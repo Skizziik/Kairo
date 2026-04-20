@@ -63,7 +63,7 @@ async def cmd_lfg(msg: Message, command: CommandObject) -> None:
         "out": {},
     }
     # Send placeholder then patch with real message_id so callback_data can reference it
-    placeholder = await msg.answer("LFG...", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[]]))
+    placeholder = await msg.answer("LFG...")
     key = (placeholder.chat.id, placeholder.message_id)
     _sessions[key] = sess
     await placeholder.edit_text(_render(sess), reply_markup=_kb(*key))
