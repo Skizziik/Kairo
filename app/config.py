@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     memory_top_k: int = Field(default=5, alias="MEMORY_TOP_K")
     memory_extract_every: int = Field(default=20, alias="MEMORY_EXTRACT_EVERY")
     rate_limit_per_minute: int = Field(default=20, alias="RATE_LIMIT_PER_MINUTE")
+    chime_in_probability: float = Field(default=0.10, alias="CHIME_IN_PROBABILITY")
+    chime_in_cooldown_seconds: int = Field(default=120, alias="CHIME_IN_COOLDOWN_SECONDS")
+    chime_in_min_words: int = Field(default=4, alias="CHIME_IN_MIN_WORDS")
 
     @field_validator("tg_allowed_chat_id", mode="before")
     @classmethod
