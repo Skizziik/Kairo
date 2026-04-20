@@ -36,6 +36,7 @@ def get_dispatcher() -> Dispatcher:
 def _register(dp: Dispatcher) -> None:
     from app.handlers import (
         ai_chat,
+        extract,
         help as help_h,
         inv,
         lfg,
@@ -61,6 +62,7 @@ def _register(dp: Dispatcher) -> None:
         start.router,
         help_h.router,
         whereami.router,
+        extract.router,
         tldr.router,
         lfg.router,
         stats.router,
