@@ -17,8 +17,5 @@ RUN pip install -r requirements.txt
 
 COPY . .
 
-# Prewarm fastembed model into image so first request isn't slow
-RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2')"
-
 EXPOSE 10000
 CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "10000", "--workers", "1"]

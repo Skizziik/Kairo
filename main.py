@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -8,7 +7,6 @@ from aiogram.types import Update
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
-from app.ai.embeddings import warmup_embedder
 from app.bot import get_bot, get_dispatcher
 from app.config import get_settings
 from app.db.client import close_pool, init_pool
@@ -26,8 +24,6 @@ log = logging.getLogger("kairo")
 async def lifespan(_: FastAPI):
     log.info("starting Kairo")
     await init_pool()
-    # warm embedder in background — loading ONNX model takes 5–10s
-    asyncio.create_task(asyncio.to_thread(warmup_embedder))
     bot = get_bot()
     dp = get_dispatcher()
     _ = dp  # touch to register routers

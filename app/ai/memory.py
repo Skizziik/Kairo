@@ -5,7 +5,6 @@ import logging
 from datetime import datetime
 
 from app.ai import cerebras
-from app.ai.embeddings import embed, embed_one
 from app.ai.prompts import EXTRACT_SYSTEM, build_system_prompt
 from app.config import get_settings
 from app.db import repos
@@ -30,8 +29,6 @@ async def answer_as_rip(
 ) -> str:
     s = get_settings()
     summary, traits = await repos.get_profile(asker_id)
-    q_vec = await embed_one(question)
-    memories = await repos.search_memories(asker_id, q_vec, s.memory_top_k)
     window_msgs = await repos.recent_messages(chat_id, s.chat_history_limit)
     window = _format_window(window_msgs)
 
@@ -39,7 +36,7 @@ async def answer_as_rip(
         asker_display=asker_display,
         asker_profile=summary,
         asker_traits=traits,
-        memories=memories,
+        memories=[],  # semantic memories disabled on free tier
         chat_window=window,
     )
     messages = [
@@ -70,7 +67,11 @@ async def summarize_recent(chat_id: int, limit: int = 80) -> str:
 
 async def extract_and_store(chat_id: int, window_size: int = 60) -> int:
     """Periodic job — pull recent messages, ask model to extract per-user facts,
-    upsert profiles and write semantic memories. Returns number of profiles updated."""
+    upsert profiles. Returns number of profiles updated.
+
+    Semantic memories table is left empty on the free tier (no embeddings). The
+    per-user `summary` and `traits` on user_profiles carry all the personality
+    state the bot actually uses when answering."""
     window_msgs = await repos.recent_messages(chat_id, window_size)
     if len(window_msgs) < 5:
         return 0
@@ -81,7 +82,6 @@ async def extract_and_store(chat_id: int, window_size: int = 60) -> int:
     ]
     raw = await cerebras.chat(messages, temperature=0.2, max_tokens=1200)
     raw = raw.strip()
-    # strip markdown code fences if model wrapped JSON
     if raw.startswith("```"):
         raw = raw.strip("`")
         if raw.startswith("json"):
@@ -102,14 +102,9 @@ async def extract_and_store(chat_id: int, window_size: int = 60) -> int:
             continue
         summary = (p.get("summary") or "").strip()
         traits = p.get("traits") or {}
-        mems = [m for m in (p.get("memories") or []) if isinstance(m, str) and m.strip()]
 
         if summary or traits:
             await repos.upsert_profile(uid, summary, traits if isinstance(traits, dict) else {})
             updated += 1
-        if mems:
-            vecs = await embed(mems)
-            for text, vec in zip(mems, vecs):
-                await repos.add_memory(uid, text, vec, importance=1)
     log.info("memory extraction: %d profiles updated at %s", updated, datetime.utcnow().isoformat())
     return updated
