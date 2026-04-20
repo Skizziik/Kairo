@@ -131,9 +131,28 @@ async def extract_and_store(chat_id: int, window_size: int | None = None) -> int
         return 0
     window = _format_window(window_msgs, show_ids=True)
     known_ids = {m.tg_user_id for m in window_msgs if not m.is_bot}
+
+    # Fetch existing profiles so the extractor can AUGMENT instead of OVERWRITE.
+    existing_blocks: list[str] = []
+    for uid in known_ids:
+        summary, traits = await repos.get_profile(uid)
+        if summary or traits:
+            tr = json.dumps(traits, ensure_ascii=False) if traits else "{}"
+            existing_blocks.append(
+                f"[id={uid}]\n  summary: {summary or '(пусто)'}\n  traits: {tr}"
+            )
+    existing_section = "\n\n".join(existing_blocks) if existing_blocks else "(пока ничего нет)"
+
+    user_content = (
+        "ТЕКУЩИЕ ПРОФИЛИ (обязательно сохрани эти факты в новом summary, ДОБАВЛЯЙ к ним, "
+        "не стирай и не перевыдумывай):\n\n"
+        f"{existing_section}\n\n"
+        "НОВЫЕ СООБЩЕНИЯ ЗА ОКНО (бери факты отсюда и ПРИКЛЕИВАЙ к существующим):\n\n"
+        f"{window}"
+    )
     messages = [
         {"role": "system", "content": EXTRACT_SYSTEM},
-        {"role": "user", "content": window},
+        {"role": "user", "content": user_content},
     ]
     raw = await llm.chat(messages, temperature=0.2, max_tokens=1200)
     raw = raw.strip()
