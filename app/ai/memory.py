@@ -80,7 +80,19 @@ async def answer_as_rip(
         {"role": "system", "content": system},
         {"role": "user", "content": question},
     ]
-    return await llm.chat(messages, temperature=0.8, max_tokens=500)
+    answer = await llm.chat(messages, temperature=0.8, max_tokens=500)
+    return _sanitize(answer)
+
+
+def _sanitize(text: str) -> str:
+    """Strip accidental command-like prefixes that the model sometimes emits
+    despite the system-prompt rule."""
+    t = text.lstrip()
+    # repeatedly drop leading command tokens like "/ai", "/ai@bot", "/cmd"
+    while t.startswith("/"):
+        space = t.find(" ")
+        t = t[space + 1 :].lstrip() if space > 0 else ""
+    return t or text.strip()
 
 
 async def summarize_recent(chat_id: int, limit: int = 80) -> str:
