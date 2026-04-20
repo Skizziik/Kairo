@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime
@@ -9,6 +10,7 @@ from app.ai.embeddings import embed, embed_one
 from app.ai.prompts import EXTRACT_SYSTEM, build_system_prompt
 from app.config import get_settings
 from app.db import repos
+from app.db.client import pool
 
 log = logging.getLogger(__name__)
 
@@ -29,8 +31,19 @@ async def answer_as_rip(
     question: str,
 ) -> str:
     s = get_settings()
-    summary, traits = await repos.get_profile(asker_id)
-    window_msgs = await repos.recent_messages(chat_id, s.chat_history_limit)
+
+    async def _mem_count() -> int:
+        async with pool().acquire() as conn:
+            n = await conn.fetchval("select count(*) from memories where user_id = $1", asker_id)
+        return int(n or 0)
+
+    profile_task = asyncio.create_task(repos.get_profile(asker_id))
+    history_task = asyncio.create_task(repos.recent_messages(chat_id, s.chat_history_limit))
+    mem_count_task = asyncio.create_task(_mem_count())
+
+    summary, traits = await profile_task
+    window_msgs = await history_task
+    mem_count = await mem_count_task
     window = _format_window(window_msgs)
 
     seen: set[str] = set()
@@ -47,12 +60,13 @@ async def answer_as_rip(
             members.append(tag)
 
     memories: list[str] = []
-    try:
-        q_vec = await embed_one(question)
-        if q_vec is not None:
-            memories = await repos.search_memories(asker_id, q_vec, s.memory_top_k)
-    except Exception:
-        log.exception("memory retrieval failed; proceeding without it")
+    if mem_count > 0:
+        try:
+            q_vec = await embed_one(question)
+            if q_vec is not None:
+                memories = await repos.search_memories(asker_id, q_vec, s.memory_top_k)
+        except Exception:
+            log.exception("memory retrieval failed; proceeding without it")
 
     system = build_system_prompt(
         asker_display=asker_display,
