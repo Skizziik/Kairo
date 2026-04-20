@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     embed_model: str = Field(default="mistral-embed", alias="EMBED_MODEL")
     embed_dim: int = Field(default=1024, alias="EMBED_DIM")
 
-    chat_history_limit: int = Field(default=30, alias="CHAT_HISTORY_LIMIT")
+    chat_history_limit: int = Field(default=50, alias="CHAT_HISTORY_LIMIT")
     memory_top_k: int = Field(default=5, alias="MEMORY_TOP_K")
     memory_extract_every: int = Field(default=10, alias="MEMORY_EXTRACT_EVERY")
     memory_extract_window: int = Field(default=100, alias="MEMORY_EXTRACT_WINDOW")
