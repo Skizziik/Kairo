@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     memory_top_k: int = Field(default=5, alias="MEMORY_TOP_K")
     memory_extract_every: int = Field(default=20, alias="MEMORY_EXTRACT_EVERY")
     rate_limit_per_minute: int = Field(default=20, alias="RATE_LIMIT_PER_MINUTE")
+
+    @field_validator("tg_allowed_chat_id", mode="before")
+    @classmethod
+    def _empty_to_none(cls, v):
+        if v is None or (isinstance(v, str) and v.strip() == ""):
+            return None
+        return v
 
     @property
     def admin_id_set(self) -> set[int]:
