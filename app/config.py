@@ -20,13 +20,14 @@ class Settings(BaseSettings):
 
     database_url: str = Field(alias="DATABASE_URL")
     steam_api_key: str | None = Field(default=None, alias="STEAM_API_KEY")
+    mistral_api_key: str | None = Field(default=None, alias="MISTRAL_API_KEY")
 
     public_base_url: str = Field(alias="PUBLIC_BASE_URL")
     port: int = Field(default=10000, alias="PORT")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
-    embed_model: str = Field(default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", alias="EMBED_MODEL")
-    embed_dim: int = Field(default=384, alias="EMBED_DIM")
+    embed_model: str = Field(default="mistral-embed", alias="EMBED_MODEL")
+    embed_dim: int = Field(default=1024, alias="EMBED_DIM")
 
     chat_history_limit: int = Field(default=30, alias="CHAT_HISTORY_LIMIT")
     memory_top_k: int = Field(default=5, alias="MEMORY_TOP_K")

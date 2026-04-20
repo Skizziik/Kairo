@@ -1,6 +1,6 @@
 -- Kairo schema — run this once in Supabase SQL Editor.
--- Dimension 384 matches intfloat/multilingual-e5-small. If you change EMBED_MODEL,
--- adjust the vector(384) type and the EMBED_DIM env var together.
+-- Dimension 1024 matches Mistral `mistral-embed`. If you change EMBED_MODEL,
+-- adjust the vector(1024) type and the EMBED_DIM env var together.
 
 create extension if not exists vector;
 
@@ -37,7 +37,7 @@ create table if not exists memories (
     id          bigserial primary key,
     user_id     bigint not null references users(tg_id) on delete cascade,
     content     text not null,
-    embedding   vector(384) not null,
+    embedding   vector(1024) not null,
     importance  int not null default 1,
     created_at  timestamptz not null default now()
 );

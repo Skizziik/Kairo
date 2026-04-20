@@ -25,12 +25,14 @@ services:
         sync: false
       - key: STEAM_API_KEY
         sync: false
+      - key: MISTRAL_API_KEY
+        sync: false
       - key: PUBLIC_BASE_URL
         sync: false
       - key: EMBED_MODEL
-        value: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+        value: mistral-embed
       - key: EMBED_DIM
-        value: "384"
+        value: "1024"
       - key: CHAT_HISTORY_LIMIT
         value: "30"
       - key: MEMORY_TOP_K

@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 
 from app.ai import cerebras
+from app.ai.embeddings import embed, embed_one
 from app.ai.prompts import EXTRACT_SYSTEM, build_system_prompt
 from app.config import get_settings
 from app.db import repos
@@ -32,11 +33,19 @@ async def answer_as_rip(
     window_msgs = await repos.recent_messages(chat_id, s.chat_history_limit)
     window = _format_window(window_msgs)
 
+    memories: list[str] = []
+    try:
+        q_vec = await embed_one(question)
+        if q_vec is not None:
+            memories = await repos.search_memories(asker_id, q_vec, s.memory_top_k)
+    except Exception:
+        log.exception("memory retrieval failed; proceeding without it")
+
     system = build_system_prompt(
         asker_display=asker_display,
         asker_profile=summary,
         asker_traits=traits,
-        memories=[],  # semantic memories disabled on free tier
+        memories=memories,
         chat_window=window,
     )
     messages = [
@@ -102,9 +111,17 @@ async def extract_and_store(chat_id: int, window_size: int = 60) -> int:
             continue
         summary = (p.get("summary") or "").strip()
         traits = p.get("traits") or {}
+        mems = [m for m in (p.get("memories") or []) if isinstance(m, str) and m.strip()]
 
         if summary or traits:
             await repos.upsert_profile(uid, summary, traits if isinstance(traits, dict) else {})
             updated += 1
+        if mems:
+            try:
+                vecs = await embed(mems)
+                for text, vec in zip(mems, vecs):
+                    await repos.add_memory(uid, text, vec, importance=1)
+            except Exception:
+                log.exception("failed to embed/store memories for uid=%s", uid)
     log.info("memory extraction: %d profiles updated at %s", updated, datetime.utcnow().isoformat())
     return updated

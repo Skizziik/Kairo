@@ -112,6 +112,29 @@ async def upsert_profile(tg_id: int, summary: str, traits: dict) -> None:
         )
 
 
+async def add_memory(user_id: int, content: str, embedding: list[float], importance: int = 1) -> None:
+    async with pool().acquire() as conn:
+        await conn.execute(
+            "insert into memories (user_id, content, embedding, importance) values ($1, $2, $3, $4)",
+            user_id, content, embedding, importance,
+        )
+
+
+async def search_memories(user_id: int, query_embedding: list[float], k: int) -> list[str]:
+    async with pool().acquire() as conn:
+        rows = await conn.fetch(
+            """
+            select content
+            from memories
+            where user_id = $1
+            order by embedding <=> $2
+            limit $3
+            """,
+            user_id, query_embedding, k,
+        )
+    return [r["content"] for r in rows]
+
+
 async def bump_extract_counter(step: int = 1) -> int:
     async with pool().acquire() as conn:
         row = await conn.fetchrow(
