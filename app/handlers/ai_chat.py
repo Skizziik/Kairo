@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
@@ -11,6 +12,13 @@ from app.bot import get_bot
 
 router = Router(name="ai_chat")
 log = logging.getLogger(__name__)
+
+# Match "нагибатор", "рип нагибатор", "kairo", "кайро" as standalone words
+NAME_TRIGGER = re.compile(
+    r"(?:^|[\s,.!?;:])(?:рип\s*)?нагибатор(?:е|ом|ов|а|у|ы)?(?:[\s,.!?;:]|$)|"
+    r"(?:^|[\s,.!?;:])(?:kairo|кайро)(?:[\s,.!?;:]|$)",
+    re.IGNORECASE,
+)
 
 
 def _display(msg: Message) -> str:
@@ -61,3 +69,51 @@ async def reply_to_bot(msg: Message) -> None:
     if not text:
         return
     await _ask(msg, text)
+
+
+async def _extract_mention_question(msg: Message) -> str | None:
+    """Return question text if message addresses the bot via @mention or name
+    trigger, otherwise None."""
+    text = msg.text or msg.caption
+    if not text:
+        return None
+    bot = get_bot()
+    me = await bot.me()
+    bot_username = (me.username or "").lower()
+
+    # Strip @mention of the bot if present
+    cleaned = text
+    if bot_username and msg.entities:
+        for entity in msg.entities:
+            if entity.type == "mention":
+                m_text = text[entity.offset : entity.offset + entity.length]
+                if m_text.lower() == f"@{bot_username}":
+                    cleaned = (text[: entity.offset] + text[entity.offset + entity.length :]).strip()
+                    return cleaned or "чё как"
+
+    # Name trigger — bot called by name somewhere in the sentence
+    if NAME_TRIGGER.search(text):
+        return text.strip()
+
+    return None
+
+
+@router.message(F.text | F.caption)
+async def on_addressed(msg: Message) -> None:
+    if msg.from_user is None or msg.from_user.is_bot:
+        return
+    # Ignore commands — they have their own handlers
+    text = msg.text or msg.caption or ""
+    if text.startswith("/"):
+        return
+    # Ignore replies to the bot — handled above
+    if (
+        msg.reply_to_message is not None
+        and msg.reply_to_message.from_user is not None
+        and msg.reply_to_message.from_user.is_bot
+    ):
+        return
+    question = await _extract_mention_question(msg)
+    if question is None:
+        return
+    await _ask(msg, question)
