@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -10,6 +11,7 @@ from fastapi.responses import PlainTextResponse
 from app.bot import get_bot, get_dispatcher
 from app.config import get_settings
 from app.db.client import close_pool, init_pool
+from app.scheduler import daily_summary_loop
 
 s = get_settings()
 
@@ -33,10 +35,22 @@ async def lifespan(_: FastAPI):
         allowed_updates=["message", "callback_query", "chat_member"],
     )
     log.info("webhook set to %s", s.webhook_url)
+
+    scheduler_task: asyncio.Task | None = None
+    if s.daily_summary_enabled:
+        scheduler_task = asyncio.create_task(daily_summary_loop(bot))
+        log.info("daily summary scheduler started (fires at %dh UTC)", s.daily_summary_hour_utc)
+
     try:
         yield
     finally:
         log.info("shutting down")
+        if scheduler_task is not None:
+            scheduler_task.cancel()
+            try:
+                await scheduler_task
+            except (asyncio.CancelledError, Exception):
+                pass
         # deliberately NOT calling delete_webhook — Telegram keeps the URL,
         # retries pending updates to the next live instance, survives redeploys
         await bot.session.close()

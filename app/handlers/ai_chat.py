@@ -25,6 +25,14 @@ NAME_TRIGGER = re.compile(
     re.IGNORECASE,
 )
 
+# Direct-address phrases — when someone clearly wants the bot's opinion
+ADDRESS_HOOKS = re.compile(
+    r"(?:как\s+думаеш[ьл]|что\s+скажеш[ьл]|тво[её]\s+мнени[ея]|согласен\??|"
+    r"а\s+ты\s*\??|бот[,!]?\s+скажи|что\s+думаеш[ьл]|\bтипа\s+мнени[ея]\b|"
+    r"прокомментируй|а\s+что\s+думаеш[ьл])",
+    re.IGNORECASE,
+)
+
 
 def _display(msg: Message) -> str:
     u = msg.from_user
@@ -100,6 +108,10 @@ async def _extract_mention_question(msg: Message) -> str | None:
     if NAME_TRIGGER.search(text):
         return text.strip()
 
+    # Direct-address hook phrases — "как думаешь", "что скажешь", "а ты?" etc.
+    if ADDRESS_HOOKS.search(text):
+        return text.strip()
+
     return None
 
 
@@ -143,7 +155,11 @@ async def on_text(msg: Message) -> None:
         return
     if not _can_chime_in(msg.chat.id, s.chime_in_cooldown_seconds):
         return
-    if random.random() > s.chime_in_probability:
+    # Questions get 2× chime probability — people asking stuff wants more response
+    probability = s.chime_in_probability
+    if "?" in text:
+        probability = min(1.0, probability * 2)
+    if random.random() > probability:
         return
 
     _mark_chimed_in(msg.chat.id)

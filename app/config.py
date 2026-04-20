@@ -34,9 +34,13 @@ class Settings(BaseSettings):
     memory_extract_every: int = Field(default=10, alias="MEMORY_EXTRACT_EVERY")
     memory_extract_window: int = Field(default=100, alias="MEMORY_EXTRACT_WINDOW")
     rate_limit_per_minute: int = Field(default=20, alias="RATE_LIMIT_PER_MINUTE")
-    chime_in_probability: float = Field(default=0.10, alias="CHIME_IN_PROBABILITY")
-    chime_in_cooldown_seconds: int = Field(default=120, alias="CHIME_IN_COOLDOWN_SECONDS")
+    chime_in_probability: float = Field(default=0.18, alias="CHIME_IN_PROBABILITY")
+    chime_in_cooldown_seconds: int = Field(default=90, alias="CHIME_IN_COOLDOWN_SECONDS")
     chime_in_min_words: int = Field(default=4, alias="CHIME_IN_MIN_WORDS")
+    emoji_react_probability: float = Field(default=0.12, alias="EMOJI_REACT_PROBABILITY")
+    meme_callback_probability: float = Field(default=0.15, alias="MEME_CALLBACK_PROBABILITY")
+    daily_summary_enabled: bool = Field(default=True, alias="DAILY_SUMMARY_ENABLED")
+    daily_summary_hour_utc: int = Field(default=19, alias="DAILY_SUMMARY_HOUR_UTC")  # 22:00 MSK
 
     @field_validator("tg_allowed_chat_id", mode="before")
     @classmethod

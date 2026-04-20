@@ -44,11 +44,13 @@ def _register(dp: Dispatcher) -> None:
         map as map_h,
         me,
         profile,
+        reactions,
         start,
         stats,
         teach,
         tldr,
         top,
+        welcome,
         whereami,
         yt,
     )
@@ -62,6 +64,7 @@ def _register(dp: Dispatcher) -> None:
     # message, so if placed earlier it would swallow /lfg, /stats, etc. before their
     # specific routers get a chance.
     dp.include_routers(
+        welcome.router,          # new_chat_members — earliest
         start.router,
         help_h.router,
         whereami.router,
@@ -77,5 +80,6 @@ def _register(dp: Dispatcher) -> None:
         teach.router,
         forget.router,
         top.router,
-        ai_chat.router,
+        reactions.router,        # stickers + emoji-reactions before on_text
+        ai_chat.router,          # MUST stay last — its on_text matches anything
     )

@@ -231,6 +231,54 @@ async def add_warn(tg_user_id: int, chat_id: int, reason: str | None, issued_by:
     return int(count)
 
 
+async def random_memory_for_chat(chat_id: int) -> tuple[int, str, str | None] | None:
+    """Pick a random recent memory of any user who posts in this chat.
+    Returns (user_id, content, username) or None if no memories exist."""
+    async with pool().acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            select m.user_id, m.content, u.username
+            from memories m
+            join users u on u.tg_id = m.user_id
+            where m.user_id in (
+                select distinct tg_user_id from messages
+                where chat_id = $1 and is_bot = false
+                and created_at > now() - interval '30 days'
+            )
+            order by random()
+            limit 1
+            """,
+            chat_id,
+        )
+    return (int(row["user_id"]), row["content"], row["username"]) if row else None
+
+
+async def messages_since_hours(chat_id: int, hours: int) -> list[MessageRow]:
+    async with pool().acquire() as conn:
+        rows = await conn.fetch(
+            """
+            select m.tg_user_id, u.username, u.first_name, m.text, m.is_bot, m.created_at
+            from messages m
+            left join users u on u.tg_id = m.tg_user_id
+            where m.chat_id = $1
+              and m.created_at > now() - (interval '1 hour' * $2)
+            order by m.created_at asc
+            """,
+            chat_id, hours,
+        )
+    return [
+        MessageRow(
+            tg_user_id=r["tg_user_id"],
+            username=r["username"],
+            first_name=r["first_name"],
+            text=r["text"],
+            is_bot=r["is_bot"],
+            created_at=r["created_at"],
+        )
+        for r in rows
+    ]
+
+
 async def top_active(chat_id: int, days: int = 7, limit: int = 10) -> list[tuple[str, int]]:
     async with pool().acquire() as conn:
         rows = await conn.fetch(
