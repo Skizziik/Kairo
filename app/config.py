@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     port: int = Field(default=10000, alias="PORT")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
-    embed_model: str = Field(default="intfloat/multilingual-e5-small", alias="EMBED_MODEL")
+    embed_model: str = Field(default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", alias="EMBED_MODEL")
     embed_dim: int = Field(default=384, alias="EMBED_DIM")
 
     chat_history_limit: int = Field(default=30, alias="CHAT_HISTORY_LIMIT")

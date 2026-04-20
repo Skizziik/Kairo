@@ -28,7 +28,7 @@ services:
       - key: PUBLIC_BASE_URL
         sync: false
       - key: EMBED_MODEL
-        value: intfloat/multilingual-e5-small
+        value: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
       - key: EMBED_DIM
         value: "384"
       - key: CHAT_HISTORY_LIMIT
