@@ -54,11 +54,13 @@ def _register(dp: Dispatcher) -> None:
     dp.message.middleware(MessageLogMiddleware())
     dp.message.middleware(AntispamMiddleware())
 
+    # IMPORTANT: ai_chat must be LAST. Its on_text handler matches any text/caption
+    # message, so if placed earlier it would swallow /lfg, /stats, etc. before their
+    # specific routers get a chance.
     dp.include_routers(
         start.router,
         help_h.router,
         whereami.router,
-        ai_chat.router,
         tldr.router,
         lfg.router,
         stats.router,
@@ -67,4 +69,5 @@ def _register(dp: Dispatcher) -> None:
         yt.router,
         me.router,
         top.router,
+        ai_chat.router,
     )
