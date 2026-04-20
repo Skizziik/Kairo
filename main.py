@@ -37,7 +37,8 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         log.info("shutting down")
-        await bot.delete_webhook(drop_pending_updates=False)
+        # deliberately NOT calling delete_webhook — Telegram keeps the URL,
+        # retries pending updates to the next live instance, survives redeploys
         await bot.session.close()
         await close_pool()
 
