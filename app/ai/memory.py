@@ -33,6 +33,19 @@ async def answer_as_rip(
     window_msgs = await repos.recent_messages(chat_id, s.chat_history_limit)
     window = _format_window(window_msgs)
 
+    seen: set[str] = set()
+    members: list[str] = []
+    for m in window_msgs:
+        if m.is_bot:
+            continue
+        nick = m.username or m.first_name
+        if not nick:
+            continue
+        tag = f"@{nick}" if m.username else nick
+        if tag not in seen:
+            seen.add(tag)
+            members.append(tag)
+
     memories: list[str] = []
     try:
         q_vec = await embed_one(question)
@@ -47,6 +60,7 @@ async def answer_as_rip(
         asker_traits=traits,
         memories=memories,
         chat_window=window,
+        members=members,
     )
     messages = [
         {"role": "system", "content": system},
