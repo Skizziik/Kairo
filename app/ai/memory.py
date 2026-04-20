@@ -4,7 +4,7 @@ import json
 import logging
 from datetime import datetime
 
-from app.ai import cerebras
+from app.ai import llm
 from app.ai.embeddings import embed, embed_one
 from app.ai.prompts import EXTRACT_SYSTEM, build_system_prompt
 from app.config import get_settings
@@ -52,7 +52,7 @@ async def answer_as_rip(
         {"role": "system", "content": system},
         {"role": "user", "content": question},
     ]
-    return await cerebras.chat(messages, temperature=0.8, max_tokens=500)
+    return await llm.chat(messages, temperature=0.8, max_tokens=500)
 
 
 async def summarize_recent(chat_id: int, limit: int = 80) -> str:
@@ -71,7 +71,7 @@ async def summarize_recent(chat_id: int, limit: int = 80) -> str:
         },
         {"role": "user", "content": f"Пересчитай о чём был разговор:\n\n{window}"},
     ]
-    return await cerebras.chat(messages, temperature=0.3, max_tokens=600)
+    return await llm.chat(messages, temperature=0.3, max_tokens=600)
 
 
 async def extract_and_store(chat_id: int, window_size: int = 60) -> int:
@@ -89,7 +89,7 @@ async def extract_and_store(chat_id: int, window_size: int = 60) -> int:
         {"role": "system", "content": EXTRACT_SYSTEM},
         {"role": "user", "content": window},
     ]
-    raw = await cerebras.chat(messages, temperature=0.2, max_tokens=1200)
+    raw = await llm.chat(messages, temperature=0.2, max_tokens=1200)
     raw = raw.strip()
     if raw.startswith("```"):
         raw = raw.strip("`")
