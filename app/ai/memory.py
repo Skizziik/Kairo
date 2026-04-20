@@ -15,11 +15,14 @@ from app.db.client import pool
 log = logging.getLogger(__name__)
 
 
-def _format_window(msgs: list[repos.MessageRow]) -> str:
+def _format_window(msgs: list[repos.MessageRow], show_ids: bool = False) -> str:
     lines = []
     for m in msgs:
         who = m.username or m.first_name or f"user{m.tg_user_id}"
-        tag = "BOT" if m.is_bot else f"@{who}"
+        if m.is_bot:
+            tag = "BOT"
+        else:
+            tag = f"[id={m.tg_user_id}] @{who}" if show_ids else f"@{who}"
         lines.append(f"{tag}: {m.text}")
     return "\n".join(lines)
 
@@ -124,7 +127,8 @@ async def extract_and_store(chat_id: int, window_size: int = 60) -> int:
     window_msgs = await repos.recent_messages(chat_id, window_size)
     if len(window_msgs) < 5:
         return 0
-    window = _format_window(window_msgs)
+    window = _format_window(window_msgs, show_ids=True)
+    known_ids = {m.tg_user_id for m in window_msgs if not m.is_bot}
     messages = [
         {"role": "system", "content": EXTRACT_SYSTEM},
         {"role": "user", "content": window},
@@ -148,6 +152,11 @@ async def extract_and_store(chat_id: int, window_size: int = 60) -> int:
         try:
             uid = int(p["tg_user_id"])
         except (KeyError, TypeError, ValueError):
+            continue
+        # Guard: model sometimes hallucinates tg_id. Only trust ids that actually
+        # appeared in the window we gave it.
+        if uid not in known_ids:
+            log.warning("extractor returned unknown tg_id=%s, skipping", uid)
             continue
         summary = (p.get("summary") or "").strip()
         traits = p.get("traits") or {}

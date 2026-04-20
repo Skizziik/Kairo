@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from functools import lru_cache
 
-from openai import AsyncOpenAI
+from openai import APIConnectionError, APITimeoutError, AsyncOpenAI
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -19,13 +19,19 @@ log = logging.getLogger(__name__)
 @lru_cache(maxsize=1)
 def client() -> AsyncOpenAI:
     s = get_settings()
-    return AsyncOpenAI(api_key=s.cerebras_api_key, base_url=s.cerebras_base_url)
+    # Total budget for Cerebras before we fall back: ~5s.
+    return AsyncOpenAI(
+        api_key=s.cerebras_api_key,
+        base_url=s.cerebras_base_url,
+        timeout=5.0,
+        max_retries=0,  # tenacity handles it, only for specific exception types
+    )
 
 
 @retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=1, max=5),
-    retry=retry_if_exception_type(Exception),
+    stop=stop_after_attempt(2),
+    wait=wait_exponential(multiplier=0.3, min=0.3, max=1),
+    retry=retry_if_exception_type((APIConnectionError, APITimeoutError)),
     reraise=True,
 )
 async def chat(
