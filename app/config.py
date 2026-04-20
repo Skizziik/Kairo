@@ -31,7 +31,8 @@ class Settings(BaseSettings):
 
     chat_history_limit: int = Field(default=30, alias="CHAT_HISTORY_LIMIT")
     memory_top_k: int = Field(default=5, alias="MEMORY_TOP_K")
-    memory_extract_every: int = Field(default=20, alias="MEMORY_EXTRACT_EVERY")
+    memory_extract_every: int = Field(default=10, alias="MEMORY_EXTRACT_EVERY")
+    memory_extract_window: int = Field(default=100, alias="MEMORY_EXTRACT_WINDOW")
     rate_limit_per_minute: int = Field(default=20, alias="RATE_LIMIT_PER_MINUTE")
     chime_in_probability: float = Field(default=0.10, alias="CHIME_IN_PROBABILITY")
     chime_in_cooldown_seconds: int = Field(default=120, alias="CHIME_IN_COOLDOWN_SECONDS")

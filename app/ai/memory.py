@@ -117,13 +117,15 @@ async def summarize_recent(chat_id: int, limit: int = 80) -> str:
     return await llm.chat(messages, temperature=0.3, max_tokens=600)
 
 
-async def extract_and_store(chat_id: int, window_size: int = 60) -> int:
+async def extract_and_store(chat_id: int, window_size: int | None = None) -> int:
     """Periodic job — pull recent messages, ask model to extract per-user facts,
     upsert profiles. Returns number of profiles updated.
 
     Semantic memories table is left empty on the free tier (no embeddings). The
     per-user `summary` and `traits` on user_profiles carry all the personality
     state the bot actually uses when answering."""
+    if window_size is None:
+        window_size = get_settings().memory_extract_window
     window_msgs = await repos.recent_messages(chat_id, window_size)
     if len(window_msgs) < 5:
         return 0

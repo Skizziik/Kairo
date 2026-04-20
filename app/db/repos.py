@@ -97,6 +97,72 @@ async def get_profile(tg_id: int) -> tuple[str, dict]:
     return row["summary"] or "", traits
 
 
+async def get_profile_full(tg_id: int) -> dict | None:
+    """Returns full profile with metadata or None if not found."""
+    async with pool().acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            select p.summary, p.traits, p.updated_at, u.username, u.first_name
+            from user_profiles p
+            left join users u on u.tg_id = p.tg_id
+            where p.tg_id = $1
+            """,
+            tg_id,
+        )
+    if row is None:
+        return None
+    traits = row["traits"] if isinstance(row["traits"], dict) else json.loads(row["traits"] or "{}")
+    return {
+        "summary": row["summary"] or "",
+        "traits": traits,
+        "updated_at": row["updated_at"],
+        "username": row["username"],
+        "first_name": row["first_name"],
+    }
+
+
+async def find_user_by_username(username: str) -> int | None:
+    username = username.lstrip("@").lower()
+    async with pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "select tg_id from users where lower(username) = $1",
+            username,
+        )
+    return row["tg_id"] if row else None
+
+
+async def recent_memories(user_id: int, limit: int = 10) -> list[tuple[str, int, object]]:
+    """Return (content, importance, created_at) ordered by newest first."""
+    async with pool().acquire() as conn:
+        rows = await conn.fetch(
+            """
+            select content, importance, created_at
+            from memories
+            where user_id = $1
+            order by created_at desc
+            limit $2
+            """,
+            user_id, limit,
+        )
+    return [(r["content"], int(r["importance"]), r["created_at"]) for r in rows]
+
+
+async def wipe_user_data(tg_id: int) -> dict:
+    """Delete memories + reset profile. Keep user + messages (chat log stays)."""
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            deleted_mem = await conn.fetchval(
+                "with d as (delete from memories where user_id = $1 returning 1) "
+                "select count(*) from d",
+                tg_id,
+            )
+            await conn.execute(
+                "update user_profiles set summary='', traits='{}'::jsonb, updated_at=now() where tg_id = $1",
+                tg_id,
+            )
+    return {"memories_deleted": int(deleted_mem or 0)}
+
+
 async def upsert_profile(tg_id: int, summary: str, traits: dict) -> None:
     async with pool().acquire() as conn:
         await conn.execute(
