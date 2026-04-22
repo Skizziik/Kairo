@@ -201,6 +201,70 @@ async def search_memories(user_id: int, query_embedding: list[float], k: int) ->
     return [r["content"] for r in rows]
 
 
+async def get_recent_openers(chat_id: int) -> list[str]:
+    async with pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "select recent_openers from bot_chat_state where chat_id = $1",
+            chat_id,
+        )
+    if row is None:
+        return []
+    val = row["recent_openers"]
+    if isinstance(val, list):
+        return [str(x) for x in val]
+    try:
+        return list(json.loads(val or "[]"))
+    except Exception:
+        return []
+
+
+async def push_opener(chat_id: int, word: str, max_keep: int = 10) -> None:
+    if not word:
+        return
+    existing = await get_recent_openers(chat_id)
+    existing.append(word)
+    if len(existing) > max_keep:
+        existing = existing[-max_keep:]
+    payload = json.dumps(existing, ensure_ascii=False)
+    async with pool().acquire() as conn:
+        await conn.execute(
+            """
+            insert into bot_chat_state (chat_id, recent_openers, updated_at)
+            values ($1, $2::jsonb, now())
+            on conflict (chat_id) do update set
+                recent_openers = excluded.recent_openers,
+                updated_at = now()
+            """,
+            chat_id, payload,
+        )
+
+
+async def can_chime_and_mark(chat_id: int, cooldown_seconds: int) -> bool:
+    """Atomic: check cooldown; if expired, mark and return True. Else False."""
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "select last_chime_at from bot_chat_state where chat_id = $1 for update",
+                chat_id,
+            )
+            from datetime import datetime, timedelta, timezone
+            now = datetime.now(timezone.utc)
+            if row is not None and row["last_chime_at"] is not None:
+                if (now - row["last_chime_at"]).total_seconds() < cooldown_seconds:
+                    return False
+            await conn.execute(
+                """
+                insert into bot_chat_state (chat_id, last_chime_at, updated_at)
+                values ($1, $2, now())
+                on conflict (chat_id) do update set
+                    last_chime_at = excluded.last_chime_at,
+                    updated_at = now()
+                """,
+                chat_id, now,
+            )
+            return True
+
+
 async def bump_extract_counter(step: int = 1) -> int:
     async with pool().acquire() as conn:
         row = await conn.fetchrow(

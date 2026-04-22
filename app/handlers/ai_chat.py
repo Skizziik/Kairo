@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import random
 import re
-import time
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
@@ -12,11 +11,10 @@ from aiogram.types import Message
 from app.ai.memory import answer_as_rip
 from app.bot import get_bot
 from app.config import get_settings
+from app.db import repos
 
 router = Router(name="ai_chat")
 log = logging.getLogger(__name__)
-
-_last_chime_by_chat: dict[int, float] = {}
 
 # Match "нагибатор", "рип нагибатор", "kairo", "кайро" as standalone words
 NAME_TRIGGER = re.compile(
@@ -115,16 +113,6 @@ async def _extract_mention_question(msg: Message) -> str | None:
     return None
 
 
-def _can_chime_in(chat_id: int, cooldown_seconds: int) -> bool:
-    now = time.time()
-    last = _last_chime_by_chat.get(chat_id, 0.0)
-    return now - last >= cooldown_seconds
-
-
-def _mark_chimed_in(chat_id: int) -> None:
-    _last_chime_by_chat[chat_id] = time.time()
-
-
 @router.message(F.text | F.caption)
 async def on_text(msg: Message) -> None:
     if msg.from_user is None or msg.from_user.is_bot:
@@ -153,15 +141,16 @@ async def on_text(msg: Message) -> None:
     s = get_settings()
     if len(text.split()) < s.chime_in_min_words:
         return
-    if not _can_chime_in(msg.chat.id, s.chime_in_cooldown_seconds):
-        return
     # Questions get 2× chime probability — people asking stuff wants more response
     probability = s.chime_in_probability
     if "?" in text:
         probability = min(1.0, probability * 2)
     if random.random() > probability:
         return
+    # Atomic cooldown check — marks last_chime_at if allowed. Persisted in DB.
+    allowed = await repos.can_chime_and_mark(msg.chat.id, s.chime_in_cooldown_seconds)
+    if not allowed:
+        return
 
-    _mark_chimed_in(msg.chat.id)
     log.info("chime-in triggered in chat=%s len=%d", msg.chat.id, len(text))
     await _ask(msg, text)

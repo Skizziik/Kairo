@@ -71,3 +71,13 @@ create table if not exists kv_state (
 );
 insert into kv_state (k, v) values ('msgs_since_extract', 0)
     on conflict (k) do nothing;
+
+-- per-chat persistent bot state (recent openers for anti-repetition,
+-- chime cooldown timestamp, misc extras)
+create table if not exists bot_chat_state (
+    chat_id         bigint primary key,
+    recent_openers  jsonb not null default '[]'::jsonb,
+    last_chime_at   timestamptz,
+    extras          jsonb not null default '{}'::jsonb,
+    updated_at      timestamptz not null default now()
+);

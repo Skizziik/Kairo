@@ -4,8 +4,6 @@ import asyncio
 import json
 import logging
 import re
-import time
-from collections import defaultdict, deque
 from datetime import datetime
 
 from app.ai import llm
@@ -18,9 +16,8 @@ from app.db.client import pool
 log = logging.getLogger(__name__)
 
 
-# Tracking recent bot opener words per chat for anti-repetition coaching.
-# Chat -> deque of last ~8 opener tokens the bot used.
-_recent_openers: dict[int, deque[str]] = defaultdict(lambda: deque(maxlen=8))
+# Openers are persisted per-chat in DB (bot_chat_state table) so they survive
+# restarts. See repos.push_opener / repos.get_recent_openers.
 
 # Openers that are banned in pole position — strip them if model ignores.
 BANNED_OPENER_REGEX = re.compile(
@@ -120,7 +117,11 @@ async def answer_as_rip(
             log.exception("memory retrieval failed; proceeding without it")
 
     # Inject anti-repetition coaching into system prompt — previous openers
-    recent = list(_recent_openers[chat_id])
+    try:
+        recent = await repos.get_recent_openers(chat_id)
+    except Exception:
+        log.exception("failed to load openers from db")
+        recent = []
     opener_note = ""
     if recent:
         opener_note = (
@@ -168,10 +169,13 @@ async def answer_as_rip(
         except Exception:
             log.exception("rewrite failed, using original")
 
-    # Track the opener so future responses avoid repeating it
+    # Track the opener so future responses avoid repeating it (persisted)
     first = _first_word(answer)
     if first:
-        _recent_openers[chat_id].append(first)
+        try:
+            await repos.push_opener(chat_id, first)
+        except Exception:
+            log.exception("failed to persist opener")
 
     return answer
 
