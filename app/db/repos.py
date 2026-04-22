@@ -231,6 +231,31 @@ async def add_warn(tg_user_id: int, chat_id: int, reason: str | None, issued_by:
     return int(count)
 
 
+async def chat_members_seen(chat_id: int, days: int = 60) -> list[UserRow]:
+    """Return distinct users who posted in this chat within last N days."""
+    async with pool().acquire() as conn:
+        rows = await conn.fetch(
+            f"""
+            select distinct on (u.tg_id) u.tg_id, u.username, u.first_name, u.last_name
+            from messages m
+            join users u on u.tg_id = m.tg_user_id
+            where m.chat_id = $1
+              and m.created_at > now() - interval '{int(days)} days'
+              and m.is_bot = false
+            """,
+            chat_id,
+        )
+    return [
+        UserRow(
+            tg_id=r["tg_id"],
+            username=r["username"],
+            first_name=r["first_name"],
+            last_name=r["last_name"],
+        )
+        for r in rows
+    ]
+
+
 async def random_memory_for_chat(chat_id: int) -> tuple[int, str, str | None] | None:
     """Pick a random recent memory of any user who posts in this chat.
     Returns (user_id, content, username) or None if no memories exist."""

@@ -12,6 +12,8 @@ from aiogram.types import (
     Message,
 )
 
+from app.db import repos
+
 router = Router(name="lfg")
 log = logging.getLogger(__name__)
 
@@ -49,24 +51,56 @@ def _render(sess: dict) -> str:
     return "\n".join(lines)
 
 
+def _render_with_mentions(sess: dict) -> str:
+    body = _render(sess)
+    mentions = sess.get("mentions")
+    if mentions:
+        return f"<i>{mentions}</i>\n\n{body}"
+    return body
+
+
+def _build_mentions(members: list, exclude_id: int) -> str:
+    """Build a string of HTML-mentions for every group member we've seen.
+    Users with @username → @username. Users without → <a href='tg://user?id='>Name</a>."""
+    parts = []
+    for m in members:
+        if m.tg_id == exclude_id:
+            continue
+        if m.username:
+            parts.append(f"@{m.username}")
+        else:
+            name = escape(m.first_name or f"user{m.tg_id}")
+            parts.append(f"<a href=\"tg://user?id={m.tg_id}\">{name}</a>")
+    return " ".join(parts)
+
+
 @router.message(Command("lfg"))
 async def cmd_lfg(msg: Message, command: CommandObject) -> None:
     if msg.from_user is None:
         return
     initiator_name = f"@{msg.from_user.username}" if msg.from_user.username else (msg.from_user.first_name or "anon")
     note = (command.args or "").strip()
+    # Ping everyone we've seen in this chat recently (TG API doesn't expose full
+    # member list, so anyone who hasn't posted yet is invisible to us).
+    mentions = ""
+    if msg.chat.type != "private":
+        members = await repos.chat_members_seen(msg.chat.id, days=60)
+        mentions = _build_mentions(members, exclude_id=msg.from_user.id)
+
     sess = {
         "initiator_id": msg.from_user.id,
         "initiator_name": initiator_name,
         "note": note,
         "in": {msg.from_user.id: initiator_name},
         "out": {},
+        "mentions": mentions,
     }
+
     # Send placeholder then patch with real message_id so callback_data can reference it
     placeholder = await msg.answer("LFG...")
     key = (placeholder.chat.id, placeholder.message_id)
     _sessions[key] = sess
-    await placeholder.edit_text(_render(sess), reply_markup=_kb(*key))
+    await placeholder.edit_text(_render_with_mentions(sess), reply_markup=_kb(*key))
 
 
 @router.callback_query(F.data.startswith("lfg:"))
@@ -107,6 +141,6 @@ async def on_lfg_click(q: CallbackQuery) -> None:
         return
 
     try:
-        await q.message.edit_text(_render(sess), reply_markup=_kb(*key))
+        await q.message.edit_text(_render_with_mentions(sess), reply_markup=_kb(*key))
     except Exception:
         log.exception("lfg edit failed")
