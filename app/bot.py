@@ -38,6 +38,7 @@ def _register(dp: Dispatcher) -> None:
         ai_chat,
         extract,
         forget,
+        google,
         help as help_h,
         inv,
         lfg,
@@ -80,6 +81,7 @@ def _register(dp: Dispatcher) -> None:
         teach.router,
         forget.router,
         top.router,
+        google.router,           # /google + "загугли X" trigger
         reactions.router,        # stickers + emoji-reactions before on_text
         ai_chat.router,          # MUST stay last — its on_text matches anything
     )
