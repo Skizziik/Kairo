@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
+import time
+from collections import defaultdict, deque
 from datetime import datetime
 
 from app.ai import llm
@@ -13,6 +16,51 @@ from app.db import repos
 from app.db.client import pool
 
 log = logging.getLogger(__name__)
+
+
+# Tracking recent bot opener words per chat for anti-repetition coaching.
+# Chat -> deque of last ~8 opener tokens the bot used.
+_recent_openers: dict[int, deque[str]] = defaultdict(lambda: deque(maxlen=8))
+
+# Openers that are banned in pole position — strip them if model ignores.
+BANNED_OPENER_REGEX = re.compile(
+    r"^(?:[Ээ]+\s*бо[йя][,.\-—!\s]+|"
+    r"[Нн]у\s+ты\s+и?\s*рак[,.\-—!\s]+|"
+    r"[Нн]у\s+ты\s+и?\s*кринж[,.\-—!\s]+)",
+    re.IGNORECASE,
+)
+
+# Words/phrases the bot keeps over-using. If found, we rewrite.
+BANNED_PHRASES = [
+    re.compile(r"\bдесматч\w*", re.IGNORECASE),
+    re.compile(r"\bфлэшк[аеуи]\s+в\s+мид", re.IGNORECASE),
+    re.compile(r"\bтакси\s+за\s+200\s*к", re.IGNORECASE),
+]
+
+
+def _first_word(text: str) -> str:
+    m = re.match(r"\s*(\S+)", text)
+    return (m.group(1).lower().rstrip(",.!?;:—-") if m else "")
+
+
+def _sanitize(text: str) -> str:
+    """Strip accidental command-like prefixes AND banned opener phrases."""
+    t = text.lstrip()
+    # repeatedly drop leading command tokens like "/ai", "/ai@bot", "/cmd"
+    while t.startswith("/"):
+        space = t.find(" ")
+        t = t[space + 1 :].lstrip() if space > 0 else ""
+    # strip banned opener phrases ("Ээ бой, ...")
+    t_new = BANNED_OPENER_REGEX.sub("", t).lstrip()
+    if t_new and t_new != t:
+        # capitalize first letter to preserve sentence shape
+        t_new = t_new[0].upper() + t_new[1:]
+        t = t_new
+    return t or text.strip()
+
+
+def _has_banned_phrase(text: str) -> bool:
+    return any(p.search(text) for p in BANNED_PHRASES)
 
 
 def _format_window(msgs: list[repos.MessageRow], show_ids: bool = False) -> str:
@@ -71,6 +119,17 @@ async def answer_as_rip(
         except Exception:
             log.exception("memory retrieval failed; proceeding without it")
 
+    # Inject anti-repetition coaching into system prompt — previous openers
+    recent = list(_recent_openers[chat_id])
+    opener_note = ""
+    if recent:
+        opener_note = (
+            "\n\nТВОИ ПОСЛЕДНИЕ ОТВЕТЫ НАЧИНАЛИСЬ С СЛОВ: "
+            + ", ".join(sorted(set(recent)))
+            + ". Следующий ответ ОБЯЗАТЕЛЬНО начни с другого слова. "
+            "Особенно НЕ НАЧИНАЙ с 'ээ', 'ээ бой', 'ну ты', если они там есть."
+        )
+
     system = build_system_prompt(
         asker_display=asker_display,
         asker_profile=summary,
@@ -78,24 +137,43 @@ async def answer_as_rip(
         memories=memories,
         chat_window=window,
         members=members,
-    )
+    ) + opener_note
+
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": question},
     ]
     answer = await llm.chat(messages, temperature=0.8, max_tokens=500)
-    return _sanitize(answer)
+    answer = _sanitize(answer)
 
+    # If banned phrases slipped through, ask the model to rewrite.
+    if _has_banned_phrase(answer):
+        log.info("response contains banned phrase, regenerating: %s", answer[:80])
+        rewrite_msgs = messages + [
+            {"role": "assistant", "content": answer},
+            {
+                "role": "user",
+                "content": (
+                    "Перепиши свой ответ выше без слов: «десматч», «флэшка в мид», "
+                    "«такси за 200к». Сохрани смысл и тон, но замени эти выражения "
+                    "на другие. Только переписанный ответ, без комментариев."
+                ),
+            },
+        ]
+        try:
+            answer2 = await llm.chat(rewrite_msgs, temperature=0.7, max_tokens=500)
+            answer2 = _sanitize(answer2)
+            if answer2 and not _has_banned_phrase(answer2):
+                answer = answer2
+        except Exception:
+            log.exception("rewrite failed, using original")
 
-def _sanitize(text: str) -> str:
-    """Strip accidental command-like prefixes that the model sometimes emits
-    despite the system-prompt rule."""
-    t = text.lstrip()
-    # repeatedly drop leading command tokens like "/ai", "/ai@bot", "/cmd"
-    while t.startswith("/"):
-        space = t.find(" ")
-        t = t[space + 1 :].lstrip() if space > 0 else ""
-    return t or text.strip()
+    # Track the opener so future responses avoid repeating it
+    first = _first_word(answer)
+    if first:
+        _recent_openers[chat_id].append(first)
+
+    return answer
 
 
 async def summarize_recent(chat_id: int, limit: int = 80) -> str:
