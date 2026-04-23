@@ -52,6 +52,7 @@ def _register(dp: Dispatcher) -> None:
         stats,
         teach,
         tldr,
+        photo,
         top,
         voice,
         welcome,
@@ -88,6 +89,7 @@ def _register(dp: Dispatcher) -> None:
         top.router,
         google.router,           # /google + "загугли X" trigger
         voice.router,            # transcribe voice/video notes
+        photo.router,            # describe photos via pixtral
         reactions.router,        # stickers + emoji-reactions before on_text
         ai_chat.router,          # MUST stay last — its on_text matches anything
     )
