@@ -110,7 +110,14 @@ async def try_claim_daily(tg_id: int) -> dict:
                 "values ($1, $2, 'daily', $3, $4)",
                 tg_id, payout, f"streak={streak}, bonus={bonus}", new_bal,
             )
-    return {"ok": True, "amount": payout, "streak": streak, "next_in_seconds": 0, "new_balance": new_bal}
+    from app.economy import retention as rt
+    leveled = await rt.grant_xp(tg_id, "daily")
+    await rt.track_mission_progress(tg_id, "dailies", 1)
+    achievements = await rt.check_achievements_after_action(tg_id, "daily")
+    if leveled.get("leveled_up"):
+        achievements += await rt.check_achievements_after_action(tg_id, "level_up")
+    return {"ok": True, "amount": payout, "streak": streak, "next_in_seconds": 0,
+            "new_balance": new_bal, "level": leveled, "achievements": achievements}
 
 
 async def grant_activity_coin(tg_id: int, per_day_cap: int = 30) -> bool:
@@ -250,6 +257,18 @@ async def open_case(user_id: int, case_id: int) -> dict:
                 user_id, int(skin["id"]), fl, wear_name, st, price, str(case["id"]),
             )
 
+    # Retention hooks (outside transaction to avoid blocking)
+    from app.economy import retention as rt
+    leveled = await rt.grant_xp(user_id, "case_open")
+    await rt.track_mission_progress(user_id, "cases", 1)
+    await rt.pvp_track(user_id, "cases_opened", 1)
+    achievements = await rt.check_achievements_after_action(
+        user_id, "case_open",
+        {"rarity": skin["rarity"], "category": skin["category"]},
+    )
+    if leveled.get("leveled_up"):
+        achievements += await rt.check_achievements_after_action(user_id, "level_up")
+
     return {
         "ok": True,
         "inventory_id": int(inv["id"]),
@@ -269,6 +288,8 @@ async def open_case(user_id: int, case_id: int) -> dict:
         "price": price,
         "new_balance": new_bal,
         "case_name": case["name"],
+        "achievements": achievements,
+        "level": leveled,
     }
 
 
@@ -338,7 +359,12 @@ async def sell_to_dealer(user_id: int, inventory_id: int) -> dict:
                 "values ($1, $2, 'sell', 'dealer', $3, $4)",
                 user_id, payout, inventory_id, new_bal,
             )
-    return {"ok": True, "payout": payout, "new_balance": new_bal}
+    from app.economy import retention as rt
+    await rt.track_mission_progress(user_id, "sells", 1)
+    achievements = await rt.check_achievements_after_action(user_id, "sell")
+    if int(new_bal) >= 1_000_000:
+        achievements += await rt.check_achievements_after_action(user_id, "balance")
+    return {"ok": True, "payout": payout, "new_balance": new_bal, "achievements": achievements}
 
 
 # ============ upgrade minigame ============
@@ -403,7 +429,6 @@ async def upgrade_item(user_id: int, inventory_id: int, target_skin_id: int, ext
                 )
 
             if success:
-                # Delete old item, insert new target with fresh float
                 await conn.execute("delete from economy_inventory where id = $1", inventory_id)
                 fl = roll_float(float(target["min_float"]), float(target["max_float"]))
                 wear_name, _ = wear_from_float(fl)
@@ -414,39 +439,49 @@ async def upgrade_item(user_id: int, inventory_id: int, target_skin_id: int, ext
                     "values ($1, $2, $3, $4, false, $5, 'upgrade', $6) returning id",
                     user_id, int(target["id"]), fl, wear_name, new_price, str(inventory_id),
                 )
-                bal_row2 = await conn.fetchrow(
-                    "select balance from economy_users where tg_id = $1", user_id
-                )
-                return {
-                    "ok": True,
-                    "success": True,
-                    "probability": probability,
-                    "new_item": {
-                        "id": int(new_inv["id"]),
-                        "name": target["full_name"],
-                        "weapon": target["weapon"],
-                        "skin_name": target["skin_name"],
-                        "rarity": target["rarity"],
-                        "rarity_color": target["rarity_color"],
-                        "image_url": target["image_url"],
-                        "float": fl,
-                        "wear": wear_name,
-                        "price": new_price,
-                    },
-                    "new_balance": int(bal_row2["balance"]),
-                }
             else:
-                # Item destroyed
                 await conn.execute("delete from economy_inventory where id = $1", inventory_id)
-                bal_row2 = await conn.fetchrow(
-                    "select balance from economy_users where tg_id = $1", user_id
-                )
-                return {
-                    "ok": True,
-                    "success": False,
-                    "probability": probability,
-                    "new_balance": int(bal_row2["balance"]),
-                }
+            bal_row2 = await conn.fetchrow(
+                "select balance from economy_users where tg_id = $1", user_id
+            )
+    # --- outside txn/pool context: retention hooks ---
+    from app.economy import retention as rt
+    await rt.track_mission_progress(user_id, "upgrade_attempts", 1)
+    if success:
+        await rt.bump_stat_counter(user_id, "upgrades_won", 1)
+        leveled = await rt.grant_xp(user_id, "upgrade_win")
+        await rt.pvp_track(user_id, "upgrades_won", 1)
+        achievements = await rt.check_achievements_after_action(
+            user_id, "upgrade", {"success": True},
+        )
+        if leveled.get("leveled_up"):
+            achievements += await rt.check_achievements_after_action(user_id, "level_up")
+        return {
+            "ok": True,
+            "success": True,
+            "probability": probability,
+            "new_item": {
+                "id": int(new_inv["id"]),
+                "name": target["full_name"],
+                "weapon": target["weapon"],
+                "skin_name": target["skin_name"],
+                "rarity": target["rarity"],
+                "rarity_color": target["rarity_color"],
+                "image_url": target["image_url"],
+                "float": fl,
+                "wear": wear_name,
+                "price": new_price,
+            },
+            "new_balance": int(bal_row2["balance"]),
+            "level": leveled,
+            "achievements": achievements,
+        }
+    return {
+        "ok": True,
+        "success": False,
+        "probability": probability,
+        "new_balance": int(bal_row2["balance"]),
+    }
 
 
 # ============ casino ============
@@ -468,7 +503,8 @@ async def play_coinflip(user_id: int, bet: int, side: str) -> dict:
                 return {"ok": False, "error": "Not enough coins"}
             actual = random.choice(["heads", "tails"])
             win = (actual == side)
-            delta = bet if win else -bet
+            # Pay 1.95x on win → 2.5% house edge, preserves "double" feel.
+            delta = int(bet * 0.95) if win else -bet
             new_bal_row = await conn.fetchrow(
                 "update economy_users set balance = balance + $2, "
                 "total_earned = total_earned + greatest($2, 0), "
@@ -482,18 +518,31 @@ async def play_coinflip(user_id: int, bet: int, side: str) -> dict:
                 "values ($1, $2, 'casino', $3, $4)",
                 user_id, delta, f"coinflip_{side}_vs_{actual}", new_bal,
             )
-    return {"ok": True, "win": win, "result": actual, "delta": delta, "new_balance": new_bal}
+    from app.economy import retention as rt
+    leveled = await rt.grant_xp(user_id, "coinflip")
+    await rt.track_mission_progress(user_id, "coinflips", 1)
+    if win:
+        await rt.pvp_track(user_id, "coinflip_won", 1)
+        await rt.pvp_track(user_id, "total_winnings", delta)
+        await rt.increment_stattrak_kills_on_win(user_id, 1)
+    achievements = []
+    if int(new_bal) >= 1_000_000:
+        achievements = await rt.check_achievements_after_action(user_id, "balance")
+    if leveled.get("leveled_up"):
+        achievements += await rt.check_achievements_after_action(user_id, "level_up")
+    return {"ok": True, "win": win, "result": actual, "delta": delta, "new_balance": new_bal,
+            "level": leveled, "achievements": achievements}
 
 
 SLOT_SYMBOLS = ["💀", "🔫", "💣", "💎", "🏆", "7️⃣"]
+# three-of-a-kind multipliers — calibrated for ~7% house edge with NO pair payout.
 SLOT_PAYOUTS = {
-    # three-of-a-kind multipliers (on total bet)
-    "💀": 5,
-    "🔫": 6,
-    "💣": 8,
-    "💎": 15,
-    "🏆": 25,
-    "7️⃣": 100,
+    "💀": 10,
+    "🔫": 15,
+    "💣": 20,
+    "💎": 30,
+    "🏆": 50,
+    "7️⃣": 200,
 }
 
 
@@ -514,9 +563,7 @@ async def play_slots(user_id: int, bet: int) -> dict:
             if reels[0] == reels[1] == reels[2]:
                 payout = bet * SLOT_PAYOUTS[reels[0]]
                 outcome = "jackpot"
-            elif reels[0] == reels[1] or reels[1] == reels[2] or reels[0] == reels[2]:
-                payout = int(bet * 1.5)  # two of a kind small payback
-                outcome = "pair"
+            # No small "pair" payout — keeps house edge healthy (~7%).
             delta = payout - bet
             new_bal_row = await conn.fetchrow(
                 "update economy_users set balance = balance + $2, "
@@ -531,6 +578,25 @@ async def play_slots(user_id: int, bet: int) -> dict:
                 "values ($1, $2, 'casino', $3, $4)",
                 user_id, delta, f"slots_{''.join(reels)}_{outcome}", new_bal,
             )
+    from app.economy import retention as rt
+    await rt.bump_stat_counter(user_id, "slots_spins", 1)
+    leveled = await rt.grant_xp(user_id, "slot_jackpot" if outcome == "jackpot" else "slot_spin")
+    await rt.track_mission_progress(user_id, "slot_spins", 1)
+    if outcome == "jackpot":
+        await rt.bump_stat_counter(user_id, "slots_jackpots", 1)
+        await rt.track_mission_progress(user_id, "slot_jackpots", 1)
+        await rt.pvp_track(user_id, "slots_jackpots", 1)
+    if delta > 0:
+        await rt.pvp_track(user_id, "slots_won", 1)
+        await rt.pvp_track(user_id, "total_winnings", delta)
+        await rt.increment_stattrak_kills_on_win(user_id, 1)
+    achievements = await rt.check_achievements_after_action(
+        user_id, "slot_spin", {"jackpot": outcome == "jackpot"},
+    )
+    if int(new_bal) >= 1_000_000:
+        achievements += await rt.check_achievements_after_action(user_id, "balance")
+    if leveled.get("leveled_up"):
+        achievements += await rt.check_achievements_after_action(user_id, "level_up")
     return {
         "ok": True,
         "reels": reels,
@@ -539,6 +605,8 @@ async def play_slots(user_id: int, bet: int) -> dict:
         "payout": payout,
         "bet": bet,
         "new_balance": new_bal,
+        "level": leveled,
+        "achievements": achievements,
     }
 
 
@@ -560,12 +628,11 @@ async def play_crash(user_id: int, bet: int, target_mult: float) -> dict:
             # House edge 5%: crash_point distribution gives avg ~0.95x on naive 1/u random
             # Implementation: u ~ Uniform(0,1), crash_point = max(1.00, 0.95 / (1 - u))
             # Equivalent to common crash games
+            # Stable 5% house edge: P(crash >= T) = 0.95/T.
+            # crash_point = 0.95 / (1 - u), u ~ U(0, 1).
             u = random.random()
-            if u < 0.03:
-                crash_point = 1.00  # 3% instant crash
-            else:
-                crash_point = 0.95 / (1 - u)
-                crash_point = max(1.00, min(100.0, crash_point))
+            denom = max(1e-6, 1 - u)
+            crash_point = max(1.00, min(100.0, 0.95 / denom))
             crash_point = round(crash_point, 2)
             win = target_mult <= crash_point
             payout = int(bet * target_mult) if win else 0
@@ -583,6 +650,19 @@ async def play_crash(user_id: int, bet: int, target_mult: float) -> dict:
                 "values ($1, $2, 'casino', $3, $4)",
                 user_id, delta, f"crash_t{target_mult}_c{crash_point}_{'W' if win else 'L'}", new_bal,
             )
+    from app.economy import retention as rt
+    leveled = None
+    achievements = []
+    if win:
+        leveled = await rt.grant_xp(user_id, "crash_win")
+        await rt.track_mission_progress(user_id, "crash_wins", 1)
+        await rt.pvp_track(user_id, "crash_profit", delta)
+        await rt.pvp_track(user_id, "total_winnings", delta)
+        await rt.increment_stattrak_kills_on_win(user_id, 1)
+    if int(new_bal) >= 1_000_000:
+        achievements = await rt.check_achievements_after_action(user_id, "balance")
+    if leveled and leveled.get("leveled_up"):
+        achievements += await rt.check_achievements_after_action(user_id, "level_up")
     return {
         "ok": True,
         "win": win,
@@ -591,6 +671,8 @@ async def play_crash(user_id: int, bet: int, target_mult: float) -> dict:
         "delta": delta,
         "payout": payout,
         "new_balance": new_bal,
+        "level": leveled,
+        "achievements": achievements,
     }
 
 
@@ -718,8 +800,17 @@ async def submit_daily_task(user_id: int, answer: str) -> dict:
                     "values ($1, $2, 'task', 'daily', $3)",
                     user_id, reward, new_bal,
                 )
-                return {"ok": True, "correct": True, "reward": reward, "new_balance": new_bal}
-            return {"ok": True, "correct": False, "attempts_left": max(0, 5 - int(row["attempts"]) - 1)}
+    # outside tx — retention hooks only on correct answer
+    if correct:
+        from app.economy import retention as rt
+        leveled = await rt.grant_xp(user_id, "task")
+        await rt.track_mission_progress(user_id, "tasks", 1)
+        achievements = []
+        if leveled.get("leveled_up"):
+            achievements = await rt.check_achievements_after_action(user_id, "level_up")
+        return {"ok": True, "correct": True, "reward": reward, "new_balance": new_bal,
+                "level": leveled, "achievements": achievements}
+    return {"ok": True, "correct": False, "attempts_left": max(0, 5 - int(row["attempts"]) - 1)}
 
 
 # ============ quiz rewards ============

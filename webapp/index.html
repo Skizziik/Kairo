@@ -24,6 +24,7 @@
           <div class="profile-avatar" id="profile-avatar">👤</div>
           <div class="profile-info">
             <div class="profile-name" id="profile-name">—</div>
+            <div id="profile-title" class="profile-title"></div>
             <div class="profile-sub">
               <span id="streak-display">🔥 0</span>
               <span class="dot">·</span>
@@ -32,9 +33,22 @@
           </div>
         </div>
 
+        <div class="level-card">
+          <div class="level-row">
+            <span class="level-badge">LVL <b id="level-num">1</b></span>
+            <span id="level-xp">0 / 100 XP</span>
+          </div>
+          <div class="level-bar"><div class="level-bar-fill" id="level-fill"></div></div>
+        </div>
+
         <button id="daily-btn" class="btn big-btn daily-btn">
           <span class="btn-icon">🎁</span>
           <span class="btn-text">Забрать ежедневные</span>
+        </button>
+
+        <button id="wheel-btn" class="btn big-btn" style="background:linear-gradient(135deg,#8847ff 0%,#d32ce6 100%);color:#fff;border:0;font-weight:800">
+          <span class="btn-icon">🎡</span>
+          <span class="btn-text">Колесо фортуны</span>
         </button>
 
         <div class="quick-stats">
@@ -165,6 +179,30 @@
           <div class="loader">Загрузка...</div>
         </div>
       </section>
+
+      <!-- view: missions -->
+      <section class="view" data-view="missions">
+        <h2>📅 Миссии недели</h2>
+        <div id="missions-list" class="missions-list">
+          <div class="loader">Загрузка...</div>
+        </div>
+      </section>
+
+      <!-- view: achievements -->
+      <section class="view" data-view="achievements">
+        <h2>🏆 Ачивки</h2>
+        <div id="achievements-list" class="ach-list">
+          <div class="loader">Загрузка...</div>
+        </div>
+      </section>
+
+      <!-- view: wheel -->
+      <section class="view" data-view="wheel">
+        <h2>🎡 Колесо Фортуны</h2>
+        <div id="wheel-view">
+          <div class="loader">Загрузка...</div>
+        </div>
+      </section>
     </main>
 
     <nav class="tabs">
@@ -183,6 +221,14 @@
       <button class="tab" data-target="games">
         <span class="tab-icon">🎰</span>
         <span class="tab-label">Игры</span>
+      </button>
+      <button class="tab" data-target="missions">
+        <span class="tab-icon">📅</span>
+        <span class="tab-label">Миссии</span>
+      </button>
+      <button class="tab" data-target="achievements">
+        <span class="tab-icon">🏆</span>
+        <span class="tab-label">Ачивки</span>
       </button>
       <button class="tab" data-target="leaderboard">
         <span class="tab-icon">💎</span>

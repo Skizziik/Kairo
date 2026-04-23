@@ -338,3 +338,87 @@ async def api_leaderboard(user: dict = Depends(require_user)) -> list[dict]:
         }
         for r in top
     ]
+
+
+# ================ retention: achievements / missions / wheel / pvp ================
+from app.economy import retention as rt
+from pydantic import BaseModel as _BM
+
+
+@router.get("/achievements")
+async def api_achievements(user: dict = Depends(require_user)) -> dict:
+    tg_id = int(user["id"])
+    await eco.ensure_user(tg_id)
+    items = await rt.list_achievements_for_user(tg_id)
+    from app.db.client import pool as dbpool
+    async with dbpool().acquire() as conn:
+        u = await conn.fetchrow(
+            "select active_title, level, xp from economy_users where tg_id = $1", tg_id,
+        )
+    return {
+        "active_title": (u["active_title"] if u else None),
+        "level": int(u["level"]) if u else 1,
+        "xp": int(u["xp"]) if u else 0,
+        "items": items,
+    }
+
+
+class TitleReq(_BM):
+    title: str | None = None
+
+
+@router.post("/achievements/title")
+async def api_set_title(req: TitleReq, user: dict = Depends(require_user)) -> dict:
+    tg_id = int(user["id"])
+    ok = await rt.set_active_title(tg_id, req.title)
+    return {"ok": ok}
+
+
+@router.get("/missions")
+async def api_missions(user: dict = Depends(require_user)) -> dict:
+    tg_id = int(user["id"])
+    return await rt.get_or_create_missions(tg_id)
+
+
+@router.post("/missions/claim_final")
+async def api_missions_claim(user: dict = Depends(require_user)) -> dict:
+    tg_id = int(user["id"])
+    return await rt.claim_final_mission_reward(tg_id)
+
+
+@router.get("/wheel")
+async def api_wheel_status(user: dict = Depends(require_user)) -> dict:
+    tg_id = int(user["id"])
+    return await rt.wheel_status(tg_id)
+
+
+@router.post("/wheel/spin")
+async def api_wheel_spin(user: dict = Depends(require_user)) -> dict:
+    tg_id = int(user["id"])
+    result = await rt.spin_wheel(tg_id)
+    return result
+
+
+@router.get("/level")
+async def api_level(user: dict = Depends(require_user)) -> dict:
+    tg_id = int(user["id"])
+    from app.db.client import pool as dbpool
+    async with dbpool().acquire() as conn:
+        row = await conn.fetchrow(
+            "select xp, level from economy_users where tg_id = $1", tg_id,
+        )
+    xp = int(row["xp"]) if row else 0
+    lvl = int(row["level"]) if row else 1
+    return {
+        "xp": xp,
+        "level": lvl,
+        "next_level_xp": rt.xp_for_level(lvl + 1),
+        "current_level_xp": rt.xp_for_level(lvl),
+        "perks": {k: v for k, v in rt.LEVEL_PERKS.items() if k <= lvl + 5},
+    }
+
+
+@router.get("/pvp/leaderboard")
+async def api_pvp_leaderboard(metric: str = "total_winnings", user: dict = Depends(require_user)) -> list[dict]:
+    _ = user
+    return await rt.pvp_leaderboard(metric=metric, limit=10)

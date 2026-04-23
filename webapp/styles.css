@@ -821,6 +821,207 @@ h2 {
   font-weight: 700;
 }
 
+/* ===== profile level + title ===== */
+.profile-title {
+  font-size: 12px;
+  color: var(--accent-gold);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-top: 2px;
+}
+
+.level-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+
+.level-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.level-badge {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-gold) 100%);
+  color: #0e0f14;
+  padding: 3px 10px;
+  border-radius: 8px;
+  font-weight: 800;
+  font-size: 12px;
+}
+
+.level-bar {
+  height: 8px;
+  background: var(--bg-elev);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.level-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-gold) 100%);
+  width: 0%;
+  transition: width 0.5s ease;
+}
+
+/* ===== missions ===== */
+.missions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mission-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.mission-card.complete {
+  border-color: #61df5b;
+  background: rgba(97,223,91,0.08);
+}
+
+.mission-head {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.mission-title { font-weight: 600; font-size: 14px; }
+.mission-reward { color: var(--accent-gold); font-weight: 700; font-size: 13px; }
+
+.mission-progress-bar {
+  height: 6px;
+  background: var(--bg-elev);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+
+.mission-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-gold) 100%);
+}
+
+.mission-progress-text {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
+.mission-final {
+  border: 2px dashed var(--accent-gold);
+  background: rgba(245,176,66,0.08);
+  text-align: center;
+  padding: 14px;
+  border-radius: 12px;
+  margin-top: 10px;
+}
+
+/* ===== achievements ===== */
+.ach-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.ach-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  opacity: 0.55;
+}
+
+.ach-card.earned { opacity: 1; border-color: var(--accent-gold); }
+
+.ach-info { flex: 1; min-width: 0; }
+.ach-name { font-weight: 700; font-size: 14px; }
+.ach-desc { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+.ach-title-btn {
+  background: transparent;
+  border: 1px solid var(--accent-gold);
+  color: var(--accent-gold);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.ach-reward { color: var(--accent-gold); font-size: 12px; font-weight: 700; margin-left: 8px; }
+
+/* ===== wheel ===== */
+.wheel-container {
+  text-align: center;
+  padding: 30px 20px;
+}
+
+.wheel-wrap {
+  position: relative;
+  width: 280px;
+  height: 280px;
+  margin: 0 auto;
+}
+
+.wheel {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: conic-gradient(
+    #eb4b4b 0deg 40deg,
+    #f5b042 40deg 80deg,
+    #8847ff 80deg 120deg,
+    #4b69ff 120deg 160deg,
+    #5e98d9 160deg 200deg,
+    #61df5b 200deg 240deg,
+    #d32ce6 240deg 280deg,
+    #f5b042 280deg 320deg,
+    #eb4b4b 320deg 360deg
+  );
+  box-shadow: 0 8px 30px rgba(0,0,0,0.6), inset 0 0 40px rgba(0,0,0,0.3);
+  transition: transform 5s cubic-bezier(0.2, 0.9, 0.1, 1);
+}
+
+.wheel-pointer {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 12px solid transparent;
+  border-right: 12px solid transparent;
+  border-top: 20px solid var(--accent-gold);
+  z-index: 2;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.6));
+}
+
+.wheel-info {
+  margin-top: 24px;
+  font-size: 14px;
+  color: var(--text-dim);
+}
+
+.wheel-result {
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: 10px;
+  font-weight: 800;
+  font-size: 18px;
+}
+
 /* ===== games / casino ===== */
 .daily-task {
   background: linear-gradient(135deg, rgba(245,176,66,0.1) 0%, rgba(235,75,75,0.05) 100%);

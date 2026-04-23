@@ -13,6 +13,7 @@ from app.api.economy_api import router as economy_router
 from app.bot import get_bot, get_dispatcher
 from app.config import get_settings
 from app.db.client import close_pool, init_pool
+from app.economy.chat_events import happy_hour_loop, mystery_drop_loop
 from app.scheduler import daily_summary_loop, weekly_memory_compact_loop
 
 s = get_settings()
@@ -44,6 +45,9 @@ async def lifespan(_: FastAPI):
         log.info("daily summary scheduler started (fires at %dh UTC)", s.daily_summary_hour_utc)
     scheduler_tasks.append(asyncio.create_task(weekly_memory_compact_loop()))
     log.info("weekly memory compact scheduler started (Sunday 03:00 UTC)")
+    scheduler_tasks.append(asyncio.create_task(happy_hour_loop(bot)))
+    scheduler_tasks.append(asyncio.create_task(mystery_drop_loop(bot)))
+    log.info("happy hour + mystery drop schedulers started")
 
     try:
         yield

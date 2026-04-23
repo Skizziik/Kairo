@@ -188,8 +188,8 @@ CASE_IMAGE_KILOWATT = "https://community.akamai.steamstatic.com/economy/image/i0
 CASE_DEFS = [
     {
         "key": "igor_king_of_mid",
-        "name": "Игорь — Король Мида",
-        "description": "Для королей мид-контроля: AK, M4 и прочие рабочие лошадки. Шанс выбить что-то крутое.",
+        "name": "Игорь — мид проебал",
+        "description": "Классика: AK, M4 и рабочие лошадки. Шанс выбить что-то крутое, пока Игорь сливает мид.",
         "price": 300,
         "weapon_set": RIFLES,
         "rarity_weights": {"mil-spec": 0.60, "restricted": 0.28, "classified": 0.09, "covert": 0.028, "exceedingly_rare": 0.002},
@@ -215,8 +215,8 @@ CASE_DEFS = [
     },
     {
         "key": "melkiy",
-        "name": "Мелкий",
-        "description": "SMG и дробаши — оружие для тех кто не любит думать. MAC-10, MP9, Nova и вся банда.",
+        "name": "Мелкий Выигрыш",
+        "description": "SMG и дробаши. Цена маленькая, выигрыш мелкий — но мальца подсосать можно.",
         "price": 200,
         "weapon_set": SMGS | HEAVY,
         "rarity_weights": {"mil-spec": 0.65, "restricted": 0.25, "classified": 0.08, "covert": 0.018, "exceedingly_rare": 0.002},

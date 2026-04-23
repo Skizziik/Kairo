@@ -48,6 +48,7 @@ def _register(dp: Dispatcher) -> None:
         match,
         me,
         moderation,
+        mystery_drop,
         nade,
         photo,
         poll,
@@ -97,6 +98,7 @@ def _register(dp: Dispatcher) -> None:
         top.router,
         google.router,           # /google + "загугли X" trigger
         economy_cmds.router,     # /balance /daily /casino
+        mystery_drop.router,     # claim_drop callback
         roll.router,
         match.router,
         timer.router,

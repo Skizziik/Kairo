@@ -111,7 +111,7 @@ async function loadLeaderboard() {
 }
 
 // ================= renderers =================
-function renderMe() {
+async function renderMe() {
   const me = state.me;
   if (!me) return;
 
@@ -122,6 +122,22 @@ function renderMe() {
   document.getElementById('stat-best-streak').textContent = `${me.best_streak} 🔥`;
   document.getElementById('streak-display').textContent = `🔥 ${me.current_streak}`;
   document.getElementById('cases-opened-display').textContent = `${me.cases_opened} кейсов`;
+
+  // Level + title (fetch in background)
+  try {
+    const lvl = await api('/api/level');
+    document.getElementById('level-num').textContent = lvl.level;
+    const span = (lvl.next_level_xp - lvl.current_level_xp) || 1;
+    const cur = Math.max(0, lvl.xp - lvl.current_level_xp);
+    const pct = Math.max(0, Math.min(100, (cur / span) * 100));
+    document.getElementById('level-fill').style.width = pct + '%';
+    document.getElementById('level-xp').textContent = `${fmt(cur)} / ${fmt(span)} XP`;
+  } catch (e) { /* non-critical */ }
+  try {
+    const ach = await api('/api/achievements');
+    const titleEl = document.getElementById('profile-title');
+    titleEl.textContent = ach.active_title || '';
+  } catch (e) {}
 
   const name = me.username ? `@${me.username}` : (me.first_name || 'Игрок');
   document.getElementById('profile-name').textContent = name;
@@ -625,6 +641,159 @@ async function playSlots() {
   if (btn) btn.disabled = false;
 }
 
+// ============== MISSIONS ==============
+async function loadMissions() {
+  const list = document.getElementById('missions-list');
+  list.innerHTML = '<div class="loader">Загрузка...</div>';
+  try {
+    const d = await api('/api/missions');
+    list.innerHTML = d.missions.map(m => {
+      const pct = Math.min(100, Math.round((m.current / m.target) * 100));
+      return `
+        <div class="mission-card ${m.completed ? 'complete' : ''}">
+          <div class="mission-head">
+            <div class="mission-title">${m.completed ? '✅ ' : ''}${escape(m.title)}</div>
+            <div class="mission-reward">+${fmt(m.reward)} 🪙</div>
+          </div>
+          <div class="mission-progress-bar"><div class="mission-progress-fill" style="width:${pct}%"></div></div>
+          <div class="mission-progress-text">${m.current} / ${m.target}</div>
+        </div>
+      `;
+    }).join('');
+    const done = d.missions.filter(m => m.completed).length;
+    if (d.all_complete) {
+      if (!d.final_claimed) {
+        list.innerHTML += `
+          <div class="mission-final">
+            <div style="font-size:16px;font-weight:800;margin-bottom:8px">🎉 Все миссии пройдены!</div>
+            <div style="color:var(--text-dim);font-size:13px;margin-bottom:12px">Забери финальный бонус</div>
+            <button class="btn daily-btn" id="claim-final-btn">Забрать ${fmt(d.final_reward)} 🪙</button>
+          </div>`;
+        document.getElementById('claim-final-btn').addEventListener('click', async () => {
+          try {
+            const r = await api('/api/missions/claim_final', { method: 'POST' });
+            if (r.ok) {
+              toast(`+${fmt(r.reward)} 🪙 финальный бонус!`);
+              tg?.HapticFeedback?.notificationOccurred?.('success');
+              state.me.balance = r.new_balance;
+              document.getElementById('balance-display').textContent = fmt(state.me.balance);
+              loadMissions();
+            } else {
+              toast(r.error || 'Ошибка');
+            }
+          } catch (e) { toast(e.message); }
+        });
+      } else {
+        list.innerHTML += '<div class="mission-final">✅ Финальный бонус забран. До понедельника.</div>';
+      }
+    } else {
+      list.innerHTML += `
+        <div class="mission-final" style="border-style:solid;opacity:0.5">
+          <div style="font-weight:700">Пройди все ${d.missions.length} миссий → ${fmt(d.final_reward)} 🪙</div>
+          <div style="font-size:12px;color:var(--text-dim);margin-top:4px">${done}/${d.missions.length} готово</div>
+        </div>`;
+    }
+  } catch (e) {
+    list.innerHTML = `<div class="loader">Ошибка: ${e.message}</div>`;
+  }
+}
+
+// ============== ACHIEVEMENTS ==============
+async function loadAchievements() {
+  const list = document.getElementById('achievements-list');
+  list.innerHTML = '<div class="loader">Загрузка...</div>';
+  try {
+    const d = await api('/api/achievements');
+    const active = d.active_title;
+    list.innerHTML = d.items.map(a => {
+      const canSetTitle = a.earned && a.title;
+      const isActive = canSetTitle && active === a.title;
+      return `
+        <div class="ach-card ${a.earned ? 'earned' : ''}">
+          <div class="ach-info">
+            <div class="ach-name">${escape(a.name)}</div>
+            <div class="ach-desc">${escape(a.description)}</div>
+          </div>
+          ${a.earned && a.reward ? `<div class="ach-reward">+${fmt(a.reward)} 🪙</div>` : ''}
+          ${canSetTitle ? `
+            <button class="ach-title-btn" data-title="${escape(a.title)}" style="${isActive ? 'background:var(--accent-gold);color:#0e0f14' : ''}">
+              ${isActive ? '✓ Активный' : 'Сделать титулом'}
+            </button>
+          ` : ''}
+        </div>
+      `;
+    }).join('');
+    list.querySelectorAll('.ach-title-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const title = btn.dataset.title;
+        const isActive = active === title;
+        try {
+          await api('/api/achievements/title', { method: 'POST', body: JSON.stringify({ title: isActive ? null : title }) });
+          toast(isActive ? 'Титул убран' : `Титул: ${title}`);
+          loadAchievements();
+          loadMe();
+        } catch (e) { toast(e.message); }
+      });
+    });
+  } catch (e) {
+    list.innerHTML = `<div class="loader">Ошибка: ${e.message}</div>`;
+  }
+}
+
+// ============== WHEEL OF FORTUNE ==============
+async function loadWheel() {
+  const view = document.getElementById('wheel-view');
+  view.innerHTML = '<div class="loader">Загрузка...</div>';
+  try {
+    const s = await api('/api/wheel');
+    view.innerHTML = `
+      <div class="wheel-container">
+        <div class="wheel-wrap">
+          <div class="wheel-pointer"></div>
+          <div class="wheel" id="wheel-disk"></div>
+        </div>
+        <div class="wheel-info" id="wheel-info">
+          ${s.available ? 'Бесплатная крутка готова!' : `Следующая через ${Math.ceil(s.next_in_seconds / 3600)} ч`}
+        </div>
+        <button class="btn big-btn daily-btn" id="wheel-spin-btn" ${s.available ? '' : 'disabled'} style="margin-top:18px">
+          🎡 ${s.available ? 'Крутить' : 'Недоступно'}
+        </button>
+        <div id="wheel-result"></div>
+        <div style="margin-top:14px;font-size:11px;color:var(--text-dim)">
+          Всего круток: <b>${s.total_spins || 0}</b>
+        </div>
+      </div>
+    `;
+    const btn = document.getElementById('wheel-spin-btn');
+    if (btn) {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        const disk = document.getElementById('wheel-disk');
+        disk.style.transform = `rotate(${1800 + Math.random() * 360}deg)`;
+        try {
+          const r = await api('/api/wheel/spin', { method: 'POST' });
+          await new Promise(x => setTimeout(x, 5100));
+          const info = document.getElementById('wheel-result');
+          if (r.ok) {
+            tg?.HapticFeedback?.notificationOccurred?.(r.prize.amount >= 1000 ? 'success' : 'warning');
+            const cls = r.prize.amount > 0 ? 'win' : 'lose';
+            info.innerHTML = `<div class="wheel-result game-out ${cls}">${r.prize.label}</div>`;
+            if (r.new_balance !== undefined) {
+              state.me.balance = r.new_balance;
+              document.getElementById('balance-display').textContent = fmt(state.me.balance);
+            }
+          } else if (r.error === 'too_early') {
+            info.innerHTML = `<div class="wheel-result">Рано. Ещё ~${Math.ceil(r.next_in_seconds/3600)} ч</div>`;
+          }
+        } catch (e) { toast(e.message); btn.disabled = false; }
+      });
+    }
+  } catch (e) {
+    view.innerHTML = `<div class="loader">Ошибка: ${e.message}</div>`;
+  }
+}
+
+// ============== CRASH ==============
 async function playCrash() {
   const bet = parseInt(document.getElementById('cr-bet').value || '0');
   const target = parseFloat(document.getElementById('cr-target').value || '0');
@@ -677,6 +846,9 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (target === 'leaderboard') loadLeaderboard();
     if (target === 'home') loadMe();
     if (target === 'games') loadDailyTask();
+    if (target === 'missions') loadMissions();
+    if (target === 'achievements') loadAchievements();
+    if (target === 'wheel') loadWheel();
   });
 });
 
@@ -708,6 +880,11 @@ if (tg) {
     }
   });
 }
+
+document.getElementById('wheel-btn')?.addEventListener('click', () => {
+  showView('wheel');
+  loadWheel();
+});
 
 document.getElementById('daily-btn').addEventListener('click', async () => {
   const btn = document.getElementById('daily-btn');
