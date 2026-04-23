@@ -11,6 +11,9 @@ if (tg) {
   tg.ready();
   tg.setHeaderColor('#0e0f14');
   tg.setBackgroundColor('#0e0f14');
+  // Prevent accidental swipe-down closing while scrolling inventory etc.
+  try { tg.disableVerticalSwipes?.(); } catch (e) { /* older SDK */ }
+  try { tg.enableClosingConfirmation?.(); } catch (e) {}
 }
 
 const INIT_DATA = tg?.initData || '';
@@ -569,24 +572,57 @@ async function playSlots() {
   const bet = parseInt(document.getElementById('sl-bet').value || '0');
   if (bet <= 0) return toast('Поставь сумму');
   const display = document.getElementById('sl-display');
-  display.textContent = '🔄 🔄 🔄';
+  const out = document.getElementById('sl-out');
+  out.style.display = 'none';
+  const btn = document.getElementById('sl-spin');
+  if (btn) btn.disabled = true;
+
+  const symbols = ['💀', '🔫', '💣', '💎', '🏆', '7️⃣'];
+  const reels = ['', '', ''];
+  const randSym = () => symbols[Math.floor(Math.random() * symbols.length)];
+  const draw = () => { display.textContent = reels.map(s => s || randSym()).join(' '); };
+
+  // Start spin
+  let spinInterval = setInterval(draw, 75);
+
+  // Fetch server result in parallel with visual spin
+  let result;
   try {
-    const r = await api('/api/casino/slots', { method: 'POST', body: JSON.stringify({ bet }) });
-    display.textContent = r.reels.join(' ');
-    const out = document.getElementById('sl-out');
-    out.style.display = 'block';
-    out.className = 'game-out ' + (r.delta > 0 ? 'win' : 'lose');
-    out.textContent = r.outcome === 'jackpot'
-      ? `🎉 JACKPOT +${fmt(r.delta)} 🪙`
-      : r.outcome === 'pair'
-        ? `Пара +${fmt(r.delta)} 🪙`
-        : `${fmt(r.delta)} 🪙`;
-    tg?.HapticFeedback?.notificationOccurred?.(r.outcome === 'jackpot' ? 'success' : (r.delta > 0 ? 'warning' : 'error'));
-    state.me.balance = r.new_balance;
-    document.getElementById('balance-display').textContent = fmt(state.me.balance);
+    result = await api('/api/casino/slots', { method: 'POST', body: JSON.stringify({ bet }) });
   } catch (e) {
+    clearInterval(spinInterval);
+    if (btn) btn.disabled = false;
     toast(e.message);
+    return;
   }
+
+  // Spin for ~1.5s total, then stop reels one by one
+  await new Promise(r => setTimeout(r, 800));
+  reels[0] = result.reels[0]; draw();
+  tg?.HapticFeedback?.impactOccurred?.('light');
+  await new Promise(r => setTimeout(r, 380));
+  reels[1] = result.reels[1]; draw();
+  tg?.HapticFeedback?.impactOccurred?.('light');
+  await new Promise(r => setTimeout(r, 380));
+  clearInterval(spinInterval);
+  reels[2] = result.reels[2]; draw();
+  tg?.HapticFeedback?.impactOccurred?.('medium');
+
+  // Show outcome
+  await new Promise(r => setTimeout(r, 250));
+  out.style.display = 'block';
+  out.className = 'game-out ' + (result.delta > 0 ? 'win' : 'lose');
+  out.textContent = result.outcome === 'jackpot'
+    ? `🎉 JACKPOT +${fmt(result.delta)} 🪙`
+    : result.outcome === 'pair'
+      ? `Пара +${fmt(result.delta)} 🪙`
+      : `${fmt(result.delta)} 🪙`;
+  tg?.HapticFeedback?.notificationOccurred?.(
+    result.outcome === 'jackpot' ? 'success' : (result.delta > 0 ? 'warning' : 'error')
+  );
+  state.me.balance = result.new_balance;
+  document.getElementById('balance-display').textContent = fmt(state.me.balance);
+  if (btn) btn.disabled = false;
 }
 
 async function playCrash() {
