@@ -72,6 +72,20 @@ create table if not exists kv_state (
 insert into kv_state (k, v) values ('msgs_since_extract', 0)
     on conflict (k) do nothing;
 
+-- user-to-user relationships inside a chat (friends, teammates, beef)
+create table if not exists relationships (
+    chat_id    bigint not null,
+    user_a     bigint not null,
+    user_b     bigint not null,
+    kind       text not null,        -- friends / teammates / rivals / beef / neutral
+    note       text,                 -- short freeform e.g. "часто флудят 1v1 перестрелки"
+    strength   int not null default 1,  -- 1..5
+    updated_at timestamptz not null default now(),
+    primary key (chat_id, user_a, user_b),
+    check (user_a < user_b)         -- canonical ordering, one row per pair
+);
+create index if not exists idx_relationships_chat on relationships (chat_id);
+
 -- track bot's own recent messages + feedback (emoji reactions) for self-learning
 create table if not exists bot_messages (
     id           bigserial primary key,

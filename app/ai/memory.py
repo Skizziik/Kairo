@@ -116,6 +116,23 @@ async def answer_as_rip(
         except Exception:
             log.exception("memory retrieval failed; proceeding without it")
 
+    # Fetch relationships for this asker — memo: "Max часто катает с Игорем"
+    relationships_lines: list[str] = []
+    try:
+        rels = await repos.relationships_for_user(chat_id, asker_id)
+        for r in rels[:6]:
+            kind_word = {
+                "friends": "друзья с",
+                "teammates": "часто катают с",
+                "rivals": "соперничают с",
+                "beef": "есть бифф с",
+                "neutral": "нейтрально с",
+            }.get(r["kind"], r["kind"])
+            note = f" ({r['note']})" if r["note"] else ""
+            relationships_lines.append(f"{kind_word} @{r['other_name']}{note}")
+    except Exception:
+        log.exception("relationships fetch failed")
+
     # Inject anti-repetition coaching into system prompt — previous openers
     try:
         recent = await repos.get_recent_openers(chat_id)
@@ -131,6 +148,10 @@ async def answer_as_rip(
             "Особенно НЕ НАЧИНАЙ с 'ээ', 'ээ бой', 'ну ты', если они там есть."
         )
 
+    rel_note = ""
+    if relationships_lines:
+        rel_note = "\n\nОтношения собеседника с другими: " + "; ".join(relationships_lines)
+
     system = build_system_prompt(
         asker_display=asker_display,
         asker_profile=summary,
@@ -138,7 +159,7 @@ async def answer_as_rip(
         memories=memories,
         chat_window=window,
         members=members,
-    ) + opener_note
+    ) + rel_note + opener_note
 
     messages = [
         {"role": "system", "content": system},
@@ -248,6 +269,23 @@ async def extract_and_store(chat_id: int, window_size: int | None = None) -> int
     except json.JSONDecodeError:
         log.warning("extractor returned non-JSON: %s", raw[:200])
         return 0
+
+    # Extract and persist relationships if model returned any
+    rels = data.get("relationships") or []
+    for r in rels:
+        try:
+            a = int(r.get("a"))
+            b = int(r.get("b"))
+            if a not in known_ids or b not in known_ids or a == b:
+                continue
+            kind = (r.get("kind") or "neutral").strip().lower()
+            if kind not in ("friends", "teammates", "rivals", "beef", "neutral"):
+                kind = "neutral"
+            note = (r.get("note") or "").strip() or None
+            strength = int(r.get("strength", 1))
+            await repos.upsert_relationship(chat_id, a, b, kind, note, strength)
+        except Exception:
+            log.exception("failed to upsert relationship %s", r)
 
     profiles = data.get("profiles") or []
     updated = 0

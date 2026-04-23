@@ -404,6 +404,65 @@ async def messages_since_hours(chat_id: int, hours: int) -> list[MessageRow]:
     ]
 
 
+async def upsert_relationship(
+    chat_id: int,
+    user_a: int,
+    user_b: int,
+    kind: str,
+    note: str | None,
+    strength: int,
+) -> None:
+    if user_a == user_b:
+        return
+    a, b = (user_a, user_b) if user_a < user_b else (user_b, user_a)
+    async with pool().acquire() as conn:
+        await conn.execute(
+            """
+            insert into relationships (chat_id, user_a, user_b, kind, note, strength, updated_at)
+            values ($1, $2, $3, $4, $5, $6, now())
+            on conflict (chat_id, user_a, user_b) do update set
+                kind = excluded.kind,
+                note = coalesce(excluded.note, relationships.note),
+                strength = greatest(relationships.strength, excluded.strength),
+                updated_at = now()
+            """,
+            chat_id, a, b, kind, note, max(1, min(5, int(strength))),
+        )
+
+
+async def relationships_for_user(chat_id: int, tg_id: int) -> list[dict]:
+    async with pool().acquire() as conn:
+        rows = await conn.fetch(
+            """
+            select r.user_a, r.user_b, r.kind, r.note, r.strength,
+                   ua.username as ua_username, ua.first_name as ua_first,
+                   ub.username as ub_username, ub.first_name as ub_first
+            from relationships r
+            left join users ua on ua.tg_id = r.user_a
+            left join users ub on ub.tg_id = r.user_b
+            where r.chat_id = $1 and ($2 in (r.user_a, r.user_b))
+            order by r.strength desc, r.updated_at desc
+            """,
+            chat_id, tg_id,
+        )
+    out = []
+    for r in rows:
+        other_id = r["user_b"] if r["user_a"] == tg_id else r["user_a"]
+        other_name = (
+            r["ub_username"] if r["user_a"] == tg_id else r["ua_username"]
+        ) or (
+            r["ub_first"] if r["user_a"] == tg_id else r["ua_first"]
+        ) or f"user{other_id}"
+        out.append({
+            "other_id": other_id,
+            "other_name": other_name,
+            "kind": r["kind"],
+            "note": r["note"],
+            "strength": int(r["strength"]),
+        })
+    return out
+
+
 async def log_bot_message(chat_id: int, message_id: int, text: str) -> None:
     if not text.strip():
         return
