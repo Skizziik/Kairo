@@ -9,6 +9,8 @@ services:
     envVars:
       - key: MINIAPP_URL
         sync: false
+      - key: MINIAPP_TME_URL
+        sync: false
       - key: TG_BOT_TOKEN
         sync: false
       - key: TG_WEBHOOK_SECRET

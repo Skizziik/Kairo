@@ -43,35 +43,44 @@ def _url_kb() -> InlineKeyboardMarkup | None:
 
 
 async def _send_with_miniapp(msg: Message, text: str, prefer_reply: bool = True) -> None:
-    """Try to send with web_app button first (opens Mini App inline in TG).
-    If Telegram rejects (no domain/app in BotFather), fall back to url button.
-    If that also fails, append URL in text."""
+    """Strategy:
+    - Private chat: use web_app button with the raw Mini App URL (inline).
+    - Group chat: use url button with t.me Direct Link Mini App URL (inline).
+      If not set, fall back to raw URL (opens browser).
+    - Any TelegramBadRequest falls through to pure text with URL appended.
+    """
     s = get_settings()
-    url = s.miniapp_url
+    is_private = msg.chat.type == "private"
     send = msg.reply if prefer_reply else msg.answer
-    if not url:
+
+    raw_url = s.miniapp_url
+    tme_url = s.miniapp_tme_url
+
+    if not raw_url and not tme_url:
         await send(text)
         return
-    # 1) try web_app (best UX — inline Mini App)
+
+    # Pick best button type per context.
     try:
+        if is_private and raw_url:
+            kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="🎰 Открыть казино", web_app=WebAppInfo(url=raw_url)),
+            ]])
+            await send(text, reply_markup=kb)
+            return
+        # Group or channel — must use url button.
+        # Prefer t.me Direct Link (opens inline), fall back to raw URL (opens browser).
+        target = tme_url or raw_url
         kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="🎰 Открыть казино", web_app=WebAppInfo(url=url)),
+            InlineKeyboardButton(text="🎰 Открыть казино", url=target),
         ]])
         await send(text, reply_markup=kb)
         return
     except TelegramBadRequest as e:
-        log.warning("web_app button rejected (%s), fall back to url", e.message)
-    # 2) fallback — plain url button (opens browser or TG webview depending on config)
-    try:
-        kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="🎰 Открыть казино", url=url),
-        ]])
-        await send(text, reply_markup=kb)
-        return
-    except TelegramBadRequest:
-        pass
-    # 3) last resort — just include url in text
-    await send(f"{text}\n\n{url}")
+        log.warning("miniapp button rejected (%s), fall back to text URL", e.message)
+
+    # Last resort — plain text with URL
+    await send(f"{text}\n\n{tme_url or raw_url}")
 
 
 def _fmt_coins(n: int) -> str:

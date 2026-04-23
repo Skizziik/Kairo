@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     memory_extract_window: int = Field(default=100, alias="MEMORY_EXTRACT_WINDOW")
     rate_limit_per_minute: int = Field(default=20, alias="RATE_LIMIT_PER_MINUTE")
     miniapp_url: str | None = Field(default=None, alias="MINIAPP_URL")
+    # Direct Link Mini App URL (t.me/BotName/AppName) — required for groups.
+    # Register via BotFather /newapp. When set, /casino uses it for url buttons.
+    miniapp_tme_url: str | None = Field(default=None, alias="MINIAPP_TME_URL")
 
     chime_in_probability: float = Field(default=0.18, alias="CHIME_IN_PROBABILITY")
     chime_in_cooldown_seconds: int = Field(default=90, alias="CHIME_IN_COOLDOWN_SECONDS")
