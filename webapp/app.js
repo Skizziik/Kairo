@@ -307,34 +307,62 @@ async function openCase(caseId) {
   const jitter = (Math.random() - 0.5) * (itemW * 0.4); // small shake for realism
   track.style.transform = `translateX(-${offset + jitter}px)`;
 
-  // after anim — show result
+  // after anim — show result as fullscreen overlay (no scroll needed)
   setTimeout(() => {
     tg?.HapticFeedback?.notificationOccurred?.(
       (result.skin.rarity === 'covert' || result.skin.rarity === 'exceedingly_rare') ? 'success' : 'warning'
     );
-
-    const resEl = document.getElementById('case-open-result');
-    const stBadge = result.stat_trak ? '<span class="stattrak-badge">ST™</span>' : '';
-    resEl.innerHTML = `
-      <div class="result-card rarity-${result.skin.rarity}" style="position:relative">
+    const stBadge = result.stat_trak ? '<div class="stattrak-badge">ST™</div>' : '';
+    let overlay = document.getElementById('case-result-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'case-result-overlay';
+      overlay.className = 'case-result-overlay';
+      document.body.appendChild(overlay);
+    }
+    overlay.innerHTML = `
+      <div class="case-result-modal rarity-${result.skin.rarity}">
         ${stBadge}
-        <img class="result-img" src="${result.skin.image_url}" alt="" />
+        <img src="${result.skin.image_url}" alt="" />
         <div class="result-name">${escape(result.skin.full_name)}</div>
         <div class="result-meta">${result.wear.replace('_', '-').toUpperCase()} • float ${result.float.toFixed(4)}</div>
-        <div class="result-price">+${fmt(result.price)} 🪙 <span style="font-size:13px; color:var(--text-dim); font-weight:normal">в инвентарь</span></div>
+        <div class="result-price">+${fmt(result.price)} 🪙 в инвентарь</div>
+        ${(result.achievements && result.achievements.length) ? `
+          <div style="margin-top:12px;padding:10px;background:rgba(245,176,66,0.1);border-radius:8px">
+            <div style="font-size:11px;color:var(--accent-gold);font-weight:700">🏆 АЧИВКА</div>
+            ${result.achievements.map(a => `<div style="font-size:13px;margin-top:4px">${escape(a.name)}</div>`).join('')}
+          </div>
+        ` : ''}
+        ${(result.level && result.level.leveled_up) ? `
+          <div style="margin-top:10px;padding:10px;background:rgba(136,71,255,0.15);border-radius:8px;font-size:13px">
+            ⭐ Уровень <b>${result.level.new_level}</b>${result.level.perk ? ' — ' + escape(result.level.perk) : ''}
+          </div>
+        ` : ''}
+        <div class="result-actions">
+          <button class="btn daily-btn" id="case-overlay-again">Открыть ещё</button>
+          <button class="btn secondary" id="case-overlay-inv">В инвентарь</button>
+        </div>
       </div>
     `;
-    resEl.classList.add('shown');
-    document.getElementById('case-open-actions').style.display = 'flex';
+    overlay.classList.remove('hidden');
 
     // update balance shown top
     state.me.balance = result.new_balance;
     state.me.cases_opened += 1;
     document.getElementById('balance-display').textContent = fmt(state.me.balance);
-  }, 6100);
 
-  // wire "open again"
-  document.getElementById('case-open-again').onclick = () => openCase(caseId);
+    document.getElementById('case-overlay-again').onclick = () => {
+      overlay.classList.add('hidden');
+      overlay.innerHTML = '';
+      openCase(caseId);
+    };
+    document.getElementById('case-overlay-inv').onclick = () => {
+      overlay.classList.add('hidden');
+      overlay.innerHTML = '';
+      showView('inventory');
+      loadInventory();
+    };
+  }, 6100);
 }
 
 const invFilter = { rarity: '', sort: 'price_desc' };
@@ -501,15 +529,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.querySelectorAll('.game-card').forEach(card => {
     card.addEventListener('click', () => {
-      document.querySelectorAll('.game-card').forEach(c => c.classList.remove('active'));
-      card.classList.add('active');
-      renderGamePlay(card.dataset.game);
+      openGameScreen(card.dataset.game);
     });
   });
 });
 
-function renderGamePlay(game) {
+function openGameScreen(gameKey) {
+  // Hide catalog + daily task, show only game play with back button
+  document.getElementById('daily-task-card')?.classList.add('hidden');
+  const grid = document.querySelector('.game-grid');
+  if (grid) grid.style.display = 'none';
   const area = document.getElementById('game-play-area');
+  area.innerHTML = `<button class="back-btn" id="game-back-btn" style="margin-bottom:10px">← к играм</button>`;
+  const holder = document.createElement('div');
+  area.appendChild(holder);
+  document.getElementById('game-back-btn').addEventListener('click', closeGameScreen);
+  renderGamePlay(gameKey, holder);
+}
+
+function closeGameScreen() {
+  const grid = document.querySelector('.game-grid');
+  if (grid) grid.style.display = '';
+  document.getElementById('daily-task-card')?.classList.remove('hidden');
+  document.getElementById('game-play-area').innerHTML = '';
+  loadDailyTask();  // refresh task state in case solved
+}
+
+function renderGamePlay(game, target) {
+  // `target` is where to render; falls back to game-play-area for safety
+  const area = target || document.getElementById('game-play-area');
   if (game === 'coinflip') {
     area.innerHTML = `
       <div class="game-play">

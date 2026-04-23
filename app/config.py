@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     meme_callback_probability: float = Field(default=0.15, alias="MEME_CALLBACK_PROBABILITY")
     daily_summary_enabled: bool = Field(default=True, alias="DAILY_SUMMARY_ENABLED")
     daily_summary_hour_utc: int = Field(default=19, alias="DAILY_SUMMARY_HOUR_UTC")  # 22:00 MSK
+    casino_chat_events_enabled: bool = Field(default=False, alias="CASINO_CHAT_EVENTS_ENABLED")
 
     @field_validator("tg_allowed_chat_id", mode="before")
     @classmethod

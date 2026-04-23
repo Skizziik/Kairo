@@ -45,9 +45,12 @@ async def lifespan(_: FastAPI):
         log.info("daily summary scheduler started (fires at %dh UTC)", s.daily_summary_hour_utc)
     scheduler_tasks.append(asyncio.create_task(weekly_memory_compact_loop()))
     log.info("weekly memory compact scheduler started (Sunday 03:00 UTC)")
-    scheduler_tasks.append(asyncio.create_task(happy_hour_loop(bot)))
-    scheduler_tasks.append(asyncio.create_task(mystery_drop_loop(bot)))
-    log.info("happy hour + mystery drop schedulers started")
+    if s.casino_chat_events_enabled:
+        scheduler_tasks.append(asyncio.create_task(happy_hour_loop(bot)))
+        scheduler_tasks.append(asyncio.create_task(mystery_drop_loop(bot)))
+        log.info("happy hour + mystery drop schedulers started")
+    else:
+        log.info("chat events disabled (CASINO_CHAT_EVENTS_ENABLED=false)")
 
     try:
         yield

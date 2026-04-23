@@ -531,6 +531,55 @@ h2 {
   z-index: 5;
 }
 
+/* ===== case result overlay ===== */
+.case-result-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.8);
+  backdrop-filter: blur(6px);
+  padding: 20px;
+  animation: fadeIn 0.25s ease;
+}
+
+.case-result-overlay.hidden { display: none; }
+
+.case-result-modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-top-width: 4px;
+  border-radius: 18px;
+  padding: 24px 20px;
+  width: 100%;
+  max-width: 360px;
+  text-align: center;
+  position: relative;
+  animation: modalIn 0.3s ease;
+}
+
+.case-result-modal img {
+  max-width: 220px;
+  margin: 0 auto;
+  filter: drop-shadow(0 10px 30px rgba(0,0,0,0.6));
+}
+
+.case-result-modal .result-name {
+  margin-top: 12px;
+}
+
+.case-result-modal .result-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.case-result-modal .result-actions button {
+  flex: 1;
+}
+
 /* ===== case open animation ===== */
 .case-open-wrapper {
   padding: 24px 0;
