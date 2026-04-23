@@ -72,6 +72,20 @@ create table if not exists kv_state (
 insert into kv_state (k, v) values ('msgs_since_extract', 0)
     on conflict (k) do nothing;
 
+-- track bot's own recent messages + feedback (emoji reactions) for self-learning
+create table if not exists bot_messages (
+    id           bigserial primary key,
+    chat_id      bigint not null,
+    message_id   bigint not null,
+    text         text not null,
+    created_at   timestamptz not null default now(),
+    reaction     text,           -- first reaction received (emoji)
+    reaction_by  bigint,         -- tg_id of reactor
+    reaction_at  timestamptz,
+    unique (chat_id, message_id)
+);
+create index if not exists idx_bot_messages_recent on bot_messages (chat_id, created_at desc);
+
 -- per-chat persistent bot state (recent openers for anti-repetition,
 -- chime cooldown timestamp, misc extras)
 create table if not exists bot_chat_state (

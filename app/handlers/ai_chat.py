@@ -57,7 +57,12 @@ async def _ask(msg: Message, question: str) -> None:
         log.exception("ai answer failed")
         await msg.reply("Щас не могу, мозги лагают. Попробуй через минуту.")
         return
-    await msg.reply(answer or "...")
+    sent = await msg.reply(answer or "...")
+    # Log bot's own message for self-learning feedback tracking
+    try:
+        await repos.log_bot_message(sent.chat.id, sent.message_id, answer or "")
+    except Exception:
+        log.exception("failed to log bot message")
 
 
 @router.message(Command("ai"))

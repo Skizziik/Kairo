@@ -404,6 +404,53 @@ async def messages_since_hours(chat_id: int, hours: int) -> list[MessageRow]:
     ]
 
 
+async def log_bot_message(chat_id: int, message_id: int, text: str) -> None:
+    if not text.strip():
+        return
+    async with pool().acquire() as conn:
+        await conn.execute(
+            "insert into bot_messages (chat_id, message_id, text) values ($1, $2, $3) "
+            "on conflict (chat_id, message_id) do nothing",
+            chat_id, message_id, text[:4000],
+        )
+
+
+async def record_reaction(chat_id: int, message_id: int, emoji: str, user_id: int) -> bool:
+    """Set reaction on a bot message if it was a bot message. Returns True if recorded."""
+    async with pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "update bot_messages set reaction=$3, reaction_by=$4, reaction_at=now() "
+            "where chat_id=$1 and message_id=$2 and reaction is null "
+            "returning id",
+            chat_id, message_id, emoji, user_id,
+        )
+    return row is not None
+
+
+async def feedback_digest(chat_id: int, limit: int = 20) -> dict:
+    """For recent bot messages, summarize feedback reception: with which emojis."""
+    async with pool().acquire() as conn:
+        rows = await conn.fetch(
+            "select text, reaction, created_at from bot_messages "
+            "where chat_id = $1 and created_at > now() - interval '14 days' "
+            "order by created_at desc limit $2",
+            chat_id, limit,
+        )
+    hits = [(r["text"], r["reaction"]) for r in rows]
+    positive = sum(1 for _, r in hits if r in POSITIVE_EMOJIS)
+    negative = sum(1 for _, r in hits if r in NEGATIVE_EMOJIS)
+    return {
+        "total": len(hits),
+        "positive": positive,
+        "negative": negative,
+        "recent": hits[:5],
+    }
+
+
+POSITIVE_EMOJIS = {"🔥", "😁", "👍", "💯", "❤", "❤️", "🫡", "🤝", "😂", "🤣", "👏"}
+NEGATIVE_EMOJIS = {"💩", "🤡", "👎", "🤮", "🖕"}
+
+
 async def top_active(chat_id: int, days: int = 7, limit: int = 10) -> list[tuple[str, int]]:
     async with pool().acquire() as conn:
         rows = await conn.fetch(

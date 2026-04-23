@@ -32,7 +32,7 @@ async def lifespan(_: FastAPI):
     await bot.set_webhook(
         url=s.webhook_url,
         drop_pending_updates=True,
-        allowed_updates=["message", "callback_query", "chat_member"],
+        allowed_updates=["message", "callback_query", "chat_member", "message_reaction"],
     )
     log.info("webhook set to %s", s.webhook_url)
 

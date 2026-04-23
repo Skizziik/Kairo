@@ -37,6 +37,7 @@ def _register(dp: Dispatcher) -> None:
     from app.handlers import (
         ai_chat,
         extract,
+        feedback,
         forget,
         google,
         help as help_h,
@@ -67,6 +68,7 @@ def _register(dp: Dispatcher) -> None:
     # specific routers get a chance.
     dp.include_routers(
         welcome.router,          # new_chat_members — earliest
+        feedback.router,         # message_reaction events
         start.router,
         help_h.router,
         whereami.router,
