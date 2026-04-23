@@ -59,7 +59,7 @@ async def on_voice(msg: Message) -> None:
     if duration and duration > 180:
         log.info("voice too long (%ss), skipping transcription", duration)
         return
-    if not s.groq_api_key:
+    if not s.mistral_api_key:
         return
 
     audio = await _download(msg, file_id)
