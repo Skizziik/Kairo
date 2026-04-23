@@ -12,9 +12,9 @@ from app.economy.pricing import compute_price, roll_float, wear_from_float
 log = logging.getLogger(__name__)
 
 STREAK_RESET_HOURS = 36
-BASE_DAILY = 50
-STREAK_BONUS_PER_DAY = 10
-STREAK_BONUS_CAP = 500
+BASE_DAILY = 150
+STREAK_BONUS_PER_DAY = 20
+STREAK_BONUS_CAP = 800
 
 
 async def ensure_user(tg_id: int) -> None:

@@ -657,8 +657,66 @@ h2 {
   padding: 12px 14px;
   border-radius: 10px;
   border: 1px solid var(--border);
-  margin-bottom: 14px;
+  margin-bottom: 10px;
   font-size: 14px;
+}
+
+.inv-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.inv-select {
+  width: 100%;
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3e%3cpath d='M3 4.5L6 7.5L9 4.5' stroke='%238b94a7' stroke-width='1.5' fill='none'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+}
+
+.inv-rarity-chips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+
+.inv-rarity-chips::-webkit-scrollbar { display: none; }
+
+.chip {
+  flex-shrink: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 12px;
+  border-radius: 16px;
+  font-size: 13px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+
+.chip.active {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-gold) 100%);
+  color: #0e0f14;
+  border-color: transparent;
+}
+
+.chip:not(.active):active {
+  background: var(--bg-card-hover);
 }
 
 .inventory-grid {

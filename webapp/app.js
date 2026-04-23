@@ -318,6 +318,25 @@ async function openCase(caseId) {
   document.getElementById('case-open-again').onclick = () => openCase(caseId);
 }
 
+const invFilter = { rarity: '', sort: 'price_desc' };
+
+function _sortInventory(items) {
+  const copy = items.slice();
+  switch (invFilter.sort) {
+    case 'price_asc':  copy.sort((a, b) => a.price - b.price); break;
+    case 'price_desc': copy.sort((a, b) => b.price - a.price); break;
+    case 'recent':     copy.sort((a, b) => new Date(b.acquired_at) - new Date(a.acquired_at)); break;
+    case 'float_asc':  copy.sort((a, b) => a.float - b.float); break;
+    case 'float_desc': copy.sort((a, b) => b.float - a.float); break;
+  }
+  return copy;
+}
+
+function _filterInventory(items) {
+  if (!invFilter.rarity) return items;
+  return items.filter(i => i.rarity === invFilter.rarity);
+}
+
 function renderInventory() {
   const grid = document.getElementById('inventory-grid');
   const inv = state.inventory;
@@ -328,7 +347,14 @@ function renderInventory() {
     grid.innerHTML = '<div class="loader">Пусто. Открой первый кейс!</div>';
     return;
   }
-  grid.innerHTML = inv.items.map(it => `
+
+  const filtered = _sortInventory(_filterInventory(inv.items));
+  if (!filtered.length) {
+    grid.innerHTML = '<div class="loader">Нет предметов этой редкости.</div>';
+    return;
+  }
+
+  grid.innerHTML = filtered.map(it => `
     <div class="inv-item rarity-${it.rarity}" data-inv-id="${it.id}">
       ${it.stat_trak ? '<div class="stattrak-badge">ST™</div>' : ''}
       <img class="inv-item-img" src="${it.image_url}" alt="" loading="lazy" />
@@ -343,6 +369,23 @@ function renderInventory() {
     card.addEventListener('click', () => showItemDetail(parseInt(card.dataset.invId)));
   });
 }
+
+// Wire filter controls once DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+  const sortEl = document.getElementById('inv-sort');
+  sortEl?.addEventListener('change', () => {
+    invFilter.sort = sortEl.value;
+    if (state.inventory) renderInventory();
+  });
+  document.querySelectorAll('#inv-rarity-chips .chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('#inv-rarity-chips .chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      invFilter.rarity = chip.dataset.rarity || '';
+      if (state.inventory) renderInventory();
+    });
+  });
+});
 
 function showItemDetail(invId) {
   const it = state.inventory.items.find(i => i.id === invId);

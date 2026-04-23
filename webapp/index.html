@@ -96,6 +96,25 @@
           <span>Предметов: <b id="inv-count">0</b></span>
           <span>Стоимость: <b id="inv-value">0</b> 🪙</span>
         </div>
+        <div class="inv-controls">
+          <select id="inv-sort" class="inv-select">
+            <option value="price_desc">Дорогие сверху</option>
+            <option value="price_asc">Дешёвые сверху</option>
+            <option value="recent">Новые сверху</option>
+            <option value="float_asc">Float ↑ (FN первые)</option>
+            <option value="float_desc">Float ↓ (BS первые)</option>
+          </select>
+          <div class="inv-rarity-chips" id="inv-rarity-chips">
+            <button class="chip active" data-rarity="">Все</button>
+            <button class="chip" data-rarity="consumer">⬜</button>
+            <button class="chip" data-rarity="industrial">🟦</button>
+            <button class="chip" data-rarity="mil-spec">🟪</button>
+            <button class="chip" data-rarity="restricted">🟣</button>
+            <button class="chip" data-rarity="classified">🌸</button>
+            <button class="chip" data-rarity="covert">🟥</button>
+            <button class="chip" data-rarity="exceedingly_rare">🟨</button>
+          </div>
+        </div>
         <div id="inventory-grid" class="inventory-grid">
           <div class="loader">Загрузка...</div>
         </div>
