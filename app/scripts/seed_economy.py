@@ -15,7 +15,7 @@ from app.db.client import pool
 
 log = logging.getLogger(__name__)
 
-CSGO_API_SKINS_URL = "https://bymykel.github.io/CSGO-API/api/en/skins.json"
+CSGO_API_SKINS_URL = "https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/skins.json"
 
 # Rarity normalization — CSGO-API returns various names, we map to our canonical.
 RARITY_MAP = {
@@ -61,7 +61,7 @@ KNIVES_GLOVES_MARKER = "★"  # CSGO-API marks knives/gloves with star
 
 
 async def _fetch_skins() -> list[dict]:
-    async with httpx.AsyncClient(timeout=60.0) as c:
+    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as c:
         r = await c.get(CSGO_API_SKINS_URL)
         r.raise_for_status()
     return r.json()
