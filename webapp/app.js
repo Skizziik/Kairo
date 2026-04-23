@@ -155,13 +155,15 @@ function renderCases() {
 
   grid.innerHTML = state.cases.map(c => {
     const preview = (c.preview_items || []).slice(0, 4);
-    const hero = c.hero_image || (preview[0] && preview[0].image_url) || '';
+    // Prefer the official CS2 case PNG if seeded; fall back to top-rarity weapon.
+    const hero = c.image_url || (preview[0] && preview[0].image_url) || '';
+    const isOfficialCase = Boolean(c.image_url);
     const topRarity = (preview[0] && preview[0].rarity) || 'mil-spec';
     const locked = !canAfford(c);
     return `
       <div class="case-tile rarity-border-${topRarity} ${locked ? 'locked' : ''}" data-case-id="${c.id}">
         <div class="case-tile-glow"></div>
-        <div class="case-tile-hero">
+        <div class="case-tile-hero ${isOfficialCase ? 'is-case' : ''}">
           ${hero ? `<img src="${hero}" alt="" />` : ''}
         </div>
         <div class="case-tile-body">

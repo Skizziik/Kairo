@@ -91,7 +91,6 @@ async def api_cases(user: dict = Depends(require_user)) -> list[dict]:
     out = []
     async with dbpool().acquire() as conn:
         for c in cases:
-            # Pull full case row to access loot_pool
             full = await conn.fetchrow(
                 "select loot_pool from economy_cases where id = $1", int(c["id"])
             )
@@ -104,11 +103,13 @@ async def api_cases(user: dict = Depends(require_user)) -> list[dict]:
             all_ids = list(set(all_ids))
 
             preview_items: list[dict] = []
-            hero_image = None
             if all_ids:
+                # Exclude knives/gloves — they're rare "jackpot" drops, not what
+                # the case is visually "about". Show the top regular weapons.
                 rows = await conn.fetch(
                     "select id, full_name, rarity, rarity_color, image_url, base_price "
-                    "from economy_skins_catalog where id = any($1::int[]) "
+                    "from economy_skins_catalog "
+                    "where id = any($1::int[]) and category = 'weapon' "
                     "order by base_price desc limit 5",
                     all_ids,
                 )
@@ -122,8 +123,6 @@ async def api_cases(user: dict = Depends(require_user)) -> list[dict]:
                     }
                     for r in rows
                 ]
-                if preview_items:
-                    hero_image = preview_items[0]["image_url"]
 
             out.append({
                 "id": int(c["id"]),
@@ -131,7 +130,7 @@ async def api_cases(user: dict = Depends(require_user)) -> list[dict]:
                 "name": c["name"],
                 "description": c["description"],
                 "price": int(c["price"]),
-                "hero_image": hero_image,
+                "image_url": c.get("image_url"),  # official case PNG (if seeded)
                 "preview_items": preview_items[:4],
             })
     return out
