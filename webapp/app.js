@@ -570,57 +570,8 @@ function showItemDetail(invId) {
 }
 
 // ============== GAMES ==============
-async function loadDailyTask() {
-  try {
-    const task = await api('/api/task');
-    const card = document.getElementById('daily-task-card');
-    document.getElementById('dt-prompt').textContent = task.prompt;
-    document.getElementById('dt-reward').textContent = `💰 +${fmt(task.reward)} коинов за верный ответ`;
-    card.classList.remove('hidden');
-    const status = document.getElementById('dt-status');
-    status.textContent = '';
-    if (task.solved) {
-      status.textContent = '✅ Решено сегодня. Завтра будет новая.';
-      document.getElementById('dt-answer').disabled = true;
-      document.getElementById('dt-submit').disabled = true;
-    } else {
-      document.getElementById('dt-answer').disabled = false;
-      document.getElementById('dt-submit').disabled = false;
-      if (task.attempts > 0) status.textContent = `Попыток: ${task.attempts}/5`;
-    }
-  } catch (e) {
-    console.warn('daily task load', e);
-  }
-}
 
 document.addEventListener('DOMContentLoaded', () => {
-  const submit = document.getElementById('dt-submit');
-  submit?.addEventListener('click', async () => {
-    const answerEl = document.getElementById('dt-answer');
-    const answer = (answerEl?.value || '').trim();
-    if (!answer) return;
-    try {
-      const r = await api('/api/task/answer', { method: 'POST', body: JSON.stringify({ answer }) });
-      const status = document.getElementById('dt-status');
-      if (r.correct && r.reward) {
-        tg?.HapticFeedback?.notificationOccurred?.('success');
-        toast(`🎉 +${fmt(r.reward)} 🪙`);
-        status.textContent = '✅ Решено!';
-        answerEl.disabled = true;
-        submit.disabled = true;
-        state.me.balance = r.new_balance;
-        document.getElementById('balance-display').textContent = fmt(state.me.balance);
-      } else if (r.correct) {
-        status.textContent = '✅ Уже решено';
-      } else {
-        tg?.HapticFeedback?.notificationOccurred?.('error');
-        status.textContent = `❌ Неправильно. Попыток осталось: ${r.attempts_left ?? '?'}`;
-      }
-    } catch (e) {
-      toast(`Ошибка: ${e.message}`);
-    }
-  });
-
   document.querySelectorAll('.game-card').forEach(card => {
     card.addEventListener('click', () => {
       openGameScreen(card.dataset.game);
@@ -629,8 +580,6 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function openGameScreen(gameKey) {
-  // Hide catalog + daily task, show only game play with back button
-  document.getElementById('daily-task-card')?.classList.add('hidden');
   const grid = document.querySelector('.game-grid');
   if (grid) grid.style.display = 'none';
   const area = document.getElementById('game-play-area');
@@ -644,9 +593,7 @@ function openGameScreen(gameKey) {
 function closeGameScreen() {
   const grid = document.querySelector('.game-grid');
   if (grid) grid.style.display = '';
-  document.getElementById('daily-task-card')?.classList.remove('hidden');
   document.getElementById('game-play-area').innerHTML = '';
-  loadDailyTask();  // refresh task state in case solved
 }
 
 function renderGamePlay(game, target) {
@@ -877,12 +824,69 @@ async function onForgeHit(e) {
 
       forgeState.state.particles += r.particles_earned;
       forgeState.state.total_breaks += 1;
-      // Wait for break anim, then refetch state (new weapon spawned server-side)
-      setTimeout(() => renderForge(forgeState.area), 600);
+      updateForgeStatsBar();
+
+      // In-place swap after break anim: fetch new weapon data and just replace
+      // image/name/HP, no full re-render. Keeps scroll position.
+      setTimeout(async () => {
+        try {
+          const fresh = await api('/api/forge/state');
+          forgeState.state = fresh;
+          swapWeaponInPlace(fresh.weapon);
+        } catch (err) {
+          // silent — keep old UI till next hit retry
+        }
+      }, 550);
     }
   } catch (e) {
     toast(e.message);
   }
+}
+
+function swapWeaponInPlace(w) {
+  const img = document.getElementById('weapon-img');
+  if (!img) return;
+  const nameEl = document.querySelector('.forge-weapon-name');
+  const rarityEl = document.querySelector('.forge-weapon-rarity');
+  const glowEl = document.querySelector('.forge-weapon-glow');
+  const hpFill = document.getElementById('hp-fill');
+  const hpText = document.getElementById('hp-text');
+
+  // fade-in new weapon
+  img.classList.remove('breaking', 'hit', 'crit-hit');
+  img.style.opacity = '0';
+  img.style.transform = 'scale(0.6)';
+  img.src = w.image_url || '';
+  // force paint then animate in
+  requestAnimationFrame(() => {
+    img.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
+    img.style.opacity = '1';
+    img.style.transform = '';
+  });
+  if (nameEl) nameEl.innerHTML = `${escape(w.full_name || '—')}${w.stattrak ? ' <span style="color:#ff6633">ST™</span>' : ''}`;
+  if (rarityEl) {
+    rarityEl.textContent = w.rarity || '';
+    rarityEl.style.color = w.rarity_color || '#8b94a7';
+  }
+  if (glowEl) {
+    glowEl.style.background = `radial-gradient(circle, ${w.rarity_color || '#fff'}88, transparent 60%)`;
+  }
+  if (hpFill) {
+    hpFill.classList.remove('low');
+    hpFill.style.width = '100%';
+  }
+  if (hpText) hpText.textContent = `${fmt(w.hp)} / ${fmt(w.max_hp)}`;
+}
+
+function updateForgeStatsBar() {
+  const s = forgeState.state;
+  if (!s) return;
+  // Top particles counter
+  const topEl = document.querySelector('.forge-stat.particles');
+  if (topEl) topEl.textContent = `⚙️ ${fmt(s.particles)}`;
+  // Effects bar breaks counter
+  const bars = document.querySelectorAll('.forge-effects-bar span');
+  if (bars.length >= 4) bars[3].textContent = `Разобрано: ${s.total_breaks}`;
 }
 
 async function onForgeClaimAfk() {
@@ -1330,7 +1334,6 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (target === 'inventory') loadInventory();
     if (target === 'leaderboard') loadLeaderboard();
     if (target === 'home') loadMe();
-    if (target === 'games') loadDailyTask();
     if (target === 'missions') loadMissions();
     if (target === 'achievements') loadAchievements();
     if (target === 'wheel') loadWheel();

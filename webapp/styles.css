@@ -32,6 +32,8 @@ html, body {
   color: var(--text);
   -webkit-font-smoothing: antialiased;
   overscroll-behavior-y: none;
+  /* Prevent double-tap zoom and rubber-band scroll on iOS */
+  touch-action: manipulation;
 }
 
 #app {
@@ -1138,6 +1140,7 @@ h2 {
   position: relative;
   overflow: hidden;
   border-radius: 14px;
+  overscroll-behavior: contain;
 }
 
 .forge-screen::before {
