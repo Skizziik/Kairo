@@ -44,6 +44,7 @@ def _register(dp: Dispatcher) -> None:
         lfg,
         map as map_h,
         me,
+        moderation,
         profile,
         reactions,
         start,
@@ -70,6 +71,7 @@ def _register(dp: Dispatcher) -> None:
         help_h.router,
         whereami.router,
         extract.router,
+        moderation.router,       # /warn /mute /ban / etc.
         tldr.router,
         lfg.router,
         stats.router,
