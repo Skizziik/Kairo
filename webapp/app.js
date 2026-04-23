@@ -39,12 +39,34 @@ async function api(path, options = {}) {
     },
   };
   const url = `${API_BASE}${path}`;
-  const resp = await fetch(url, opts);
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: resp.statusText }));
-    throw new Error(err.detail || `HTTP ${resp.status}`);
+  const maxRetries = 2;
+  let lastErr = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const ctrl = new AbortController();
+      const timeoutId = setTimeout(() => ctrl.abort(), 10000);
+      const resp = await fetch(url, { ...opts, signal: ctrl.signal });
+      clearTimeout(timeoutId);
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        throw new Error(err.detail || `HTTP ${resp.status}`);
+      }
+      return resp.json();
+    } catch (e) {
+      lastErr = e;
+      // Retry only on network-level errors, not on server 4xx/5xx
+      const msg = String(e?.message || e);
+      const isNetwork = msg === 'Failed to fetch' || msg.includes('NetworkError') || e?.name === 'AbortError';
+      if (!isNetwork || attempt === maxRetries) break;
+      await new Promise(r => setTimeout(r, 300 * (attempt + 1)));
+    }
   }
-  return resp.json();
+  // Normalize message so users see something readable
+  const msg = String(lastErr?.message || lastErr);
+  if (msg === 'Failed to fetch' || msg.includes('NetworkError') || msg.includes('aborted')) {
+    throw new Error('Сеть лагает, попробуй ещё раз');
+  }
+  throw lastErr;
 }
 
 // ================= utils =================
@@ -1021,6 +1043,9 @@ function renderForgeExchange(area) {
 async function playCoinflip(side) {
   const bet = parseInt(document.getElementById('cf-bet').value || '0');
   if (bet <= 0) return toast('Поставь сумму');
+  const btns = document.querySelectorAll('[data-side]');
+  if (Array.from(btns).some(b => b.disabled)) return;  // request in flight
+  btns.forEach(b => b.disabled = true);
   try {
     const r = await api('/api/casino/coinflip', { method: 'POST', body: JSON.stringify({ bet, side }) });
     const resEl = document.getElementById('cf-result');
@@ -1034,6 +1059,8 @@ async function playCoinflip(side) {
     document.getElementById('balance-display').textContent = fmt(state.me.balance);
   } catch (e) {
     toast(e.message);
+  } finally {
+    btns.forEach(b => b.disabled = false);
   }
 }
 
@@ -1251,6 +1278,9 @@ async function playCrash() {
   const bet = parseInt(document.getElementById('cr-bet').value || '0');
   const target = parseFloat(document.getElementById('cr-target').value || '0');
   if (bet <= 0 || target < 1.01) return toast('Ставка > 0, таргет >= 1.01');
+  const btn = document.getElementById('cr-play');
+  if (btn?.disabled) return;
+  if (btn) btn.disabled = true;
   try {
     const r = await api('/api/casino/crash', { method: 'POST', body: JSON.stringify({ bet, target_mult: target }) });
     const out = document.getElementById('cr-out');
@@ -1264,6 +1294,8 @@ async function playCrash() {
     document.getElementById('balance-display').textContent = fmt(state.me.balance);
   } catch (e) {
     toast(e.message);
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 
