@@ -1071,6 +1071,345 @@ h2 {
   font-size: 18px;
 }
 
+/* ===== FORGE ===== */
+.forge-screen {
+  background: radial-gradient(circle at center, #1a1d28 0%, #0a0c14 80%);
+  min-height: 80vh;
+  padding: 16px 16px 100px 16px;
+  position: relative;
+  overflow: hidden;
+  border-radius: 14px;
+}
+
+.forge-screen::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 30px 30px;
+  pointer-events: none;
+}
+
+.forge-top {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  position: relative;
+  z-index: 1;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.forge-stat {
+  background: rgba(0,0,0,0.4);
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.forge-stat.particles { color: #7dd3fc; border-color: rgba(125,211,252,0.4); }
+.forge-stat.afk { color: #fde047; border-color: rgba(253,224,71,0.4); }
+.forge-stat.buffer { color: #a78bfa; border-color: rgba(167,139,250,0.4); cursor: pointer; }
+
+.forge-weapon-card {
+  position: relative;
+  z-index: 1;
+  margin: 18px auto;
+  max-width: 360px;
+  padding: 20px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, transparent 100%);
+  border-radius: 18px;
+  text-align: center;
+}
+
+.forge-weapon-name {
+  font-weight: 800;
+  font-size: 18px;
+  margin-bottom: 4px;
+}
+
+.forge-weapon-rarity {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-weight: 700;
+  margin-bottom: 16px;
+}
+
+.forge-weapon-image-wrap {
+  position: relative;
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.forge-weapon-glow {
+  position: absolute;
+  inset: -20%;
+  border-radius: 50%;
+  filter: blur(30px);
+  opacity: 0.4;
+  animation: forgePulse 2s ease-in-out infinite;
+}
+
+@keyframes forgePulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.9); }
+  50% { opacity: 0.55; transform: scale(1); }
+}
+
+.forge-weapon-image {
+  position: relative;
+  max-width: 100%;
+  max-height: 100%;
+  cursor: pointer;
+  user-select: none;
+  filter: drop-shadow(0 8px 30px rgba(0,0,0,0.6));
+  transition: transform 0.05s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.forge-weapon-image.hit { animation: forgeShake 0.15s ease; }
+.forge-weapon-image.crit-hit { animation: forgeShakeHard 0.25s ease; }
+
+@keyframes forgeShake {
+  0% { transform: translate(0, 0) rotate(0); }
+  25% { transform: translate(-4px, 2px) rotate(-1deg); }
+  50% { transform: translate(5px, -1px) rotate(1deg); }
+  75% { transform: translate(-3px, 2px) rotate(-0.5deg); }
+  100% { transform: translate(0, 0) rotate(0); }
+}
+
+@keyframes forgeShakeHard {
+  0% { transform: translate(0, 0) scale(1) rotate(0); }
+  30% { transform: translate(-10px, -3px) scale(1.08) rotate(-3deg); }
+  60% { transform: translate(12px, 3px) scale(1.05) rotate(3deg); }
+  100% { transform: translate(0, 0) scale(1) rotate(0); }
+}
+
+.forge-weapon-image.breaking {
+  animation: forgeBreak 0.5s ease forwards;
+}
+
+@keyframes forgeBreak {
+  0% { transform: scale(1) rotate(0); opacity: 1; }
+  30% { transform: scale(1.15) rotate(8deg); filter: brightness(2); }
+  100% { transform: scale(1.6) rotate(-12deg); opacity: 0; }
+}
+
+.forge-hp-wrap {
+  position: relative;
+  z-index: 1;
+  margin-bottom: 10px;
+}
+
+.forge-hp-bar {
+  height: 14px;
+  background: rgba(0,0,0,0.5);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+}
+
+.forge-hp-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #d32ce6 0%, #eb4b4b 100%);
+  transition: width 0.15s ease;
+  box-shadow: 0 0 10px rgba(235,75,75,0.5);
+}
+
+.forge-hp-fill.low {
+  background: linear-gradient(90deg, #f5b042 0%, #eb4b4b 100%);
+  animation: hpLowPulse 0.8s ease-in-out infinite;
+}
+
+@keyframes hpLowPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.forge-hp-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+}
+
+/* Damage popup that flies up from weapon on tap */
+.dmg-popup {
+  position: absolute;
+  font-weight: 900;
+  font-size: 22px;
+  color: #fff;
+  text-shadow: 0 2px 6px rgba(0,0,0,0.8);
+  pointer-events: none;
+  animation: dmgFly 0.6s ease-out forwards;
+}
+.dmg-popup.crit {
+  color: #fde047;
+  font-size: 32px;
+  text-shadow: 0 0 15px rgba(253,224,71,0.7);
+}
+
+@keyframes dmgFly {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.7); }
+  20% { opacity: 1; transform: translate(0, -10px) scale(1.1); }
+  100% { opacity: 0; transform: translate(0, -90px) scale(1); }
+}
+
+/* Particle dots that fly out on break */
+.particle-dot {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: #7dd3fc;
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(125,211,252,0.9);
+  pointer-events: none;
+  animation: particleFly 0.9s ease-out forwards;
+}
+
+@keyframes particleFly {
+  0% { opacity: 1; transform: translate(0, 0) scale(1); }
+  100% { opacity: 0; transform: translate(var(--dx, 80px), var(--dy, -60px)) scale(0.3); }
+}
+
+.forge-combo {
+  text-align: center;
+  position: relative;
+  z-index: 1;
+  font-size: 13px;
+  color: var(--accent-gold);
+  font-weight: 800;
+  opacity: 0;
+  transition: opacity 0.2s;
+  margin-top: 4px;
+}
+
+.forge-combo.active { opacity: 1; }
+
+.forge-actions {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.forge-actions button {
+  padding: 12px 8px;
+  font-size: 13px;
+}
+
+.forge-effects-bar {
+  position: relative;
+  z-index: 1;
+  background: rgba(0,0,0,0.4);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 14px;
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Upgrade tree screen */
+.forge-tree {
+  padding: 12px 0 100px 0;
+}
+
+.branch-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.branch-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.branch-name { font-weight: 800; font-size: 15px; }
+
+.branch-level-badge {
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.branch-level-badge.maxed {
+  background: var(--accent-gold);
+  color: #0e0f14;
+}
+
+.branch-desc {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+
+.branch-effect {
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.branch-effect b { color: var(--accent-gold); }
+
+.branch-progress {
+  height: 6px;
+  background: var(--bg-elev);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.branch-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-gold) 100%);
+}
+
+.branch-upgrade-btn {
+  width: 100%;
+  padding: 10px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.branch-upgrade-btn.afford {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-gold) 100%);
+  color: #0e0f14;
+  border: 0;
+}
+
+.branch-upgrade-btn.locked {
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  cursor: not-allowed;
+}
+
 /* ===== games / casino ===== */
 .daily-task {
   background: linear-gradient(135deg, rgba(245,176,66,0.1) 0%, rgba(235,75,75,0.05) 100%);

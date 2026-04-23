@@ -422,3 +422,46 @@ async def api_level(user: dict = Depends(require_user)) -> dict:
 async def api_pvp_leaderboard(metric: str = "total_winnings", user: dict = Depends(require_user)) -> list[dict]:
     _ = user
     return await rt.pvp_leaderboard(metric=metric, limit=10)
+
+
+# ================ FORGE ================
+from app.economy import forge as _forge
+
+
+@router.get("/forge/state")
+async def api_forge_state(user: dict = Depends(require_user)) -> dict:
+    return await _forge.get_state(int(user["id"]))
+
+
+@router.post("/forge/hit")
+async def api_forge_hit(user: dict = Depends(require_user)) -> dict:
+    return await _forge.hit(int(user["id"]))
+
+
+@router.post("/forge/claim_afk")
+async def api_forge_claim_afk(user: dict = Depends(require_user)) -> dict:
+    return await _forge.claim_afk(int(user["id"]))
+
+
+class ForgeUpgradeReq(_BM):
+    branch: str
+
+
+@router.post("/forge/upgrade")
+async def api_forge_upgrade(req: ForgeUpgradeReq, user: dict = Depends(require_user)) -> dict:
+    return await _forge.buy_upgrade(int(user["id"]), req.branch)
+
+
+class ForgeExchangeReq(_BM):
+    particles: int
+
+
+@router.post("/forge/exchange")
+async def api_forge_exchange(req: ForgeExchangeReq, user: dict = Depends(require_user)) -> dict:
+    return await _forge.exchange(int(user["id"]), req.particles)
+
+
+@router.get("/forge/tree")
+async def api_forge_tree(user: dict = Depends(require_user)) -> list[dict]:
+    _ = user
+    return _forge.get_branches_info()

@@ -610,7 +610,350 @@ function renderGamePlay(game, target) {
         </p>
       </div>
     `;
+  } else if (game === 'forge') {
+    renderForge(area);
   }
+}
+
+// ======================= FORGE =======================
+
+const forgeState = {
+  state: null,
+  branches: null,
+  pendingHits: 0,
+  lastHitAt: 0,
+  comboCount: 0,
+  comboResetTimer: null,
+  area: null,
+};
+
+async function renderForge(area) {
+  area = area || forgeState.area;
+  if (!area) return;
+  forgeState.area = area;
+  area.innerHTML = `<div class="loader">Загрузка кузницы...</div>`;
+  try {
+    const [state, branches] = await Promise.all([
+      api('/api/forge/state'),
+      forgeState.branches ? Promise.resolve(forgeState.branches) : api('/api/forge/tree'),
+    ]);
+    forgeState.state = state;
+    forgeState.branches = branches;
+    forgePaint(area);
+  } catch (e) {
+    area.innerHTML = `<div class="loader">Ошибка: ${e.message}</div>`;
+  }
+}
+
+function forgePaint(area) {
+  const s = forgeState.state;
+  const w = s.weapon;
+  const hpPct = Math.max(0, (w.hp / w.max_hp) * 100);
+  const lowHp = hpPct < 30;
+  const rarityColor = w.rarity_color || '#8b94a7';
+  const stTag = w.stattrak ? ' <span style="color:#ff6633">ST™</span>' : '';
+
+  area.innerHTML = `
+    <div class="forge-screen">
+      <div class="forge-top">
+        <div class="forge-stat particles">⚙️ ${fmt(s.particles)}</div>
+        <div class="forge-stat afk">⏱ ${s.effects.afk_rate_per_sec}/сек</div>
+        ${s.afk.buffer > 0 ? `<div class="forge-stat buffer" id="afk-claim-btn">📦 ${fmt(s.afk.buffer)} →</div>` : ''}
+      </div>
+
+      <div class="forge-weapon-card">
+        <div class="forge-weapon-name">${escape(w.full_name || '—')}${stTag}</div>
+        <div class="forge-weapon-rarity" style="color:${rarityColor}">${escape(w.rarity || '')}</div>
+        <div class="forge-weapon-image-wrap" id="weapon-wrap">
+          <div class="forge-weapon-glow" style="background: radial-gradient(circle, ${rarityColor}88, transparent 60%)"></div>
+          <img class="forge-weapon-image" id="weapon-img" src="${w.image_url || ''}" alt="" draggable="false" />
+        </div>
+        <div class="forge-hp-wrap">
+          <div class="forge-hp-bar">
+            <div class="forge-hp-fill ${lowHp ? 'low' : ''}" id="hp-fill" style="width:${hpPct}%"></div>
+            <div class="forge-hp-text" id="hp-text">${fmt(w.hp)} / ${fmt(w.max_hp)}</div>
+          </div>
+        </div>
+        <div class="forge-combo" id="combo-indicator"></div>
+      </div>
+
+      <div class="forge-effects-bar">
+        <span>⚒ ${s.effects.damage} dmg</span>
+        <span>🎯 ${s.effects.crit_chance}% crit</span>
+        <span>🍀 +${s.effects.luck_bonus_pct}%</span>
+        <span>Разобрано: ${s.total_breaks}</span>
+      </div>
+
+      <div class="forge-actions">
+        <button class="btn secondary" id="forge-upgrades-btn">🛠 Апгрейды</button>
+        <button class="btn" id="forge-exchange-btn" style="background:linear-gradient(135deg,#7dd3fc 0%,#a78bfa 100%);color:#0a0c14;border:0;font-weight:800">💱 Обменять на 🪙</button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('weapon-img').addEventListener('click', onForgeHit);
+  document.getElementById('forge-upgrades-btn').addEventListener('click', () => renderForgeUpgrades(area));
+  document.getElementById('forge-exchange-btn').addEventListener('click', () => renderForgeExchange(area));
+  document.getElementById('afk-claim-btn')?.addEventListener('click', onForgeClaimAfk);
+}
+
+async function onForgeHit(e) {
+  const now = Date.now();
+  if (now - forgeState.lastHitAt < 75) return;  // visual anti-double
+  forgeState.lastHitAt = now;
+
+  const img = document.getElementById('weapon-img');
+  const wrap = document.getElementById('weapon-wrap');
+  if (!img) return;
+
+  // Combo logic (purely visual)
+  forgeState.comboCount += 1;
+  const comboEl = document.getElementById('combo-indicator');
+  if (comboEl && forgeState.comboCount >= 10) {
+    comboEl.textContent = `🔥 COMBO x${forgeState.comboCount}`;
+    comboEl.classList.add('active');
+  }
+  clearTimeout(forgeState.comboResetTimer);
+  forgeState.comboResetTimer = setTimeout(() => {
+    forgeState.comboCount = 0;
+    if (comboEl) comboEl.classList.remove('active');
+  }, 1500);
+
+  try {
+    const r = await api('/api/forge/hit', { method: 'POST' });
+    if (!r.ok) return;
+
+    tg?.HapticFeedback?.impactOccurred?.(r.crit ? 'heavy' : 'light');
+
+    // Shake animation
+    img.classList.remove('hit', 'crit-hit');
+    void img.offsetWidth;  // reflow
+    img.classList.add(r.crit ? 'crit-hit' : 'hit');
+
+    // Damage popup
+    const popup = document.createElement('div');
+    popup.className = 'dmg-popup' + (r.crit ? ' crit' : '');
+    popup.textContent = r.crit ? `CRIT -${r.damage}` : `-${r.damage}`;
+    const rect = wrap.getBoundingClientRect();
+    const imgRect = img.getBoundingClientRect();
+    popup.style.left = (imgRect.left - rect.left + imgRect.width * 0.5 + (Math.random()*60-30)) + 'px';
+    popup.style.top = (imgRect.top - rect.top + imgRect.height * 0.3) + 'px';
+    wrap.appendChild(popup);
+    setTimeout(() => popup.remove(), 600);
+
+    // HP bar update
+    forgeState.state.weapon.hp = r.new_hp;
+    const hpFill = document.getElementById('hp-fill');
+    const hpText = document.getElementById('hp-text');
+    const pct = Math.max(0, (r.new_hp / forgeState.state.weapon.max_hp) * 100);
+    if (hpFill) {
+      hpFill.style.width = pct + '%';
+      hpFill.classList.toggle('low', pct < 30);
+    }
+    if (hpText) hpText.textContent = `${fmt(r.new_hp)} / ${fmt(forgeState.state.weapon.max_hp)}`;
+
+    if (r.broken) {
+      // Explosion: breaking animation + particles flying out
+      img.classList.add('breaking');
+      tg?.HapticFeedback?.notificationOccurred?.('success');
+      for (let i = 0; i < 16; i++) {
+        const dot = document.createElement('div');
+        dot.className = 'particle-dot';
+        const imgRect = img.getBoundingClientRect();
+        const rect = wrap.getBoundingClientRect();
+        dot.style.left = (imgRect.left - rect.left + imgRect.width * 0.5) + 'px';
+        dot.style.top = (imgRect.top - rect.top + imgRect.height * 0.5) + 'px';
+        const angle = (Math.PI * 2 / 16) * i;
+        const distance = 80 + Math.random() * 80;
+        dot.style.setProperty('--dx', Math.cos(angle) * distance + 'px');
+        dot.style.setProperty('--dy', Math.sin(angle) * distance + 'px');
+        wrap.appendChild(dot);
+        setTimeout(() => dot.remove(), 900);
+      }
+      // Particles earned popup (center)
+      const bigPop = document.createElement('div');
+      bigPop.className = 'dmg-popup crit';
+      bigPop.style.color = '#7dd3fc';
+      bigPop.textContent = `+${fmt(r.particles_earned)} ⚙️`;
+      bigPop.style.left = '50%';
+      bigPop.style.top = '50%';
+      bigPop.style.transform = 'translate(-50%, -50%)';
+      wrap.appendChild(bigPop);
+      setTimeout(() => bigPop.remove(), 600);
+
+      forgeState.state.particles += r.particles_earned;
+      forgeState.state.total_breaks += 1;
+      // Wait for break anim, then refetch state (new weapon spawned server-side)
+      setTimeout(() => renderForge(forgeState.area), 600);
+    }
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function onForgeClaimAfk() {
+  try {
+    const r = await api('/api/forge/claim_afk', { method: 'POST' });
+    if (r.ok && r.claimed > 0) {
+      tg?.HapticFeedback?.notificationOccurred?.('success');
+      toast(`+${fmt(r.claimed)} ⚙️ из AFK`);
+      await renderForge(forgeState.area);
+    }
+  } catch (e) { toast(e.message); }
+}
+
+function renderForgeUpgrades(area) {
+  const s = forgeState.state;
+  const branches = forgeState.branches;
+
+  area.innerHTML = `
+    <button class="back-btn" id="upgrades-back">← к кузнице</button>
+    <div class="forge-tree" id="forge-tree-list"></div>
+  `;
+
+  const list = document.getElementById('forge-tree-list');
+  list.innerHTML = branches.map(b => {
+    const level = s.levels[b.key] || 0;
+    const isLocked = ['silver', 'gold', 'global'].includes(b.key) && level < 0;
+    const isMaxed = level >= b.max_level && !isLocked;
+    let nextTier = null;
+    let nextCost = null;
+    let nextEffect = null;
+    if (isLocked) {
+      nextCost = b.unlock_cost;
+      nextEffect = 'unlock';
+    } else if (!isMaxed) {
+      nextTier = b.tiers[level];
+      if (nextTier) {
+        nextCost = nextTier.cost;
+        nextEffect = nextTier.effect;
+      }
+    }
+    const canAfford = nextCost !== null && s.particles >= nextCost;
+    const progressPct = isMaxed ? 100 : (level / b.max_level) * 100;
+    return `
+      <div class="branch-card">
+        <div class="branch-head">
+          <div class="branch-name">${escape(b.name)}</div>
+          <div class="branch-level-badge ${isMaxed ? 'maxed' : ''}">
+            ${isLocked ? '🔒' : `${level} / ${b.max_level}`}
+          </div>
+        </div>
+        <div class="branch-desc">${escape(b.description)}</div>
+        ${!isMaxed && !isLocked ? `
+          <div class="branch-effect">
+            Сейчас: <b>${forgeEffectLabel(b.key, level)}</b>
+            → ${forgeEffectLabel(b.key, level + 1)}
+          </div>` : ''}
+        ${isLocked ? `<div class="branch-effect">Разблокировать за ${fmt(b.unlock_cost)} ⚙️</div>` : ''}
+        ${isMaxed ? `<div class="branch-effect" style="color:var(--accent-gold)">МАКС УРОВЕНЬ — эффект <b>${forgeEffectLabel(b.key, level)}</b></div>` : ''}
+        <div class="branch-progress"><div class="branch-progress-fill" style="width:${progressPct}%"></div></div>
+        ${(isMaxed) ? '' : `
+          <button class="btn branch-upgrade-btn ${canAfford ? 'afford' : 'locked'}" data-branch="${b.key}" ${canAfford ? '' : 'disabled'}>
+            ${isLocked ? '🔓 Разблокировать' : '⬆ Прокачать'} · ${fmt(nextCost)} ⚙️
+          </button>`}
+      </div>
+    `;
+  }).join('');
+
+  document.getElementById('upgrades-back').addEventListener('click', () => forgePaint(area));
+
+  list.querySelectorAll('[data-branch]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      try {
+        const r = await api('/api/forge/upgrade', { method: 'POST', body: JSON.stringify({ branch: btn.dataset.branch }) });
+        if (r.ok) {
+          tg?.HapticFeedback?.notificationOccurred?.('success');
+          toast(r.unlocked ? `🔓 Разблокирован ${btn.dataset.branch}` : `⬆ Прокачка! ${fmt(r.cost)} ⚙️ снято`);
+          const s2 = await api('/api/forge/state');
+          forgeState.state = s2;
+          renderForgeUpgrades(area);
+        } else {
+          toast(r.error || 'Не удалось');
+        }
+      } catch (e) { toast(e.message); }
+    });
+  });
+}
+
+function forgeEffectLabel(branchKey, level) {
+  const lvl = Math.max(0, Math.min(level, 15));
+  if (branchKey === 'damage') {
+    const table = [1, 2, 3, 5, 8, 12, 18, 27, 40, 60, 90, 130, 180, 240, 300, 400];
+    return `${table[lvl] ?? table[table.length - 1]} урон`;
+  }
+  if (branchKey === 'crit') {
+    const table = [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15];
+    return `${table[Math.min(lvl, 10)]}% шанс`;
+  }
+  if (branchKey === 'luck') {
+    const table = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50];
+    return `+${table[Math.min(lvl, 10)]}% particles`;
+  }
+  if (branchKey === 'offline_cap') {
+    const table = [8, 10, 12, 16, 20];
+    return `${table[Math.min(lvl, 4)]} ч`;
+  }
+  if (branchKey === 'silver') {
+    const table = [0.2, 0.30, 0.45, 0.60, 0.75, 0.90, 1.05, 1.20, 1.35, 1.50, 1.70];
+    return `${table[Math.min(lvl, 10)]}/сек`;
+  }
+  if (branchKey === 'gold') {
+    const table = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0];
+    return `${table[Math.min(lvl, 10)]}/сек`;
+  }
+  if (branchKey === 'global') {
+    const table = [4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 17.0, 18.0, 19.0, 20.0];
+    return `${table[Math.min(lvl, 10)]}/сек`;
+  }
+  return '';
+}
+
+function renderForgeExchange(area) {
+  const s = forgeState.state;
+  area.innerHTML = `
+    <button class="back-btn" id="ex-back">← к кузнице</button>
+    <div class="game-play">
+      <h3>💱 Обмен particles → coins</h3>
+      <p style="color:var(--text-dim); font-size:13px; margin-bottom:16px">
+        Курс: 10 ⚙️ = 1 🪙. У тебя сейчас <b>${fmt(s.particles)}</b> ⚙️.
+      </p>
+      <label>Сколько particles обменять</label>
+      <input type="number" id="ex-amount" min="10" max="${s.particles}" step="10" value="${Math.min(s.particles, 1000)}" />
+      <div style="font-size:13px; margin-bottom:12px; color:var(--accent-gold)">
+        Получишь: <b id="ex-preview">${Math.floor(Math.min(s.particles, 1000) / 10)}</b> 🪙
+      </div>
+      <button class="btn big-btn daily-btn" id="ex-btn">Обменять</button>
+    </div>
+  `;
+
+  document.getElementById('ex-back').addEventListener('click', () => forgePaint(area));
+
+  const input = document.getElementById('ex-amount');
+  const preview = document.getElementById('ex-preview');
+  input.addEventListener('input', () => {
+    const v = parseInt(input.value || '0');
+    preview.textContent = Math.floor(v / 10);
+  });
+
+  document.getElementById('ex-btn').addEventListener('click', async () => {
+    const amount = parseInt(input.value || '0');
+    if (amount < 10) return toast('Минимум 10 ⚙️');
+    try {
+      const r = await api('/api/forge/exchange', { method: 'POST', body: JSON.stringify({ particles: amount }) });
+      if (r.ok) {
+        tg?.HapticFeedback?.notificationOccurred?.('success');
+        toast(`+${fmt(r.coins)} 🪙`);
+        state.me.balance = r.new_balance;
+        document.getElementById('balance-display').textContent = fmt(state.me.balance);
+        const s2 = await api('/api/forge/state');
+        forgeState.state = s2;
+        forgePaint(area);
+      } else {
+        toast(r.error || 'Ошибка');
+      }
+    } catch (e) { toast(e.message); }
+  });
 }
 
 async function playCoinflip(side) {
