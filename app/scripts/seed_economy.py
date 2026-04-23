@@ -39,15 +39,16 @@ RARITY_COLOR = {
     "exceedingly_rare": "#E4AE39",
 }
 
-# Median price per tier in coins. Individual items randomized around.
+# Median price per tier in coins. Calibrated so standard-weighted case opens
+# have ~50% expected return (classic house edge).
 PRICE_ANCHOR = {
-    "consumer": 15,
-    "industrial": 100,
-    "mil-spec": 500,
-    "restricted": 2500,
-    "classified": 12000,
-    "covert": 60000,
-    "exceedingly_rare": 400000,
+    "consumer": 8,
+    "industrial": 25,
+    "mil-spec": 50,
+    "restricted": 250,
+    "classified": 1200,
+    "covert": 5500,
+    "exceedingly_rare": 35000,
 }
 
 # Weapon categories for filtering case loot pools.
@@ -176,6 +177,13 @@ async def _insert_catalog(skins: list[dict]) -> int:
     return inserted
 
 
+# Real CS2 case PNGs from Steam CDN — used as decorative box art for our custom cases.
+CASE_IMAGE_REVOLUTION = "https://community.akamai.steamstatic.com/economy/image/i0CoZ81Ui0m-9KwlBY1L_18myuGuq1wfhWSaZgMttyVfPaERSR0Wqmu7LAocGJKz2lu_XsnXwtmkJjSU91dh8bj35VTqVBP4io_frnAVvfb6aqduc_TFVjTCxbx05OU4S3jilE9w4DzRnImtIy2Sa1JzDJEhRPlK7EcO4U8gfA"
+CASE_IMAGE_DREAMS = "https://community.akamai.steamstatic.com/economy/image/i0CoZ81Ui0m-9KwlBY1L_18myuGuq1wfhWSaZgMttyVfPaERSR0Wqmu7LAocGJKz2lu_XsnXwtmkJjSU91dh8bj35VTqVBP4io_frnIV7Kb5OaU-JqfHDzXFle0u4LY8Gy_kkRgisGzcm4v4J3vDOAQmDMdyRvlK7EcmeCU3yw"
+CASE_IMAGE_PRISMA2 = "https://community.akamai.steamstatic.com/economy/image/i0CoZ81Ui0m-9KwlBY1L_18myuGuq1wfhWSaZgMttyVfPaERSR0Wqmu7LAocGJKz2lu_XsnXwtmkJjSU91dh8bj35VTqVBP4io_fr3cV6vT9avBvefWWDDGTxbZ14rhsTX7qkE90sDiHwt2pdC-TblJ2DsB1QPlK7Ee9riHKAA"
+CASE_IMAGE_SNAKEBITE = "https://community.akamai.steamstatic.com/economy/image/i0CoZ81Ui0m-9KwlBY1L_18myuGuq1wfhWSaZgMttyVfPaERSR0Wqmu7LAocGJKz2lu_XsnXwtmkJjSU91dh8bj35VTqVBP4io_fr3oVvvT4bfI4dvTLCGTCmLl16ec7TX_mk08k42iHwtqscy-WPVUmCZJ4R_lK7EcmeCU3yw"
+CASE_IMAGE_KILOWATT = "https://community.akamai.steamstatic.com/economy/image/i0CoZ81Ui0m-9KwlBY1L_18myuGuq1wfhWSaZgMttyVfPaERSR0Wqmu7LAocGJKz2lu_XsnXwtmkJjSU91dh8bj35VTqVBP4io_frnEVvqf_a6VoIfGSXz7Hlbwg57QwSS_mxhl15jiGyN37c3_GZw91W8BwRflK7EfKsa2sfw"
+
 # Case definitions — lookup items by weapon category at insert time.
 CASE_DEFS = [
     {
@@ -185,6 +193,7 @@ CASE_DEFS = [
         "price": 300,
         "weapon_set": RIFLES,
         "rarity_weights": {"mil-spec": 0.60, "restricted": 0.28, "classified": 0.09, "covert": 0.028, "exceedingly_rare": 0.002},
+        "image_url": CASE_IMAGE_REVOLUTION,
     },
     {
         "key": "lera_golova",
@@ -193,6 +202,7 @@ CASE_DEFS = [
         "price": 750,
         "weapon_set": SNIPERS,
         "rarity_weights": {"mil-spec": 0.50, "restricted": 0.30, "classified": 0.13, "covert": 0.06, "exceedingly_rare": 0.01},
+        "image_url": CASE_IMAGE_DREAMS,
     },
     {
         "key": "masha_yu_know",
@@ -201,6 +211,7 @@ CASE_DEFS = [
         "price": 150,
         "weapon_set": PISTOLS,
         "rarity_weights": {"mil-spec": 0.70, "restricted": 0.22, "classified": 0.06, "covert": 0.018, "exceedingly_rare": 0.002},
+        "image_url": CASE_IMAGE_PRISMA2,
     },
     {
         "key": "melkiy",
@@ -209,6 +220,7 @@ CASE_DEFS = [
         "price": 200,
         "weapon_set": SMGS | HEAVY,
         "rarity_weights": {"mil-spec": 0.65, "restricted": 0.25, "classified": 0.08, "covert": 0.018, "exceedingly_rare": 0.002},
+        "image_url": CASE_IMAGE_SNAKEBITE,
     },
     {
         "key": "rip",
@@ -217,6 +229,7 @@ CASE_DEFS = [
         "price": 5000,
         "weapon_set": None,  # all weapons allowed
         "rarity_weights": {"restricted": 0.40, "classified": 0.35, "covert": 0.20, "exceedingly_rare": 0.05},
+        "image_url": CASE_IMAGE_KILOWATT,
     },
 ]
 
@@ -272,6 +285,7 @@ async def _insert_cases() -> int:
                     name = excluded.name,
                     description = excluded.description,
                     price = excluded.price,
+                    image_url = excluded.image_url,
                     loot_pool = excluded.loot_pool,
                     stat_trak_chance = excluded.stat_trak_chance
                 """,
@@ -279,7 +293,7 @@ async def _insert_cases() -> int:
                 case["name"],
                 case["description"],
                 int(case["price"]),
-                None,  # image_url — placeholder, later can be added
+                case.get("image_url"),
                 _json.dumps(loot_pool),
                 0.05,
             )
@@ -287,10 +301,32 @@ async def _insert_cases() -> int:
     return inserted
 
 
+async def _reprice_catalog() -> int:
+    """Recompute base_price for existing catalog entries to match current PRICE_ANCHOR."""
+    updated = 0
+    async with pool().acquire() as conn:
+        rows = await conn.fetch("select id, rarity, category from economy_skins_catalog")
+        for r in rows:
+            rarity = r["rarity"]
+            is_kg = r["category"] in ("knife", "gloves")
+            new_price = _price_for(rarity, is_kg)
+            await conn.execute(
+                "update economy_skins_catalog set base_price = $2 where id = $1",
+                int(r["id"]), new_price,
+            )
+            updated += 1
+    return updated
+
+
 async def run_seed(force: bool = False) -> dict:
     existing = await _catalog_count()
     if existing > 0 and not force:
-        return {"status": "already_seeded", "catalog_size": existing}
+        # Idempotent mode: keep skins but refresh case definitions (names/images/loot)
+        # and rebalance catalog prices to current PRICE_ANCHOR.
+        log.info("catalog already seeded (%d items); updating cases + reprice", existing)
+        repriced = await _reprice_catalog()
+        cases = await _insert_cases()
+        return {"status": "refreshed", "catalog_size": existing, "cases": cases, "repriced": repriced}
     log.info("fetching CSGO-API skins...")
     all_skins = await _fetch_skins()
     log.info("got %d skins from api", len(all_skins))

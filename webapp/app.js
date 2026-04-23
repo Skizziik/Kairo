@@ -203,13 +203,19 @@ async function openCasePreview(caseId) {
         <div class="case-preview-desc">${escape(data.description || '')}</div>
       </div>
       <div class="case-preview-items">
-        ${data.items.slice(0, 40).map(it => `
-          <div class="item-card rarity-${it.rarity}">
-            <img class="item-card-img" src="${it.image_url}" alt="${escape(it.name)}" loading="lazy" />
-            <div class="item-card-name">${escape(it.name)}</div>
-            <div class="item-card-price">≈ ${fmt(it.base_price)} 🪙</div>
+        ${data.items.slice(0, 60).map(it => {
+          const parts = (it.name || '').split('|').map(s => s.trim());
+          const weapon = parts[0] || '';
+          const skin = parts[1] || it.name;
+          return `
+          <div class="item-card rarity-${it.rarity}" title="${escape(it.name)}">
+            <img class="item-card-img" src="${it.image_url}" alt="" loading="lazy" />
+            <div class="item-card-weapon">${escape(weapon)}</div>
+            <div class="item-card-name">${escape(skin)}</div>
+            <div class="item-card-price">${fmt(it.base_price)} 🪙</div>
           </div>
-        `).join('')}
+          `;
+        }).join('')}
       </div>
       <div class="open-case-fixed">
         <button class="btn big-btn daily-btn" id="case-preview-open-btn">
