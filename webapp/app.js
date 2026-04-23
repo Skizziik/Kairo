@@ -366,6 +366,7 @@ async function openCase(caseId) {
 }
 
 const invFilter = { rarity: '', sort: 'price_desc' };
+const invSelection = { active: false, ids: new Set() };
 
 function _sortInventory(items) {
   const copy = items.slice();
@@ -401,8 +402,12 @@ function renderInventory() {
     return;
   }
 
-  grid.innerHTML = filtered.map(it => `
-    <div class="inv-item rarity-${it.rarity}" data-inv-id="${it.id}">
+  grid.classList.toggle('inv-grid-select', invSelection.active);
+  grid.innerHTML = filtered.map(it => {
+    const selected = invSelection.ids.has(it.id) ? 'selected' : '';
+    return `
+    <div class="inv-item rarity-${it.rarity} ${selected}" data-inv-id="${it.id}">
+      <div class="sel-check"></div>
       ${it.stat_trak ? '<div class="stattrak-badge">ST™</div>' : ''}
       <img class="inv-item-img" src="${it.image_url}" alt="" loading="lazy" />
       <div class="inv-item-weapon">${escape(it.weapon)}</div>
@@ -410,12 +415,79 @@ function renderInventory() {
       <div class="inv-item-wear">${it.wear_short} · ${it.float.toFixed(3)}</div>
       <div class="inv-item-price">${fmt(it.price)} 🪙</div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 
   grid.querySelectorAll('.inv-item').forEach(card => {
-    card.addEventListener('click', () => showItemDetail(parseInt(card.dataset.invId)));
+    card.addEventListener('click', () => {
+      const id = parseInt(card.dataset.invId);
+      if (invSelection.active) {
+        if (invSelection.ids.has(id)) invSelection.ids.delete(id);
+        else invSelection.ids.add(id);
+        updateBulkBar();
+        renderInventory();
+      } else {
+        showItemDetail(id);
+      }
+    });
   });
 }
+
+function updateBulkBar() {
+  const bar = document.getElementById('inv-bulk-bar');
+  const cntEl = document.getElementById('inv-sel-count');
+  if (!bar) return;
+  bar.classList.toggle('hidden', !invSelection.active);
+  if (cntEl) cntEl.textContent = invSelection.ids.size;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('inv-select-mode')?.addEventListener('click', () => {
+    invSelection.active = !invSelection.active;
+    if (!invSelection.active) invSelection.ids.clear();
+    document.getElementById('inv-select-mode').textContent = invSelection.active ? 'Готово' : 'Выбрать';
+    document.getElementById('inv-select-mode').classList.toggle('active', invSelection.active);
+    updateBulkBar();
+    renderInventory();
+  });
+  document.getElementById('inv-bulk-cancel')?.addEventListener('click', () => {
+    invSelection.active = false;
+    invSelection.ids.clear();
+    document.getElementById('inv-select-mode').textContent = 'Выбрать';
+    document.getElementById('inv-select-mode').classList.remove('active');
+    updateBulkBar();
+    renderInventory();
+  });
+  document.getElementById('inv-bulk-all')?.addEventListener('click', () => {
+    if (!state.inventory) return;
+    state.inventory.items.forEach(it => invSelection.ids.add(it.id));
+    updateBulkBar();
+    renderInventory();
+  });
+  document.getElementById('inv-bulk-sell')?.addEventListener('click', async () => {
+    if (invSelection.ids.size === 0) return toast('Ничего не выбрано');
+    const ids = Array.from(invSelection.ids);
+    const totalPrice = (state.inventory?.items || [])
+      .filter(i => invSelection.ids.has(i.id))
+      .reduce((sum, i) => sum + Math.round(i.price * 0.7), 0);
+    if (!confirm(`Продать ${ids.length} предметов за ~${fmt(totalPrice)} 🪙?`)) return;
+    try {
+      const r = await api('/api/sell_bulk', { method: 'POST', body: JSON.stringify({ inventory_ids: ids }) });
+      if (r.ok) {
+        tg?.HapticFeedback?.notificationOccurred?.('success');
+        toast(`✅ Продано ${r.sold_count}. +${fmt(r.payout)} 🪙`);
+        state.me.balance = r.new_balance;
+        document.getElementById('balance-display').textContent = fmt(state.me.balance);
+        invSelection.ids.clear();
+        invSelection.active = false;
+        document.getElementById('inv-select-mode').textContent = 'Выбрать';
+        document.getElementById('inv-select-mode').classList.remove('active');
+        updateBulkBar();
+        await loadInventory();
+      }
+    } catch (e) { toast(e.message); }
+  });
+});
 
 // Wire filter controls once DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
@@ -877,36 +949,26 @@ function renderForgeUpgrades(area) {
 }
 
 function forgeEffectLabel(branchKey, level) {
-  const lvl = Math.max(0, Math.min(level, 15));
-  if (branchKey === 'damage') {
-    const table = [1, 2, 3, 5, 8, 12, 18, 27, 40, 60, 90, 130, 180, 240, 300, 400];
-    return `${table[lvl] ?? table[table.length - 1]} урон`;
+  const branch = (forgeState.branches || []).find(b => b.key === branchKey);
+  if (!branch) return '';
+  const baseLabels = {
+    damage: { base: 1, suffix: ' урон' },
+    crit: { base: 0, suffix: '% шанс' },
+    luck: { base: 0, suffix: '% particles', prefix: '+' },
+    offline_cap: { base: 8, suffix: ' ч' },
+    silver: { base: 0.3, suffix: '/сек', decimals: 2 },
+    gold: { base: 1.0, suffix: '/сек', decimals: 1 },
+    global: { base: 4.0, suffix: '/сек', decimals: 1 },
+  };
+  const conf = baseLabels[branchKey] || { base: 0, suffix: '' };
+  let value;
+  if (level <= 0) value = conf.base;
+  else {
+    const idx = Math.min(level, branch.tiers.length) - 1;
+    value = branch.tiers[idx].effect;
   }
-  if (branchKey === 'crit') {
-    const table = [0, 1, 2, 3, 4, 5, 7, 9, 11, 13, 15];
-    return `${table[Math.min(lvl, 10)]}% шанс`;
-  }
-  if (branchKey === 'luck') {
-    const table = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50];
-    return `+${table[Math.min(lvl, 10)]}% particles`;
-  }
-  if (branchKey === 'offline_cap') {
-    const table = [8, 10, 12, 16, 20];
-    return `${table[Math.min(lvl, 4)]} ч`;
-  }
-  if (branchKey === 'silver') {
-    const table = [0.2, 0.30, 0.45, 0.60, 0.75, 0.90, 1.05, 1.20, 1.35, 1.50, 1.70];
-    return `${table[Math.min(lvl, 10)]}/сек`;
-  }
-  if (branchKey === 'gold') {
-    const table = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0];
-    return `${table[Math.min(lvl, 10)]}/сек`;
-  }
-  if (branchKey === 'global') {
-    const table = [4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 17.0, 18.0, 19.0, 20.0];
-    return `${table[Math.min(lvl, 10)]}/сек`;
-  }
-  return '';
+  if (conf.decimals !== undefined) value = value.toFixed(conf.decimals);
+  return `${conf.prefix || ''}${value}${conf.suffix}`;
 }
 
 function renderForgeExchange(area) {

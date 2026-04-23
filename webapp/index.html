@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>RIP Casino</title>
   <link rel="stylesheet" href="./styles.css" />
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -105,7 +105,10 @@
 
       <!-- view: inventory -->
       <section class="view" data-view="inventory">
-        <h2>🎒 Инвентарь</h2>
+        <div class="inv-header">
+          <h2 style="margin:0">🎒 Инвентарь</h2>
+          <button id="inv-select-mode" class="chip">Выбрать</button>
+        </div>
         <div class="inv-summary">
           <span>Предметов: <b id="inv-count">0</b></span>
           <span>Стоимость: <b id="inv-value">0</b> 🪙</span>
@@ -131,6 +134,11 @@
         </div>
         <div id="inventory-grid" class="inventory-grid">
           <div class="loader">Загрузка...</div>
+        </div>
+        <div id="inv-bulk-bar" class="inv-bulk-bar hidden">
+          <button class="btn secondary" id="inv-bulk-cancel">Отмена</button>
+          <button class="btn" id="inv-bulk-all">Все</button>
+          <button class="btn daily-btn" id="inv-bulk-sell">Продать (<span id="inv-sel-count">0</span>)</button>
         </div>
       </section>
 

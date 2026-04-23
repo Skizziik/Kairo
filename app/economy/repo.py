@@ -331,6 +331,47 @@ async def leaderboard_rich(limit: int = 10) -> list[dict]:
 DEALER_PRICE_FRACTION = 0.7  # sell = 70% of listed price
 
 
+async def sell_bulk_to_dealer(user_id: int, inventory_ids: list[int]) -> dict:
+    """Sell many items in one atomic transaction. Returns total payout + count."""
+    if not inventory_ids:
+        return {"ok": False, "error": "Empty list"}
+    unique_ids = list({int(x) for x in inventory_ids})
+    total_payout = 0
+    sold_count = 0
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            rows = await conn.fetch(
+                "select id, price, locked from economy_inventory "
+                "where id = any($1::bigint[]) and user_id = $2 for update",
+                unique_ids, user_id,
+            )
+            to_delete = []
+            for r in rows:
+                if r["locked"]:
+                    continue
+                to_delete.append(int(r["id"]))
+                total_payout += int(round(int(r["price"]) * DEALER_PRICE_FRACTION))
+                sold_count += 1
+            if not to_delete:
+                return {"ok": False, "error": "Nothing to sell"}
+            await conn.execute(
+                "delete from economy_inventory where id = any($1::bigint[])",
+                to_delete,
+            )
+            new_bal_row = await conn.fetchrow(
+                "update economy_users set balance = balance + $2, total_earned = total_earned + $2 "
+                "where tg_id = $1 returning balance",
+                user_id, total_payout,
+            )
+            new_bal = int(new_bal_row["balance"])
+            await conn.execute(
+                "insert into economy_transactions (user_id, amount, kind, reason, balance_after) "
+                "values ($1, $2, 'sell_bulk', $3, $4)",
+                user_id, total_payout, f"{sold_count} items", new_bal,
+            )
+    return {"ok": True, "payout": total_payout, "sold_count": sold_count, "new_balance": new_bal}
+
+
 async def sell_to_dealer(user_id: int, inventory_id: int) -> dict:
     """Sell item to bot dealer. Returns payout."""
     async with pool().acquire() as conn:

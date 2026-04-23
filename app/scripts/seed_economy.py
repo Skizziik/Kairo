@@ -225,10 +225,11 @@ CASE_DEFS = [
     {
         "key": "rip",
         "name": "RIP",
-        "description": "Легенда для легенд. Только топ-рарности + шанс выбить нож. Цена кусается.",
+        "description": "Легенда для легенд. Сочная рарность, шанс выбить нож. Цена кусается, но лут оправдывает.",
         "price": 5000,
         "weapon_set": None,  # all weapons allowed
-        "rarity_weights": {"restricted": 0.40, "classified": 0.35, "covert": 0.20, "exceedingly_rare": 0.05},
+        # Higher covert + exceedingly_rare chance so RIP feels rewarding.
+        "rarity_weights": {"restricted": 0.25, "classified": 0.35, "covert": 0.30, "exceedingly_rare": 0.10},
         "image_url": CASE_IMAGE_KILOWATT,
     },
 ]

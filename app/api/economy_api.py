@@ -218,6 +218,21 @@ async def api_sell(req: SellReq, user: dict = Depends(require_user)) -> dict:
     return result
 
 
+class BulkSellReq(BaseModel):
+    inventory_ids: list[int]
+
+
+@router.post("/sell_bulk")
+async def api_sell_bulk(req: BulkSellReq, user: dict = Depends(require_user)) -> dict:
+    tg_id = int(user["id"])
+    if not req.inventory_ids:
+        raise HTTPException(status_code=400, detail="empty list")
+    result = await eco.sell_bulk_to_dealer(tg_id, req.inventory_ids)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error"))
+    return result
+
+
 # ============ upgrade ============
 class UpgradeReq(BaseModel):
     inventory_id: int = Field(..., ge=1)

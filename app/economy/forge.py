@@ -70,17 +70,19 @@ async def _refresh_skin_pools() -> None:
         rows = await conn.fetch(
             "select id, weapon, rarity, category from economy_skins_catalog where active"
         )
+    # Separate knives/gloves from regular weapons so Golden tier (covert-only)
+    # doesn't accidentally include knives/gloves.
     by_weapon: dict[tuple[str, str], list[int]] = {}
     knives: list[int] = []
     gloves: list[int] = []
     for r in rows:
-        weapon = r["weapon"]
-        rarity = r["rarity"]
-        by_weapon.setdefault((weapon, rarity), []).append(int(r["id"]))
         if r["category"] == "knife":
             knives.append(int(r["id"]))
-        elif r["category"] == "gloves":
+            continue
+        if r["category"] == "gloves":
             gloves.append(int(r["id"]))
+            continue
+        by_weapon.setdefault((r["weapon"], r["rarity"]), []).append(int(r["id"]))
 
     pools: dict[str, list[int]] = {k: [] for k in TIER_CONFIG}
     for tier_key, cfg in TIER_CONFIG.items():
@@ -121,69 +123,92 @@ def _roll_tier() -> str:
 
 # For each branch: list of (level_reached_after_buy, effect_value, cost_particles)
 # Level 0 = base state (no upgrade bought).
-DAMAGE_TIERS = [
-    (1, 2,   30),   (2, 3,   80),   (3, 5,   200),   (4, 8,   500),  (5, 12,  1000),
-    (6, 18,  2000), (7, 27,  4000), (8, 40,  8000),  (9, 60,  16000),(10, 90, 35000),
-    (11, 130,70000),(12,180, 140000),(13,240, 280000),(14,300, 550000),(15,400, 1_000_000),
-]
-CRIT_TIERS = [  # crit multiplier is fixed x3
-    (1, 1,  50),    (2, 2,  150),   (3, 3,  400),  (4, 4,  1000), (5, 5,  2500),
-    (6, 7,  6000),  (7, 9,  15000), (8, 11, 35000),(9, 13, 80000),(10,15, 200000),
-]
-LUCK_TIERS = [  # % bonus to particle drops
-    (1, 5,  50),    (2, 10, 150),   (3, 15, 400),  (4, 20, 1000), (5, 25, 2500),
-    (6, 30, 6000),  (7, 35, 15000), (8, 40, 35000),(9, 45, 80000),(10,50, 200000),
-]
-OFFLINE_TIERS = [  # hours cap for AFK offline
-    (1, 10, 5000),  (2, 12, 25000), (3, 16, 100000),(4, 20, 400000),
-]
+# Upgrade tiers generated from formulas for smoother progression.
+def _build_tiers(max_level: int, effect_fn, cost_fn, round_effect: bool = True) -> list[tuple]:
+    tiers = []
+    for lvl in range(1, max_level + 1):
+        effect = effect_fn(lvl)
+        if round_effect:
+            effect = int(round(effect))
+        cost = int(round(cost_fn(lvl)))
+        tiers.append((lvl, effect, cost))
+    return tiers
 
-# AFK bots: (unlock_cost, base_rate_per_sec, per-level rate addition, per-level cost growth)
-SILVER_UNLOCK_COST = 1000
-SILVER_BASE_RATE = 0.2
-SILVER_UPGRADE_TIERS = [
-    (1, 0.30, 200),  (2, 0.45, 500),  (3, 0.60, 1000),  (4, 0.75, 2000),
-    (5, 0.90, 4000), (6, 1.05, 8000), (7, 1.20, 15000), (8, 1.35, 30000),
-    (9, 1.50, 60000),(10, 1.70, 120000),
-]
-GOLD_UNLOCK_COST = 15000
+
+# Damage: 25 levels, 1 → ~200 damage. Total cost ~350k particles.
+DAMAGE_TIERS = _build_tiers(
+    max_level=25,
+    effect_fn=lambda L: 1 + L * 0.8 + (L ** 1.55) * 0.25,  # smooth growth
+    cost_fn=lambda L: 15 * (1.42 ** (L - 1)),
+)
+# Crit: 20 levels, 0 → 20%. Total ~160k.
+CRIT_TIERS = _build_tiers(
+    max_level=20,
+    effect_fn=lambda L: L,  # 1% per level up to 20%
+    cost_fn=lambda L: 40 * (1.38 ** (L - 1)),
+)
+# Luck: 20 levels, 0 → 60%. Total ~160k.
+LUCK_TIERS = _build_tiers(
+    max_level=20,
+    effect_fn=lambda L: L * 3,  # +3% per level
+    cost_fn=lambda L: 40 * (1.38 ** (L - 1)),
+)
+# Offline cap: 8 levels, 8h → 24h.
+OFFLINE_TIERS = _build_tiers(
+    max_level=8,
+    effect_fn=lambda L: 8 + L * 2,  # +2h per level (8 → 24h)
+    cost_fn=lambda L: 2000 * (1.9 ** (L - 1)),
+)
+
+# AFK bots — 20 levels each
+SILVER_UNLOCK_COST = 200                       # affordable early (~10 weapons)
+SILVER_BASE_RATE = 0.3                         # weak but present auto-farm
+SILVER_UPGRADE_TIERS = _build_tiers(
+    max_level=20,
+    effect_fn=lambda L: 0.3 + L * 0.12,        # +0.12/sec per level → max 2.7/sec
+    cost_fn=lambda L: 100 * (1.35 ** (L - 1)),
+    round_effect=False,
+)
+GOLD_UNLOCK_COST = 12000
 GOLD_BASE_RATE = 1.0
-GOLD_UPGRADE_TIERS = [
-    (1, 1.5, 2000),  (2, 2.0, 5000),  (3, 2.5, 10000),  (4, 3.0, 20000),
-    (5, 3.5, 40000), (6, 4.0, 80000), (7, 4.5, 150000), (8, 5.0, 300000),
-    (9, 5.5, 600000),(10, 6.0, 1_000_000),
-]
-GLOBAL_UNLOCK_COST = 150000
+GOLD_UPGRADE_TIERS = _build_tiers(
+    max_level=20,
+    effect_fn=lambda L: 1.0 + L * 0.5,        # +0.5/sec per level → max 11/sec
+    cost_fn=lambda L: 800 * (1.38 ** (L - 1)),
+    round_effect=False,
+)
+GLOBAL_UNLOCK_COST = 100000
 GLOBAL_BASE_RATE = 4.0
-GLOBAL_UPGRADE_TIERS = [
-    (1, 6.0,  30000),  (2, 8.0,  75000),  (3, 10.0, 150000),  (4, 12.0, 300000),
-    (5, 14.0, 600000), (6, 16.0, 1_200_000), (7, 17.0, 2_000_000),
-    (8, 18.0, 3_500_000),(9, 19.0, 5_000_000),(10, 20.0, 8_000_000),
-]
+GLOBAL_UPGRADE_TIERS = _build_tiers(
+    max_level=20,
+    effect_fn=lambda L: 4.0 + L * 1.5,        # +1.5/sec per level → max 34/sec
+    cost_fn=lambda L: 8000 * (1.4 ** (L - 1)),
+    round_effect=False,
+)
 
 
 def damage_at(level: int) -> int:
     if level <= 0:
         return 1
-    return DAMAGE_TIERS[min(level, 15) - 1][1]
+    return DAMAGE_TIERS[min(level, len(DAMAGE_TIERS)) - 1][1]
 
 
 def crit_chance_at(level: int) -> int:
     if level <= 0:
         return 0
-    return CRIT_TIERS[min(level, 10) - 1][1]
+    return CRIT_TIERS[min(level, len(CRIT_TIERS)) - 1][1]
 
 
 def luck_bonus_at(level: int) -> int:
     if level <= 0:
         return 0
-    return LUCK_TIERS[min(level, 10) - 1][1]
+    return LUCK_TIERS[min(level, len(LUCK_TIERS)) - 1][1]
 
 
 def offline_hours_at(level: int) -> int:
     if level <= 0:
         return 8
-    return OFFLINE_TIERS[min(level, 4) - 1][1]
+    return OFFLINE_TIERS[min(level, len(OFFLINE_TIERS)) - 1][1]
 
 
 def silver_rate_at(level: int) -> float:
@@ -191,7 +216,7 @@ def silver_rate_at(level: int) -> float:
         return 0.0
     if level == 0:
         return SILVER_BASE_RATE
-    return SILVER_UPGRADE_TIERS[min(level, 10) - 1][1]
+    return SILVER_UPGRADE_TIERS[min(level, len(SILVER_UPGRADE_TIERS)) - 1][1]
 
 
 def gold_rate_at(level: int) -> float:
@@ -199,7 +224,7 @@ def gold_rate_at(level: int) -> float:
         return 0.0
     if level == 0:
         return GOLD_BASE_RATE
-    return GOLD_UPGRADE_TIERS[min(level, 10) - 1][1]
+    return GOLD_UPGRADE_TIERS[min(level, len(GOLD_UPGRADE_TIERS)) - 1][1]
 
 
 def global_rate_at(level: int) -> float:
@@ -207,7 +232,7 @@ def global_rate_at(level: int) -> float:
         return 0.0
     if level == 0:
         return GLOBAL_BASE_RATE
-    return GLOBAL_UPGRADE_TIERS[min(level, 10) - 1][1]
+    return GLOBAL_UPGRADE_TIERS[min(level, len(GLOBAL_UPGRADE_TIERS)) - 1][1]
 
 
 def total_afk_rate(silver_lvl: int, gold_lvl: int, global_lvl: int) -> float:
@@ -216,14 +241,18 @@ def total_afk_rate(silver_lvl: int, gold_lvl: int, global_lvl: int) -> float:
 
 # Branches catalog for UI / API
 UPGRADE_BRANCHES = {
-    "damage":      {"name": "⚒ Молот",        "description": "Урон за клик",       "max_level": 15, "tiers": DAMAGE_TIERS},
-    "crit":        {"name": "🎯 Крит",         "description": "Шанс x3 урона",      "max_level": 10, "tiers": CRIT_TIERS},
-    "luck":        {"name": "🍀 Удача",        "description": "Бонус к particles",  "max_level": 10, "tiers": LUCK_TIERS},
-    "offline_cap": {"name": "⏰ Сон бота",     "description": "Часы оффлайн фарма", "max_level": 4,  "tiers": OFFLINE_TIERS},
-    "silver":      {"name": "🥉 Silver-бот",   "description": "Автофарм",           "max_level": 10, "tiers": SILVER_UPGRADE_TIERS, "unlock_cost": SILVER_UNLOCK_COST},
-    "gold":        {"name": "🥈 Gold-бот",     "description": "Автофарм+",          "max_level": 10, "tiers": GOLD_UPGRADE_TIERS,   "unlock_cost": GOLD_UNLOCK_COST},
-    "global":      {"name": "🥇 Global-бот",   "description": "Автофарм++",         "max_level": 10, "tiers": GLOBAL_UPGRADE_TIERS, "unlock_cost": GLOBAL_UNLOCK_COST},
+    "damage":      {"name": "⚒ Молот",        "description": "Урон за клик",       "unit": "dmg",   "tiers": DAMAGE_TIERS},
+    "crit":        {"name": "🎯 Крит",         "description": "Шанс x3 урона",      "unit": "%",     "tiers": CRIT_TIERS},
+    "luck":        {"name": "🍀 Удача",        "description": "Бонус к particles",  "unit": "%",     "tiers": LUCK_TIERS},
+    "offline_cap": {"name": "⏰ Сон бота",     "description": "Часы оффлайн фарма",  "unit": "ч",     "tiers": OFFLINE_TIERS},
+    "silver":      {"name": "🥉 Silver-бот",   "description": "Автофарм",           "unit": "/сек",  "tiers": SILVER_UPGRADE_TIERS, "unlock_cost": SILVER_UNLOCK_COST},
+    "gold":        {"name": "🥈 Gold-бот",     "description": "Автофарм+",          "unit": "/сек",  "tiers": GOLD_UPGRADE_TIERS,   "unlock_cost": GOLD_UNLOCK_COST},
+    "global":      {"name": "🥇 Global-бот",   "description": "Автофарм++",         "unit": "/сек",  "tiers": GLOBAL_UPGRADE_TIERS, "unlock_cost": GLOBAL_UNLOCK_COST},
 }
+
+# Dynamic max_level populated from actual tiers
+for _key, _cfg in UPGRADE_BRANCHES.items():
+    _cfg["max_level"] = len(_cfg["tiers"])
 
 # ============================================================
 # CONSTANTS
