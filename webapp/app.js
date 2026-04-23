@@ -151,15 +151,41 @@ function renderCases() {
     grid.innerHTML = '<div class="loader">Кейсов нет. Админ должен запустить /seed_economy в боте.</div>';
     return;
   }
-  grid.innerHTML = state.cases.map(c => `
-    <div class="case-card" data-case-id="${c.id}">
-      <div class="case-card-name">${escape(c.name)}</div>
-      <div class="case-card-desc">${escape(c.description || '')}</div>
-      <div class="case-card-price">🪙 ${fmt(c.price)}</div>
-    </div>
-  `).join('');
+  const canAfford = c => !!state.me && state.me.balance >= c.price;
 
-  grid.querySelectorAll('.case-card').forEach(card => {
+  grid.innerHTML = state.cases.map(c => {
+    const preview = (c.preview_items || []).slice(0, 4);
+    const hero = c.hero_image || (preview[0] && preview[0].image_url) || '';
+    const topRarity = (preview[0] && preview[0].rarity) || 'mil-spec';
+    const locked = !canAfford(c);
+    return `
+      <div class="case-tile rarity-border-${topRarity} ${locked ? 'locked' : ''}" data-case-id="${c.id}">
+        <div class="case-tile-glow"></div>
+        <div class="case-tile-hero">
+          ${hero ? `<img src="${hero}" alt="" />` : ''}
+        </div>
+        <div class="case-tile-body">
+          <div class="case-tile-name">${escape(c.name)}</div>
+          <div class="case-tile-desc">${escape(c.description || '')}</div>
+          <div class="case-tile-preview-strip">
+            ${preview.map(it => `
+              <div class="preview-thumb rarity-${it.rarity}">
+                <img src="${it.image_url}" alt="" />
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        <div class="case-tile-footer">
+          <div class="case-tile-price ${locked ? 'locked' : ''}">
+            ${locked ? '🔒' : '🪙'} ${fmt(c.price)}
+          </div>
+          <div class="case-tile-open">открыть →</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  grid.querySelectorAll('.case-tile').forEach(card => {
     card.addEventListener('click', () => openCasePreview(parseInt(card.dataset.caseId)));
   });
 }

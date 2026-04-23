@@ -85,18 +85,55 @@ async def api_daily(user: dict = Depends(require_user)) -> dict:
 @router.get("/cases")
 async def api_cases(user: dict = Depends(require_user)) -> list[dict]:
     _ = user
+    from app.db.client import pool as dbpool
+
     cases = await eco.list_cases()
-    # Add preview of top rarity items for each case
     out = []
-    for c in cases:
-        out.append({
-            "id": int(c["id"]),
-            "key": c["key"],
-            "name": c["name"],
-            "description": c["description"],
-            "price": int(c["price"]),
-            "image_url": c.get("image_url"),
-        })
+    async with dbpool().acquire() as conn:
+        for c in cases:
+            # Pull full case row to access loot_pool
+            full = await conn.fetchrow(
+                "select loot_pool from economy_cases where id = $1", int(c["id"])
+            )
+            pool = full["loot_pool"] if full else None
+            if isinstance(pool, str):
+                pool = json.loads(pool)
+            all_ids: list[int] = []
+            for ids in (pool or {}).get("by_rarity", {}).values():
+                all_ids.extend(ids)
+            all_ids = list(set(all_ids))
+
+            preview_items: list[dict] = []
+            hero_image = None
+            if all_ids:
+                rows = await conn.fetch(
+                    "select id, full_name, rarity, rarity_color, image_url, base_price "
+                    "from economy_skins_catalog where id = any($1::int[]) "
+                    "order by base_price desc limit 5",
+                    all_ids,
+                )
+                preview_items = [
+                    {
+                        "id": int(r["id"]),
+                        "name": r["full_name"],
+                        "rarity": r["rarity"],
+                        "rarity_color": r["rarity_color"],
+                        "image_url": r["image_url"],
+                    }
+                    for r in rows
+                ]
+                if preview_items:
+                    hero_image = preview_items[0]["image_url"]
+
+            out.append({
+                "id": int(c["id"]),
+                "key": c["key"],
+                "name": c["name"],
+                "description": c["description"],
+                "price": int(c["price"]),
+                "hero_image": hero_image,
+                "preview_items": preview_items[:4],
+            })
     return out
 
 
