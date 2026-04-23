@@ -1,0 +1,76 @@
+{
+  "mirage": {
+    "title": "Mirage",
+    "lineups": [
+      {"type": "smoke", "side": "T", "name": "Jungle", "desc": "T-spawn, встаёшь у машины, прицел в небо под определённым пикселем — смок перекрывает Jungle на A site. База любого A executa.", "ref": "https://csnades.gg/mirage"},
+      {"type": "smoke", "side": "T", "name": "Stairs (A exec)", "desc": "T-ramp, кидаешь right-click прыжковый jumpthrow — смок ложится на лестнице, закрывая ретейк с CT.", "ref": "https://csnades.gg/mirage"},
+      {"type": "smoke", "side": "T", "name": "CT (full retake deny)", "desc": "С T-ramp jumpthrow через крыши — смок на CT, отключая ретейк с CT spawn.", "ref": "https://csnades.gg/mirage"},
+      {"type": "smoke", "side": "T", "name": "Van (B exec)", "desc": "От B apartments, один смок на Van — прячет захват сайта.", "ref": "https://csnades.gg/mirage"},
+      {"type": "flash", "side": "T", "name": "Pop-flash A site", "desc": "С palace или ramp — быстрая поп-флэш в A, ослепляет CT и jungle.", "ref": "https://csnades.gg/mirage"},
+      {"type": "molo", "side": "T", "name": "Connector molly", "desc": "Молик в connector с T-ramp — выкуривает CT если прячется в connector.", "ref": "https://csnades.gg/mirage"},
+      {"type": "smoke", "side": "CT", "name": "Window smoke", "desc": "С CT-spawn или default — смок на window, слепит Т-сторону от mid.", "ref": "https://csnades.gg/mirage"},
+      {"type": "smoke", "side": "CT", "name": "Stairs (CT defend)", "desc": "С A site — jumpthrow смок на stairs, не даёт Т зайти.", "ref": "https://csnades.gg/mirage"}
+    ]
+  },
+  "inferno": {
+    "title": "Inferno",
+    "lineups": [
+      {"type": "smoke", "side": "T", "name": "Coffins", "desc": "С second mid кидаешь jumpthrow — смок на coffins, закрывает защитников B.", "ref": "https://csnades.gg/inferno"},
+      {"type": "smoke", "side": "T", "name": "Library (A site)", "desc": "С Banana или short — смок на library, закрывает angle ретейка.", "ref": "https://csnades.gg/inferno"},
+      {"type": "smoke", "side": "T", "name": "Pit (A)", "desc": "С short — смок pit, ключевая раскидка на A execute.", "ref": "https://csnades.gg/inferno"},
+      {"type": "smoke", "side": "T", "name": "CT (execute A/B)", "desc": "CT smoke — закрывает поддержку с CT spawn. Разные lineup с banana и short.", "ref": "https://csnades.gg/inferno"},
+      {"type": "molo", "side": "T", "name": "Banana molly (default)", "desc": "Молик на banana из T spawn — очищает позицию CT early round.", "ref": "https://csnades.gg/inferno"},
+      {"type": "molo", "side": "T", "name": "Triple molly B", "desc": "3 молика — site, pit, dark — выжигают всех защитников B сразу.", "ref": "https://csnades.gg/inferno"},
+      {"type": "flash", "side": "T", "name": "Pop-flash banana", "desc": "С T ramp pop-flash за banana — ослепляет CT на позиции.", "ref": "https://csnades.gg/inferno"},
+      {"type": "smoke", "side": "CT", "name": "Banana smoke (default)", "desc": "С CT-spawn jumpthrow — смок на banana, держит T на далеко.", "ref": "https://csnades.gg/inferno"}
+    ]
+  },
+  "dust2": {
+    "title": "Dust2",
+    "lineups": [
+      {"type": "smoke", "side": "T", "name": "X-box (B tuns)", "desc": "Из T-spawn jumpthrow — смок на X-box, закрывает B defenders.", "ref": "https://csnades.gg/dust2"},
+      {"type": "smoke", "side": "T", "name": "Mid doors (from T)", "desc": "С T-spawn быстрый left-click — смок в mid doors, cutting rotations.", "ref": "https://csnades.gg/dust2"},
+      {"type": "smoke", "side": "T", "name": "Cross (A site)", "desc": "Из long — смок на cross, закрывает CT angle при захвате A.", "ref": "https://csnades.gg/dust2"},
+      {"type": "smoke", "side": "T", "name": "CT (A execute)", "desc": "С long corner — jumpthrow смок на CT, закрывая rotation с CT spawn.", "ref": "https://csnades.gg/dust2"},
+      {"type": "flash", "side": "T", "name": "Pop-flash long", "desc": "С long corner быстрая поп-флэш — ослепляет AWP на pit/long cross.", "ref": "https://csnades.gg/dust2"},
+      {"type": "molo", "side": "T", "name": "B site molly", "desc": "Из mid doors — молик в B plant area, выгоняет если кто сидит на plant spot.", "ref": "https://csnades.gg/dust2"},
+      {"type": "smoke", "side": "CT", "name": "Mid doors smoke", "desc": "С CT — смок на mid doors, не даёт rush mid.", "ref": "https://csnades.gg/dust2"},
+      {"type": "smoke", "side": "CT", "name": "Long corner", "desc": "С long — смок в long corner, играя forward от A site.", "ref": "https://csnades.gg/dust2"}
+    ]
+  },
+  "nuke": {
+    "title": "Nuke",
+    "lineups": [
+      {"type": "smoke", "side": "T", "name": "Heaven (outside)", "desc": "С outside — смок heaven, не даёт снайперу в heaven стрелять по lobby.", "ref": "https://csnades.gg/nuke"},
+      {"type": "smoke", "side": "T", "name": "Hut (outside)", "desc": "С outside jumpthrow — смок hut, закрывает angle с hut-доора.", "ref": "https://csnades.gg/nuke"},
+      {"type": "smoke", "side": "T", "name": "Radio (upper A)", "desc": "Из mini — смок radio, cutting ротацию.", "ref": "https://csnades.gg/nuke"},
+      {"type": "molo", "side": "T", "name": "Mini molly", "desc": "Молик в mini — выжигает CT если сидит в mini.", "ref": "https://csnades.gg/nuke"},
+      {"type": "smoke", "side": "CT", "name": "Secret smoke", "desc": "С CT — смок secret, не даёт T lurk через vent.", "ref": "https://csnades.gg/nuke"}
+    ]
+  },
+  "anubis": {
+    "title": "Anubis",
+    "lineups": [
+      {"type": "smoke", "side": "T", "name": "Connector (A exec)", "desc": "С mid bottom — смок connector, closes CT rotation to A.", "ref": "https://csnades.gg/anubis"},
+      {"type": "smoke", "side": "T", "name": "Heaven (A)", "desc": "Jumpthrow — смок heaven на A site.", "ref": "https://csnades.gg/anubis"},
+      {"type": "smoke", "side": "T", "name": "Stairs (B exec)", "desc": "С bridge — смок stairs, закрывая B plant.", "ref": "https://csnades.gg/anubis"},
+      {"type": "molo", "side": "T", "name": "Water molly (B)", "desc": "Молик в воду у B — выгоняет CT с плавающей позиции.", "ref": "https://csnades.gg/anubis"}
+    ]
+  },
+  "ancient": {
+    "title": "Ancient",
+    "lineups": [
+      {"type": "smoke", "side": "T", "name": "Ramp (B exec)", "desc": "С main кидаешь смок ramp — закрывает ретейк с CT.", "ref": "https://csnades.gg/ancient"},
+      {"type": "smoke", "side": "T", "name": "Cave (A exec)", "desc": "С cave area — смок cave, cutting defender sight.", "ref": "https://csnades.gg/ancient"},
+      {"type": "smoke", "side": "T", "name": "CT (full retake deny)", "desc": "Дальний jumpthrow смок на CT spawn.", "ref": "https://csnades.gg/ancient"}
+    ]
+  },
+  "train": {
+    "title": "Train",
+    "lineups": [
+      {"type": "smoke", "side": "T", "name": "Ivy (A)", "desc": "Смок ivy с T main — главная раскидка на A execute.", "ref": "https://csnades.gg/train"},
+      {"type": "smoke", "side": "T", "name": "Sandwich (A)", "desc": "Смок sandwich, не даёт CT играть far angle.", "ref": "https://csnades.gg/train"},
+      {"type": "smoke", "side": "T", "name": "Z (B exec)", "desc": "С back yard смок Z, closes ретейк с CT spawn.", "ref": "https://csnades.gg/train"}
+    ]
+  }
+}
