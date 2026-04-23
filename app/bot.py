@@ -44,15 +44,20 @@ def _register(dp: Dispatcher) -> None:
         inv,
         lfg,
         map as map_h,
+        match,
         me,
         moderation,
+        photo,
+        poll,
         profile,
+        quiz,
         reactions,
+        roll,
         start,
         stats,
         teach,
+        timer,
         tldr,
-        photo,
         top,
         voice,
         welcome,
@@ -88,6 +93,11 @@ def _register(dp: Dispatcher) -> None:
         forget.router,
         top.router,
         google.router,           # /google + "загугли X" trigger
+        roll.router,
+        match.router,
+        timer.router,
+        poll.router,
+        quiz.router,
         voice.router,            # transcribe voice/video notes
         photo.router,            # describe photos via pixtral
         reactions.router,        # stickers + emoji-reactions before on_text
