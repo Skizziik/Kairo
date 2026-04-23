@@ -277,3 +277,77 @@ async def extract_and_store(chat_id: int, window_size: int | None = None) -> int
                 log.exception("failed to embed/store memories for uid=%s", uid)
     log.info("memory extraction: %d profiles updated at %s", updated, datetime.utcnow().isoformat())
     return updated
+
+
+async def compact_user_memories(tg_id: int, min_count: int = 30) -> int:
+    """Rewrite a user's memory list through LLM: dedupe, refine, drop stale.
+    Returns final memory count (0 if skipped because too few)."""
+    from app.ai.prompts import COMPACT_SYSTEM
+    count = await repos.memory_count_for_user(tg_id)
+    if count < min_count:
+        log.info("compact skip uid=%s count=%s below threshold", tg_id, count)
+        return count
+    items = await repos.all_memories_for_user(tg_id)
+    bullets = "\n".join(f"- {m}" for m in items)
+    summary, traits = await repos.get_profile(tg_id)
+    user_block = (
+        f"Текущий профиль: {summary}\n"
+        f"Traits: {json.dumps(traits, ensure_ascii=False)}\n\n"
+        f"Все воспоминания ({len(items)} шт):\n{bullets}"
+    )
+    try:
+        raw = await llm.chat(
+            [
+                {"role": "system", "content": COMPACT_SYSTEM},
+                {"role": "user", "content": user_block},
+            ],
+            temperature=0.2,
+            max_tokens=2500,
+        )
+    except Exception:
+        log.exception("compact LLM failed uid=%s", tg_id)
+        return count
+
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        log.warning("compact returned non-JSON uid=%s: %s", tg_id, raw[:200])
+        return count
+
+    new_mems = [m.strip() for m in (data.get("memories") or []) if isinstance(m, str) and m.strip()]
+    if not new_mems:
+        log.warning("compact returned empty memories uid=%s", tg_id)
+        return count
+
+    try:
+        vecs = await embed(new_mems)
+    except Exception:
+        log.exception("compact embed failed uid=%s", tg_id)
+        return count
+    if len(vecs) != len(new_mems):
+        log.warning("compact embed count mismatch uid=%s", tg_id)
+        return count
+
+    pairs = list(zip(new_mems, vecs))
+    await repos.replace_memories(tg_id, pairs)
+    log.info("compact done uid=%s: %d -> %d", tg_id, count, len(new_mems))
+    return len(new_mems)
+
+
+async def compact_all_users() -> dict:
+    ids = await repos.distinct_user_ids_with_memories()
+    result = {"processed": 0, "total": len(ids), "details": []}
+    for uid in ids:
+        try:
+            new_count = await compact_user_memories(uid)
+            result["processed"] += 1
+            result["details"].append({"uid": uid, "new_count": new_count})
+        except Exception:
+            log.exception("compact_all_users failed for uid=%s", uid)
+    return result

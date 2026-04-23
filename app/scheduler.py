@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from aiogram import Bot
 
 from app.ai import llm
+from app.ai.memory import compact_all_users
 from app.config import get_settings
 from app.db import repos
 
@@ -60,6 +61,33 @@ async def _build_daily_summary(chat_id: int) -> str | None:
         return None
     header = "<b>📒 Итоги дня</b>\n\n"
     return header + text
+
+
+def _seconds_until_weekly(weekday: int, hour_utc: int) -> float:
+    """Seconds until next occurrence of given weekday (0=Mon) at hour UTC."""
+    now = datetime.now(timezone.utc)
+    days_ahead = (weekday - now.weekday()) % 7
+    target = now.replace(hour=hour_utc, minute=0, second=0, microsecond=0)
+    if days_ahead == 0 and target <= now:
+        days_ahead = 7
+    target += timedelta(days=days_ahead)
+    return (target - now).total_seconds()
+
+
+async def weekly_memory_compact_loop() -> None:
+    """Sunday 03:00 UTC: consolidate each user's memories through LLM."""
+    while True:
+        try:
+            delay = _seconds_until_weekly(weekday=6, hour_utc=3)  # Sunday 3 AM UTC
+            log.info("next memory compact in %.0fs", delay)
+            await asyncio.sleep(delay)
+            result = await compact_all_users()
+            log.info("weekly memory compact result: %s", result)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("weekly memory compact loop iteration failed")
+            await asyncio.sleep(600)
 
 
 async def daily_summary_loop(bot: Bot) -> None:

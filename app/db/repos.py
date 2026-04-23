@@ -178,6 +178,42 @@ async def upsert_profile(tg_id: int, summary: str, traits: dict) -> None:
         )
 
 
+async def all_memories_for_user(user_id: int) -> list[str]:
+    async with pool().acquire() as conn:
+        rows = await conn.fetch(
+            "select content from memories where user_id = $1 order by created_at desc",
+            user_id,
+        )
+    return [r["content"] for r in rows]
+
+
+async def memory_count_for_user(user_id: int) -> int:
+    async with pool().acquire() as conn:
+        return int(await conn.fetchval(
+            "select count(*) from memories where user_id = $1",
+            user_id,
+        ) or 0)
+
+
+async def replace_memories(user_id: int, new_memories: list[tuple[str, list[float]]]) -> None:
+    """Wipe all existing memories for user and insert new compacted set atomically."""
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("delete from memories where user_id = $1", user_id)
+            for content, embedding in new_memories:
+                await conn.execute(
+                    "insert into memories (user_id, content, embedding, importance) "
+                    "values ($1, $2, $3, 2)",
+                    user_id, content, embedding,
+                )
+
+
+async def distinct_user_ids_with_memories() -> list[int]:
+    async with pool().acquire() as conn:
+        rows = await conn.fetch("select distinct user_id from memories")
+    return [int(r["user_id"]) for r in rows]
+
+
 async def add_memory(user_id: int, content: str, embedding: list[float], importance: int = 1) -> None:
     async with pool().acquire() as conn:
         await conn.execute(
