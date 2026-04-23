@@ -36,6 +36,7 @@ def get_dispatcher() -> Dispatcher:
 def _register(dp: Dispatcher) -> None:
     from app.handlers import (
         ai_chat,
+        economy_cmds,
         extract,
         feedback,
         forget,
@@ -45,9 +46,9 @@ def _register(dp: Dispatcher) -> None:
         lfg,
         map as map_h,
         match,
-        nade,
         me,
         moderation,
+        nade,
         photo,
         poll,
         profile,
@@ -95,6 +96,7 @@ def _register(dp: Dispatcher) -> None:
         forget.router,
         top.router,
         google.router,           # /google + "загугли X" trigger
+        economy_cmds.router,     # /balance /daily /casino
         roll.router,
         match.router,
         timer.router,

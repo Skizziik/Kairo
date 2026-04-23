@@ -10,6 +10,7 @@ from aiogram.types import Message
 from app.ai.memory import extract_and_store
 from app.config import get_settings
 from app.db import repos
+from app.economy import repo as eco
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +55,12 @@ class MessageLogMiddleware(BaseMiddleware):
                     if count >= s.memory_extract_every:
                         await repos.reset_extract_counter()
                         asyncio.create_task(_run_extract_safe(event.chat.id))
+                    # Activity reward: give 1 coin every ~10 messages, capped per day.
+                    if count % 10 == 0:
+                        try:
+                            await eco.grant_activity_coin(event.from_user.id)
+                        except Exception:
+                            log.exception("activity coin grant failed")
         except Exception:
             log.exception("message log middleware failed")
 

@@ -6,8 +6,10 @@ from contextlib import asynccontextmanager
 
 from aiogram.types import Update
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 
+from app.api.economy_api import router as economy_router
 from app.bot import get_bot, get_dispatcher
 from app.config import get_settings
 from app.db.client import close_pool, init_pool
@@ -61,6 +63,17 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+
+# CORS for Mini App frontend (hosted separately).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Telegram Web Apps can come from any origin user configured
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
+app.include_router(economy_router)
 
 
 @app.get("/", response_class=PlainTextResponse)

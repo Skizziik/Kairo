@@ -7,6 +7,8 @@ services:
     branch: main
     healthCheckPath: /health
     envVars:
+      - key: MINIAPP_URL
+        sync: false
       - key: TG_BOT_TOKEN
         sync: false
       - key: TG_WEBHOOK_SECRET
@@ -43,3 +45,21 @@ services:
         value: "20"
       - key: LOG_LEVEL
         value: INFO
+
+  - type: web
+    name: kairo-casino-app
+    runtime: static
+    plan: free
+    branch: main
+    staticPublishPath: ./webapp
+    pullRequestPreviewsEnabled: false
+    buildFilter:
+      paths:
+        - webapp/**
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: ALLOWALL
+      - path: /*
+        name: Cache-Control
+        value: public, max-age=60

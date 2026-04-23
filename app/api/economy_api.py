@@ -1,0 +1,185 @@
+"""FastAPI routes for the Casino Mini App."""
+from __future__ import annotations
+
+import json
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+
+from app.api.auth import require_user
+from app.db import repos as base_repos
+from app.economy import repo as eco
+from app.economy.pricing import rarity_emoji, rarity_label, wear_label, wear_short
+
+log = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api", tags=["casino"])
+
+
+class OpenCaseReq(BaseModel):
+    case_id: int = Field(..., ge=1)
+
+
+def _skin_to_dict(item: dict) -> dict:
+    """Normalize inventory row for JSON output."""
+    return {
+        "id": int(item["id"]),
+        "skin_id": int(item["skin_id"]),
+        "name": item["full_name"],
+        "weapon": item["weapon"],
+        "skin_name": item["skin_name"],
+        "rarity": item["rarity"],
+        "rarity_label": rarity_label(item["rarity"]),
+        "rarity_color": item["rarity_color"],
+        "rarity_emoji": rarity_emoji(item["rarity"]),
+        "image_url": item["image_url"],
+        "category": item["category"],
+        "float": round(float(item["float_value"]), 4),
+        "wear": item["wear"],
+        "wear_label": wear_label(item["wear"]),
+        "wear_short": wear_short(item["wear"]),
+        "stat_trak": bool(item["stat_trak"]),
+        "price": int(item["price"]),
+        "acquired_at": item["acquired_at"].isoformat() if item.get("acquired_at") else None,
+        "locked": bool(item.get("locked", False)),
+    }
+
+
+@router.get("/me")
+async def api_me(user: dict = Depends(require_user)) -> dict:
+    tg_id = int(user["id"])
+    # keep users table in sync with Telegram profile
+    await base_repos.upsert_user(
+        tg_id=tg_id,
+        username=user.get("username"),
+        first_name=user.get("first_name"),
+        last_name=user.get("last_name"),
+    )
+    await eco.ensure_user(tg_id)
+    row = await eco.get_user(tg_id)
+    inv_count = len(await eco.inventory_of(tg_id, limit=1000))
+    return {
+        "tg_id": tg_id,
+        "username": user.get("username"),
+        "first_name": user.get("first_name"),
+        "photo_url": user.get("photo_url"),
+        "balance": int(row["balance"]) if row else 0,
+        "total_earned": int(row["total_earned"]) if row else 0,
+        "total_spent": int(row["total_spent"]) if row else 0,
+        "cases_opened": int(row["cases_opened"]) if row else 0,
+        "current_streak": int(row["current_streak"]) if row else 0,
+        "best_streak": int(row["best_streak"]) if row else 0,
+        "last_daily_at": row["last_daily_at"].isoformat() if row and row.get("last_daily_at") else None,
+        "inventory_count": inv_count,
+    }
+
+
+@router.post("/daily")
+async def api_daily(user: dict = Depends(require_user)) -> dict:
+    tg_id = int(user["id"])
+    result = await eco.try_claim_daily(tg_id)
+    return result
+
+
+@router.get("/cases")
+async def api_cases(user: dict = Depends(require_user)) -> list[dict]:
+    _ = user
+    cases = await eco.list_cases()
+    # Add preview of top rarity items for each case
+    out = []
+    for c in cases:
+        out.append({
+            "id": int(c["id"]),
+            "key": c["key"],
+            "name": c["name"],
+            "description": c["description"],
+            "price": int(c["price"]),
+            "image_url": c.get("image_url"),
+        })
+    return out
+
+
+@router.post("/case/open")
+async def api_case_open(req: OpenCaseReq, user: dict = Depends(require_user)) -> dict:
+    tg_id = int(user["id"])
+    result = await eco.open_case(tg_id, req.case_id)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error", "error"))
+    return result
+
+
+@router.get("/case/{case_id}/pool")
+async def api_case_pool(case_id: int, user: dict = Depends(require_user)) -> dict:
+    """Return the full loot pool (all items that can drop) for a case.
+    Used to render the preview carousel."""
+    _ = user
+    case = await eco.get_case(case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="case not found")
+    pool = case["loot_pool"]
+    if isinstance(pool, str):
+        pool = json.loads(pool)
+    by_rarity = pool.get("by_rarity", {})
+    all_ids = []
+    for ids in by_rarity.values():
+        all_ids.extend(ids)
+    all_ids = list(set(all_ids))
+    if not all_ids:
+        return {"name": case["name"], "items": []}
+    from app.db.client import pool as dbpool
+    async with dbpool().acquire() as conn:
+        rows = await conn.fetch(
+            "select id, full_name, weapon, skin_name, rarity, rarity_color, image_url, base_price "
+            "from economy_skins_catalog where id = any($1::int[])",
+            all_ids,
+        )
+    items = [
+        {
+            "id": int(r["id"]),
+            "name": r["full_name"],
+            "rarity": r["rarity"],
+            "rarity_color": r["rarity_color"],
+            "rarity_emoji": rarity_emoji(r["rarity"]),
+            "image_url": r["image_url"],
+            "base_price": int(r["base_price"]),
+        }
+        for r in rows
+    ]
+    items.sort(key=lambda x: x["base_price"], reverse=True)
+    return {
+        "id": int(case["id"]),
+        "name": case["name"],
+        "description": case["description"],
+        "price": int(case["price"]),
+        "items": items,
+    }
+
+
+@router.get("/inventory")
+async def api_inventory(user: dict = Depends(require_user)) -> dict:
+    tg_id = int(user["id"])
+    items = await eco.inventory_of(tg_id, limit=500)
+    total_value = sum(int(i["price"]) for i in items)
+    return {
+        "count": len(items),
+        "total_value": total_value,
+        "items": [_skin_to_dict(i) for i in items],
+    }
+
+
+@router.get("/leaderboard")
+async def api_leaderboard(user: dict = Depends(require_user)) -> list[dict]:
+    _ = user
+    top = await eco.leaderboard_rich(limit=20)
+    return [
+        {
+            "tg_id": int(r["tg_id"]),
+            "username": r["username"],
+            "first_name": r["first_name"],
+            "balance": int(r["balance"]),
+            "cases_opened": int(r["cases_opened"]),
+            "streak": int(r["current_streak"]),
+        }
+        for r in top
+    ]
