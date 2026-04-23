@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     database_url: str = Field(alias="DATABASE_URL")
     steam_api_key: str | None = Field(default=None, alias="STEAM_API_KEY")
     mistral_api_key: str | None = Field(default=None, alias="MISTRAL_API_KEY")
+    groq_api_key: str | None = Field(default=None, alias="GROQ_API_KEY")
 
     public_base_url: str = Field(alias="PUBLIC_BASE_URL")
     port: int = Field(default=10000, alias="PORT")
