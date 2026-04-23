@@ -8,6 +8,7 @@ from html import escape
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
+from aiogram.exceptions import TelegramBadRequest
 
 from app.config import get_settings
 from app.economy import repo as eco
@@ -18,7 +19,8 @@ router = Router(name="economy_cmds")
 log = logging.getLogger(__name__)
 
 
-def _miniapp_kb() -> InlineKeyboardMarkup | None:
+def _webapp_kb() -> InlineKeyboardMarkup | None:
+    """WebApp button — works only in private chats without BotFather /setdomain."""
     s = get_settings()
     url = s.miniapp_url
     if not url:
@@ -26,6 +28,24 @@ def _miniapp_kb() -> InlineKeyboardMarkup | None:
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="🎰 Открыть казино", web_app=WebAppInfo(url=url)),
     ]])
+
+
+def _url_kb() -> InlineKeyboardMarkup | None:
+    """URL button — works everywhere. Opens in Telegram WebView if domain is
+    registered via BotFather /newapp, otherwise in browser."""
+    s = get_settings()
+    url = s.miniapp_url
+    if not url:
+        return None
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🎰 Открыть казино", url=url),
+    ]])
+
+
+def _miniapp_kb(is_private: bool) -> InlineKeyboardMarkup | None:
+    # web_app button only works in private chats without domain setup;
+    # in groups/channels we use url button.
+    return _webapp_kb() if is_private else _url_kb()
 
 
 def _fmt_coins(n: int) -> str:
@@ -58,8 +78,11 @@ async def cmd_balance(msg: Message) -> None:
         f"Кейсов открыто: <b>{user['cases_opened']}</b>\n"
         f"Текущий стрик: <b>{user['current_streak']}</b> 🔥 (лучший: {user['best_streak']})"
     )
-    kb = _miniapp_kb()
-    await msg.reply(text, reply_markup=kb)
+    kb = _miniapp_kb(msg.chat.type == "private")
+    try:
+        await msg.reply(text, reply_markup=kb)
+    except TelegramBadRequest:
+        await msg.reply(text)
 
 
 @router.message(Command("daily", "дейли"))
@@ -72,12 +95,15 @@ async def cmd_daily(msg: Message) -> None:
         await msg.reply(f"Сегодня уже забирал. Ещё через <b>{_fmt_duration(wait)}</b> можно.")
         return
     new_bal = result.get("new_balance", 0)
-    await msg.reply(
+    text = (
         f"✅ +{_fmt_coins(result['amount'])} коинов на счёт\n"
         f"Стрик: <b>{result['streak']}</b> 🔥\n"
-        f"Баланс: <b>{_fmt_coins(new_bal)}</b>",
-        reply_markup=_miniapp_kb(),
+        f"Баланс: <b>{_fmt_coins(new_bal)}</b>"
     )
+    try:
+        await msg.reply(text, reply_markup=_miniapp_kb(msg.chat.type == "private"))
+    except TelegramBadRequest:
+        await msg.reply(text)
 
 
 @router.message(Command("casino", "казино"))
@@ -89,10 +115,12 @@ async def cmd_casino(msg: Message) -> None:
             "Админ должен задеплоить фронт и прописать URL в Render env."
         )
         return
-    await msg.answer(
-        "🎰 <b>RIP Казино</b>\n\nЖми кнопку снизу — откроется полноценное приложение.",
-        reply_markup=_miniapp_kb(),
-    )
+    text = "🎰 <b>RIP Казино</b>\n\nЖми кнопку снизу — откроется полноценное приложение."
+    try:
+        await msg.answer(text, reply_markup=_miniapp_kb(msg.chat.type == "private"))
+    except TelegramBadRequest:
+        # Fall back to plain link if button type rejected (unregistered domain).
+        await msg.answer(f"{text}\n\n{s.miniapp_url}", disable_web_page_preview=False)
 
 
 @router.message(Command("inv_text", "inv_t"))
