@@ -5,7 +5,9 @@ import random
 
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, PollAnswer
+
+from app.economy import repo as eco
 
 router = Router(name="quiz")
 log = logging.getLogger(__name__)
@@ -59,15 +61,36 @@ QUESTIONS: list[tuple[str, list[str], int, str]] = [
 async def cmd_quiz(msg: Message) -> None:
     q, opts, correct_idx, explanation = random.choice(QUESTIONS)
     try:
-        await msg.bot.send_poll(
+        sent = await msg.bot.send_poll(
             chat_id=msg.chat.id,
-            question=f"🎯 {q}",
+            question=f"🎯 {q}  (+20 🪙 за верный ответ)",
             options=opts,
             type="quiz",
             correct_option_id=correct_idx,
             explanation=explanation[:200],
             is_anonymous=False,
         )
+        # Register poll for coin rewards
+        if sent.poll:
+            await eco.register_quiz(sent.poll.id, correct_idx, reward=20)
     except Exception as e:
         log.exception("quiz failed")
         await msg.reply(f"Не смог: {e}")
+
+
+@router.poll_answer()
+async def on_poll_answer(answer: PollAnswer) -> None:
+    if answer.user is None:
+        return
+    try:
+        result = await eco.handle_quiz_answer(
+            answer.poll_id,
+            answer.user.id,
+            list(answer.option_ids or []),
+        )
+    except Exception:
+        log.exception("quiz answer handling failed")
+        return
+    # We don't reply in chat — reward is silent; next /balance will show growth
+    if result.get("rewarded"):
+        log.info("quiz reward +%s to %s", result.get("reward"), answer.user.id)

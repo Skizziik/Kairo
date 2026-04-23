@@ -204,6 +204,125 @@ async def api_inventory(user: dict = Depends(require_user)) -> dict:
     }
 
 
+# ============ sell ============
+class SellReq(BaseModel):
+    inventory_id: int = Field(..., ge=1)
+
+
+@router.post("/sell")
+async def api_sell(req: SellReq, user: dict = Depends(require_user)) -> dict:
+    tg_id = int(user["id"])
+    result = await eco.sell_to_dealer(tg_id, req.inventory_id)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error"))
+    return result
+
+
+# ============ upgrade ============
+class UpgradeReq(BaseModel):
+    inventory_id: int = Field(..., ge=1)
+    target_skin_id: int = Field(..., ge=1)
+    extra_coins: int = Field(default=0, ge=0)
+
+
+@router.post("/upgrade")
+async def api_upgrade(req: UpgradeReq, user: dict = Depends(require_user)) -> dict:
+    tg_id = int(user["id"])
+    result = await eco.upgrade_item(tg_id, req.inventory_id, req.target_skin_id, req.extra_coins)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error"))
+    return result
+
+
+@router.get("/upgrade/candidates")
+async def api_upgrade_candidates(
+    min_price: int = 0, max_price: int = 1_000_000_000, limit: int = 80,
+    user: dict = Depends(require_user),
+) -> list[dict]:
+    """Return skins whose median base_price is in the requested range."""
+    _ = user
+    from app.db.client import pool as dbpool
+    async with dbpool().acquire() as conn:
+        rows = await conn.fetch(
+            "select id, full_name, weapon, skin_name, rarity, rarity_color, image_url, base_price "
+            "from economy_skins_catalog where active and base_price between $1 and $2 "
+            "order by base_price asc limit $3",
+            int(min_price), int(max_price), int(min(200, limit)),
+        )
+    return [
+        {
+            "id": int(r["id"]),
+            "name": r["full_name"],
+            "weapon": r["weapon"],
+            "skin_name": r["skin_name"],
+            "rarity": r["rarity"],
+            "rarity_color": r["rarity_color"],
+            "image_url": r["image_url"],
+            "base_price": int(r["base_price"]),
+        }
+        for r in rows
+    ]
+
+
+# ============ casino ============
+class CoinflipReq(BaseModel):
+    bet: int = Field(..., ge=1)
+    side: str
+
+
+@router.post("/casino/coinflip")
+async def api_coinflip(req: CoinflipReq, user: dict = Depends(require_user)) -> dict:
+    tg_id = int(user["id"])
+    result = await eco.play_coinflip(tg_id, req.bet, req.side)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error"))
+    return result
+
+
+class SlotsReq(BaseModel):
+    bet: int = Field(..., ge=1)
+
+
+@router.post("/casino/slots")
+async def api_slots(req: SlotsReq, user: dict = Depends(require_user)) -> dict:
+    tg_id = int(user["id"])
+    result = await eco.play_slots(tg_id, req.bet)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error"))
+    return result
+
+
+class CrashReq(BaseModel):
+    bet: int = Field(..., ge=1)
+    target_mult: float = Field(..., ge=1.01, le=50.0)
+
+
+@router.post("/casino/crash")
+async def api_crash(req: CrashReq, user: dict = Depends(require_user)) -> dict:
+    tg_id = int(user["id"])
+    result = await eco.play_crash(tg_id, req.bet, req.target_mult)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error"))
+    return result
+
+
+# ============ daily task ============
+@router.get("/task")
+async def api_task(user: dict = Depends(require_user)) -> dict:
+    tg_id = int(user["id"])
+    return await eco.get_or_create_daily_task(tg_id)
+
+
+class TaskAnswerReq(BaseModel):
+    answer: str
+
+
+@router.post("/task/answer")
+async def api_task_answer(req: TaskAnswerReq, user: dict = Depends(require_user)) -> dict:
+    tg_id = int(user["id"])
+    return await eco.submit_daily_task(tg_id, req.answer)
+
+
 @router.get("/leaderboard")
 async def api_leaderboard(user: dict = Depends(require_user)) -> list[dict]:
     _ = user

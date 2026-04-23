@@ -303,3 +303,470 @@ async def leaderboard_rich(limit: int = 10) -> list[dict]:
             limit,
         )
     return [dict(r) for r in rows]
+
+
+# ============ sell to dealer ============
+
+DEALER_PRICE_FRACTION = 0.7  # sell = 70% of listed price
+
+
+async def sell_to_dealer(user_id: int, inventory_id: int) -> dict:
+    """Sell item to bot dealer. Returns payout."""
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            item = await conn.fetchrow(
+                "select id, user_id, price, locked from economy_inventory "
+                "where id = $1 for update",
+                inventory_id,
+            )
+            if item is None:
+                return {"ok": False, "error": "Item not found"}
+            if int(item["user_id"]) != user_id:
+                return {"ok": False, "error": "Not your item"}
+            if item["locked"]:
+                return {"ok": False, "error": "Item is locked (on market or in trade)"}
+            payout = max(1, int(round(int(item["price"]) * DEALER_PRICE_FRACTION)))
+            await conn.execute("delete from economy_inventory where id = $1", inventory_id)
+            new_bal_row = await conn.fetchrow(
+                "update economy_users set balance = balance + $2, total_earned = total_earned + $2 "
+                "where tg_id = $1 returning balance",
+                user_id, payout,
+            )
+            new_bal = int(new_bal_row["balance"])
+            await conn.execute(
+                "insert into economy_transactions (user_id, amount, kind, reason, ref_id, balance_after) "
+                "values ($1, $2, 'sell', 'dealer', $3, $4)",
+                user_id, payout, inventory_id, new_bal,
+            )
+    return {"ok": True, "payout": payout, "new_balance": new_bal}
+
+
+# ============ upgrade minigame ============
+
+async def upgrade_item(user_id: int, inventory_id: int, target_skin_id: int, extra_coins: int = 0) -> dict:
+    """Gamble an item + extra coins to upgrade into a target skin."""
+    import random
+    from app.economy.pricing import compute_price, wear_from_float, roll_float
+
+    if extra_coins < 0:
+        return {"ok": False, "error": "Invalid coins"}
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            bal_row = await conn.fetchrow(
+                "select balance from economy_users where tg_id = $1 for update",
+                user_id,
+            )
+            if bal_row is None or int(bal_row["balance"]) < extra_coins:
+                return {"ok": False, "error": "Not enough coins"}
+
+            item = await conn.fetchrow(
+                "select id, user_id, price, locked, skin_id from economy_inventory "
+                "where id = $1 for update",
+                inventory_id,
+            )
+            if item is None or int(item["user_id"]) != user_id:
+                return {"ok": False, "error": "Item not yours"}
+            if item["locked"]:
+                return {"ok": False, "error": "Item locked"}
+
+            target = await conn.fetchrow(
+                "select id, full_name, weapon, skin_name, rarity, rarity_color, image_url, "
+                "base_price, min_float, max_float, category, stat_trak_available "
+                "from economy_skins_catalog where id = $1 and active",
+                target_skin_id,
+            )
+            if target is None:
+                return {"ok": False, "error": "Target skin not found"}
+
+            stake_value = int(item["price"]) + int(extra_coins)
+            target_median_price = int(target["base_price"])
+            # Target is worth more (or equal) to be a real upgrade
+            if target_median_price <= stake_value:
+                return {"ok": False, "error": "Target must be more valuable than stake"}
+
+            # Probability — always < 1, with 10% house edge
+            probability = (stake_value / target_median_price) * 0.90
+            probability = max(0.02, min(0.95, probability))
+            success = random.random() < probability
+
+            # Deduct extra coins upfront (either way)
+            if extra_coins > 0:
+                await conn.execute(
+                    "update economy_users set balance = balance - $2, total_spent = total_spent + $2 "
+                    "where tg_id = $1",
+                    user_id, extra_coins,
+                )
+                await conn.execute(
+                    "insert into economy_transactions (user_id, amount, kind, reason, balance_after) "
+                    "select $1, $2, 'upgrade', 'stake', balance from economy_users where tg_id = $1",
+                    user_id, -extra_coins,
+                )
+
+            if success:
+                # Delete old item, insert new target with fresh float
+                await conn.execute("delete from economy_inventory where id = $1", inventory_id)
+                fl = roll_float(float(target["min_float"]), float(target["max_float"]))
+                wear_name, _ = wear_from_float(fl)
+                new_price = compute_price(int(target["base_price"]), fl, wear_name, False)
+                new_inv = await conn.fetchrow(
+                    "insert into economy_inventory "
+                    "  (user_id, skin_id, float_value, wear, stat_trak, price, source, source_ref) "
+                    "values ($1, $2, $3, $4, false, $5, 'upgrade', $6) returning id",
+                    user_id, int(target["id"]), fl, wear_name, new_price, str(inventory_id),
+                )
+                bal_row2 = await conn.fetchrow(
+                    "select balance from economy_users where tg_id = $1", user_id
+                )
+                return {
+                    "ok": True,
+                    "success": True,
+                    "probability": probability,
+                    "new_item": {
+                        "id": int(new_inv["id"]),
+                        "name": target["full_name"],
+                        "weapon": target["weapon"],
+                        "skin_name": target["skin_name"],
+                        "rarity": target["rarity"],
+                        "rarity_color": target["rarity_color"],
+                        "image_url": target["image_url"],
+                        "float": fl,
+                        "wear": wear_name,
+                        "price": new_price,
+                    },
+                    "new_balance": int(bal_row2["balance"]),
+                }
+            else:
+                # Item destroyed
+                await conn.execute("delete from economy_inventory where id = $1", inventory_id)
+                bal_row2 = await conn.fetchrow(
+                    "select balance from economy_users where tg_id = $1", user_id
+                )
+                return {
+                    "ok": True,
+                    "success": False,
+                    "probability": probability,
+                    "new_balance": int(bal_row2["balance"]),
+                }
+
+
+# ============ casino ============
+
+async def play_coinflip(user_id: int, bet: int, side: str) -> dict:
+    """50/50 doubler. side = 'heads' or 'tails'."""
+    import random
+    if bet <= 0:
+        return {"ok": False, "error": "Bet must be positive"}
+    if side not in ("heads", "tails"):
+        return {"ok": False, "error": "Invalid side"}
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            bal_row = await conn.fetchrow(
+                "select balance from economy_users where tg_id = $1 for update",
+                user_id,
+            )
+            if bal_row is None or int(bal_row["balance"]) < bet:
+                return {"ok": False, "error": "Not enough coins"}
+            actual = random.choice(["heads", "tails"])
+            win = (actual == side)
+            delta = bet if win else -bet
+            new_bal_row = await conn.fetchrow(
+                "update economy_users set balance = balance + $2, "
+                "total_earned = total_earned + greatest($2, 0), "
+                "total_spent = total_spent + greatest(-$2, 0) "
+                "where tg_id = $1 returning balance",
+                user_id, delta,
+            )
+            new_bal = int(new_bal_row["balance"])
+            await conn.execute(
+                "insert into economy_transactions (user_id, amount, kind, reason, balance_after) "
+                "values ($1, $2, 'casino', $3, $4)",
+                user_id, delta, f"coinflip_{side}_vs_{actual}", new_bal,
+            )
+    return {"ok": True, "win": win, "result": actual, "delta": delta, "new_balance": new_bal}
+
+
+SLOT_SYMBOLS = ["💀", "🔫", "💣", "💎", "🏆", "7️⃣"]
+SLOT_PAYOUTS = {
+    # three-of-a-kind multipliers (on total bet)
+    "💀": 5,
+    "🔫": 6,
+    "💣": 8,
+    "💎": 15,
+    "🏆": 25,
+    "7️⃣": 100,
+}
+
+
+async def play_slots(user_id: int, bet: int) -> dict:
+    import random
+    if bet <= 0:
+        return {"ok": False, "error": "Bet must be positive"}
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            bal_row = await conn.fetchrow(
+                "select balance from economy_users where tg_id = $1 for update", user_id,
+            )
+            if bal_row is None or int(bal_row["balance"]) < bet:
+                return {"ok": False, "error": "Not enough coins"}
+            reels = [random.choice(SLOT_SYMBOLS) for _ in range(3)]
+            payout = 0
+            outcome = "lose"
+            if reels[0] == reels[1] == reels[2]:
+                payout = bet * SLOT_PAYOUTS[reels[0]]
+                outcome = "jackpot"
+            elif reels[0] == reels[1] or reels[1] == reels[2] or reels[0] == reels[2]:
+                payout = int(bet * 1.5)  # two of a kind small payback
+                outcome = "pair"
+            delta = payout - bet
+            new_bal_row = await conn.fetchrow(
+                "update economy_users set balance = balance + $2, "
+                "total_earned = total_earned + greatest($2, 0), "
+                "total_spent = total_spent + greatest(-$2, 0) "
+                "where tg_id = $1 returning balance",
+                user_id, delta,
+            )
+            new_bal = int(new_bal_row["balance"])
+            await conn.execute(
+                "insert into economy_transactions (user_id, amount, kind, reason, balance_after) "
+                "values ($1, $2, 'casino', $3, $4)",
+                user_id, delta, f"slots_{''.join(reels)}_{outcome}", new_bal,
+            )
+    return {
+        "ok": True,
+        "reels": reels,
+        "outcome": outcome,
+        "delta": delta,
+        "payout": payout,
+        "bet": bet,
+        "new_balance": new_bal,
+    }
+
+
+async def play_crash(user_id: int, bet: int, target_mult: float) -> dict:
+    """Player sets target multiplier. Server rolls crash point.
+    Win if target <= crash_point."""
+    import random, math
+    if bet <= 0 or target_mult < 1.01:
+        return {"ok": False, "error": "Bet > 0, target >= 1.01"}
+    if target_mult > 50:
+        return {"ok": False, "error": "Max target 50x"}
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            bal_row = await conn.fetchrow(
+                "select balance from economy_users where tg_id = $1 for update", user_id,
+            )
+            if bal_row is None or int(bal_row["balance"]) < bet:
+                return {"ok": False, "error": "Not enough coins"}
+            # House edge 5%: crash_point distribution gives avg ~0.95x on naive 1/u random
+            # Implementation: u ~ Uniform(0,1), crash_point = max(1.00, 0.95 / (1 - u))
+            # Equivalent to common crash games
+            u = random.random()
+            if u < 0.03:
+                crash_point = 1.00  # 3% instant crash
+            else:
+                crash_point = 0.95 / (1 - u)
+                crash_point = max(1.00, min(100.0, crash_point))
+            crash_point = round(crash_point, 2)
+            win = target_mult <= crash_point
+            payout = int(bet * target_mult) if win else 0
+            delta = payout - bet
+            new_bal_row = await conn.fetchrow(
+                "update economy_users set balance = balance + $2, "
+                "total_earned = total_earned + greatest($2, 0), "
+                "total_spent = total_spent + greatest(-$2, 0) "
+                "where tg_id = $1 returning balance",
+                user_id, delta,
+            )
+            new_bal = int(new_bal_row["balance"])
+            await conn.execute(
+                "insert into economy_transactions (user_id, amount, kind, reason, balance_after) "
+                "values ($1, $2, 'casino', $3, $4)",
+                user_id, delta, f"crash_t{target_mult}_c{crash_point}_{'W' if win else 'L'}", new_bal,
+            )
+    return {
+        "ok": True,
+        "win": win,
+        "target": target_mult,
+        "crash_point": crash_point,
+        "delta": delta,
+        "payout": payout,
+        "new_balance": new_bal,
+    }
+
+
+# ============ daily task ============
+
+TASK_POOL = [
+    # (kind, prompt_template, answer_fn, reward)
+]
+
+
+def _make_math_task() -> dict:
+    import random
+    a = random.randint(12, 99)
+    b = random.randint(3, 15)
+    op = random.choice(["+", "-", "*"])
+    if op == "+":
+        q = f"Сколько будет {a} + {b}?"
+        ans = a + b
+    elif op == "-":
+        q = f"Сколько будет {a} − {b}?"
+        ans = a - b
+    else:
+        q = f"Сколько будет {a} × {b}?"
+        ans = a * b
+    return {"kind": "math", "prompt": q, "answer": str(ans), "reward": 120}
+
+
+def _make_cs_trivia_task() -> dict:
+    import random
+    pool = [
+        ("Сколько секунд после плана C4 до взрыва?", "40", 150),
+        ("Сколько раундов до победы в премьер CS2?", "13", 150),
+        ("Максимум патронов в магазине AWP?", "10", 180),
+        ("Сколько стоит AK-47 в CS2?", "2700", 180),
+        ("Сколько стоит AWP в CS2?", "4750", 180),
+        ("Какая нация у s1mple (по стране)?", "украина", 200),
+        ("Как называется главная точка плана B на Mirage одним словом?", "b", 100),
+        ("Сколько игроков в команде в премьер матче CS2?", "5", 120),
+    ]
+    q, a, r = random.choice(pool)
+    return {"kind": "cs_trivia", "prompt": q, "answer": a.lower(), "reward": r}
+
+
+def _make_logic_task() -> dict:
+    import random
+    pool = [
+        ("У тебя 3 флэшки. Ты кинул 2. Сколько осталось?", "1", 120),
+        ("Мать тильтит 20 минут. Ты - 40. На сколько ты тильтишь дольше?", "20", 120),
+        ("Раунд длится 1:55. Прошло 1:40. Сколько осталось (в секундах)?", "15", 150),
+    ]
+    q, a, r = random.choice(pool)
+    return {"kind": "logic", "prompt": q, "answer": a.lower(), "reward": r}
+
+
+def _new_task() -> dict:
+    import random
+    return random.choice([_make_math_task, _make_cs_trivia_task, _make_logic_task])()
+
+
+async def get_or_create_daily_task(user_id: int) -> dict:
+    from datetime import date as _date
+    today = _date.today()
+    async with pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "select kind, prompt, answer, reward, solved, attempts from economy_tasks "
+            "where user_id = $1 and day = $2",
+            user_id, today,
+        )
+        if row is None:
+            task = _new_task()
+            await conn.execute(
+                "insert into economy_tasks (user_id, day, kind, prompt, answer, reward) "
+                "values ($1, $2, $3, $4, $5, $6) "
+                "on conflict (user_id) do update set "
+                "  day = excluded.day, kind = excluded.kind, prompt = excluded.prompt, "
+                "  answer = excluded.answer, reward = excluded.reward, "
+                "  solved = false, attempts = 0, created_at = now(), solved_at = null",
+                user_id, today, task["kind"], task["prompt"], task["answer"], task["reward"],
+            )
+            return {"kind": task["kind"], "prompt": task["prompt"], "reward": task["reward"], "solved": False, "attempts": 0}
+        return {
+            "kind": row["kind"],
+            "prompt": row["prompt"],
+            "reward": int(row["reward"]),
+            "solved": bool(row["solved"]),
+            "attempts": int(row["attempts"]),
+        }
+
+
+async def submit_daily_task(user_id: int, answer: str) -> dict:
+    from datetime import date as _date
+    today = _date.today()
+    normalized = (answer or "").strip().lower()
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "select kind, prompt, answer, reward, solved, attempts "
+                "from economy_tasks where user_id = $1 and day = $2 for update",
+                user_id, today,
+            )
+            if row is None:
+                return {"ok": False, "error": "No task today — call /task first"}
+            if row["solved"]:
+                return {"ok": False, "error": "Already solved", "correct": True}
+            if int(row["attempts"]) >= 5:
+                return {"ok": False, "error": "Too many attempts today"}
+
+            correct = normalized == row["answer"]
+            await conn.execute(
+                "update economy_tasks set attempts = attempts + 1, "
+                "solved = $2, solved_at = case when $2 then now() else solved_at end "
+                "where user_id = $1 and day = $3",
+                user_id, correct, today,
+            )
+            if correct:
+                reward = int(row["reward"])
+                new_bal_row = await conn.fetchrow(
+                    "update economy_users set balance = balance + $2, total_earned = total_earned + $2 "
+                    "where tg_id = $1 returning balance",
+                    user_id, reward,
+                )
+                new_bal = int(new_bal_row["balance"])
+                await conn.execute(
+                    "insert into economy_transactions (user_id, amount, kind, reason, balance_after) "
+                    "values ($1, $2, 'task', 'daily', $3)",
+                    user_id, reward, new_bal,
+                )
+                return {"ok": True, "correct": True, "reward": reward, "new_balance": new_bal}
+            return {"ok": True, "correct": False, "attempts_left": max(0, 5 - int(row["attempts"]) - 1)}
+
+
+# ============ quiz rewards ============
+
+async def register_quiz(poll_id: str, correct_option_id: int, reward: int = 20) -> None:
+    async with pool().acquire() as conn:
+        await conn.execute(
+            "insert into economy_quizzes (poll_id, correct_option_id, reward) "
+            "values ($1, $2, $3) on conflict (poll_id) do nothing",
+            poll_id, correct_option_id, reward,
+        )
+
+
+async def handle_quiz_answer(poll_id: str, user_id: int, option_ids: list[int]) -> dict:
+    """Credit user if they answered a registered quiz correctly, once per quiz."""
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            quiz = await conn.fetchrow(
+                "select correct_option_id, reward from economy_quizzes where poll_id = $1",
+                poll_id,
+            )
+            if quiz is None:
+                return {"ok": False, "registered": False}
+            # Idempotency
+            already = await conn.fetchval(
+                "select correct from economy_quiz_answers where poll_id = $1 and user_id = $2",
+                poll_id, user_id,
+            )
+            correct = bool(option_ids and option_ids[0] == int(quiz["correct_option_id"]))
+            if already is None:
+                await conn.execute(
+                    "insert into economy_quiz_answers (poll_id, user_id, correct) values ($1, $2, $3)",
+                    poll_id, user_id, correct,
+                )
+            if not correct or already is not None:
+                return {"ok": True, "correct": correct, "rewarded": False}
+            reward = int(quiz["reward"])
+            await ensure_user(user_id)
+            new_bal_row = await conn.fetchrow(
+                "update economy_users set balance = balance + $2, total_earned = total_earned + $2 "
+                "where tg_id = $1 returning balance",
+                user_id, reward,
+            )
+            new_bal = int(new_bal_row["balance"]) if new_bal_row else 0
+            await conn.execute(
+                "insert into economy_transactions (user_id, amount, kind, reason, balance_after) "
+                "values ($1, $2, 'quiz', $3, $4)",
+                user_id, reward, poll_id, new_bal,
+            )
+            return {"ok": True, "correct": True, "rewarded": True, "reward": reward, "new_balance": new_bal}

@@ -391,6 +391,7 @@ function showItemDetail(invId) {
   const it = state.inventory.items.find(i => i.id === invId);
   if (!it) return;
   const body = document.getElementById('item-modal-body');
+  const dealerPayout = Math.max(1, Math.round(it.price * 0.7));
   body.innerHTML = `
     <div class="result-card rarity-${it.rarity}" style="border:0; padding:0; position:relative">
       ${it.stat_trak ? '<div class="stattrak-badge">ST™</div>' : ''}
@@ -403,11 +404,209 @@ function showItemDetail(invId) {
       <div class="result-price">${fmt(it.price)} 🪙</div>
     </div>
     <div style="display:flex; gap:8px; margin-top:16px; flex-wrap:wrap">
-      <button class="btn secondary" disabled style="flex:1">Продать (скоро)</button>
+      <button class="btn" id="item-sell-btn" style="flex:1; background:linear-gradient(135deg,var(--accent) 0%,var(--accent-gold) 100%);color:#0e0f14;border:0;font-weight:800">
+        Продать за ${fmt(dealerPayout)} 🪙
+      </button>
       <button class="btn secondary" disabled style="flex:1">Трейд (скоро)</button>
     </div>
   `;
   document.getElementById('item-modal').classList.remove('hidden');
+
+  document.getElementById('item-sell-btn').addEventListener('click', async () => {
+    if (!confirm(`Продать за ${fmt(dealerPayout)} 🪙?`)) return;
+    try {
+      const r = await api('/api/sell', { method: 'POST', body: JSON.stringify({ inventory_id: it.id }) });
+      tg?.HapticFeedback?.notificationOccurred?.('success');
+      toast(`+${fmt(r.payout)} 🪙`);
+      document.getElementById('item-modal').classList.add('hidden');
+      state.me.balance = r.new_balance;
+      document.getElementById('balance-display').textContent = fmt(state.me.balance);
+      await loadInventory();
+    } catch (e) {
+      toast(`Ошибка: ${e.message}`);
+    }
+  });
+}
+
+// ============== GAMES ==============
+async function loadDailyTask() {
+  try {
+    const task = await api('/api/task');
+    const card = document.getElementById('daily-task-card');
+    document.getElementById('dt-prompt').textContent = task.prompt;
+    document.getElementById('dt-reward').textContent = `💰 +${fmt(task.reward)} коинов за верный ответ`;
+    card.classList.remove('hidden');
+    const status = document.getElementById('dt-status');
+    status.textContent = '';
+    if (task.solved) {
+      status.textContent = '✅ Решено сегодня. Завтра будет новая.';
+      document.getElementById('dt-answer').disabled = true;
+      document.getElementById('dt-submit').disabled = true;
+    } else {
+      document.getElementById('dt-answer').disabled = false;
+      document.getElementById('dt-submit').disabled = false;
+      if (task.attempts > 0) status.textContent = `Попыток: ${task.attempts}/5`;
+    }
+  } catch (e) {
+    console.warn('daily task load', e);
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const submit = document.getElementById('dt-submit');
+  submit?.addEventListener('click', async () => {
+    const answerEl = document.getElementById('dt-answer');
+    const answer = (answerEl?.value || '').trim();
+    if (!answer) return;
+    try {
+      const r = await api('/api/task/answer', { method: 'POST', body: JSON.stringify({ answer }) });
+      const status = document.getElementById('dt-status');
+      if (r.correct && r.reward) {
+        tg?.HapticFeedback?.notificationOccurred?.('success');
+        toast(`🎉 +${fmt(r.reward)} 🪙`);
+        status.textContent = '✅ Решено!';
+        answerEl.disabled = true;
+        submit.disabled = true;
+        state.me.balance = r.new_balance;
+        document.getElementById('balance-display').textContent = fmt(state.me.balance);
+      } else if (r.correct) {
+        status.textContent = '✅ Уже решено';
+      } else {
+        tg?.HapticFeedback?.notificationOccurred?.('error');
+        status.textContent = `❌ Неправильно. Попыток осталось: ${r.attempts_left ?? '?'}`;
+      }
+    } catch (e) {
+      toast(`Ошибка: ${e.message}`);
+    }
+  });
+
+  document.querySelectorAll('.game-card').forEach(card => {
+    card.addEventListener('click', () => {
+      document.querySelectorAll('.game-card').forEach(c => c.classList.remove('active'));
+      card.classList.add('active');
+      renderGamePlay(card.dataset.game);
+    });
+  });
+});
+
+function renderGamePlay(game) {
+  const area = document.getElementById('game-play-area');
+  if (game === 'coinflip') {
+    area.innerHTML = `
+      <div class="game-play">
+        <h3>🪙 Coinflip</h3>
+        <label>Ставка</label>
+        <input type="number" id="cf-bet" min="1" value="100" />
+        <div class="game-row">
+          <button class="btn" data-side="heads">🪙 Орёл</button>
+          <button class="btn" data-side="tails">✨ Решка</button>
+        </div>
+        <div class="cf-result" id="cf-result">🪙</div>
+        <div class="game-out" id="cf-out" style="display:none"></div>
+      </div>
+    `;
+    area.querySelectorAll('[data-side]').forEach(btn => {
+      btn.addEventListener('click', () => playCoinflip(btn.dataset.side));
+    });
+  } else if (game === 'slots') {
+    area.innerHTML = `
+      <div class="game-play">
+        <h3>🎰 Слоты</h3>
+        <label>Ставка</label>
+        <input type="number" id="sl-bet" min="1" value="100" />
+        <div class="slots-display" id="sl-display">❓ ❓ ❓</div>
+        <button class="btn big-btn daily-btn" id="sl-spin">Крутить</button>
+        <div class="game-out" id="sl-out" style="display:none"></div>
+      </div>
+    `;
+    document.getElementById('sl-spin').addEventListener('click', playSlots);
+  } else if (game === 'crash') {
+    area.innerHTML = `
+      <div class="game-play">
+        <h3>💥 Crash</h3>
+        <label>Ставка</label>
+        <input type="number" id="cr-bet" min="1" value="100" />
+        <label>Таргет множитель (1.01 – 50.00)</label>
+        <input type="number" id="cr-target" min="1.01" max="50" step="0.1" value="2" />
+        <button class="btn big-btn daily-btn" id="cr-play">Играть</button>
+        <div class="game-out" id="cr-out" style="display:none"></div>
+      </div>
+    `;
+    document.getElementById('cr-play').addEventListener('click', playCrash);
+  } else if (game === 'upgrade') {
+    area.innerHTML = `
+      <div class="game-play">
+        <h3>⚡ Upgrade (скоро)</h3>
+        <p style="color:var(--text-dim); font-size:13px">
+          Выбираешь свой скин, скидываешь доп коины, выбираешь цель —
+          крутишь шанс прокачать. UI докрутим в следующем обновлении.
+        </p>
+      </div>
+    `;
+  }
+}
+
+async function playCoinflip(side) {
+  const bet = parseInt(document.getElementById('cf-bet').value || '0');
+  if (bet <= 0) return toast('Поставь сумму');
+  try {
+    const r = await api('/api/casino/coinflip', { method: 'POST', body: JSON.stringify({ bet, side }) });
+    const resEl = document.getElementById('cf-result');
+    const out = document.getElementById('cf-out');
+    resEl.textContent = r.result === 'heads' ? '🪙' : '✨';
+    out.style.display = 'block';
+    out.className = 'game-out ' + (r.win ? 'win' : 'lose');
+    out.textContent = r.win ? `+${fmt(r.delta)} 🪙` : `${fmt(r.delta)} 🪙`;
+    tg?.HapticFeedback?.notificationOccurred?.(r.win ? 'success' : 'error');
+    state.me.balance = r.new_balance;
+    document.getElementById('balance-display').textContent = fmt(state.me.balance);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function playSlots() {
+  const bet = parseInt(document.getElementById('sl-bet').value || '0');
+  if (bet <= 0) return toast('Поставь сумму');
+  const display = document.getElementById('sl-display');
+  display.textContent = '🔄 🔄 🔄';
+  try {
+    const r = await api('/api/casino/slots', { method: 'POST', body: JSON.stringify({ bet }) });
+    display.textContent = r.reels.join(' ');
+    const out = document.getElementById('sl-out');
+    out.style.display = 'block';
+    out.className = 'game-out ' + (r.delta > 0 ? 'win' : 'lose');
+    out.textContent = r.outcome === 'jackpot'
+      ? `🎉 JACKPOT +${fmt(r.delta)} 🪙`
+      : r.outcome === 'pair'
+        ? `Пара +${fmt(r.delta)} 🪙`
+        : `${fmt(r.delta)} 🪙`;
+    tg?.HapticFeedback?.notificationOccurred?.(r.outcome === 'jackpot' ? 'success' : (r.delta > 0 ? 'warning' : 'error'));
+    state.me.balance = r.new_balance;
+    document.getElementById('balance-display').textContent = fmt(state.me.balance);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function playCrash() {
+  const bet = parseInt(document.getElementById('cr-bet').value || '0');
+  const target = parseFloat(document.getElementById('cr-target').value || '0');
+  if (bet <= 0 || target < 1.01) return toast('Ставка > 0, таргет >= 1.01');
+  try {
+    const r = await api('/api/casino/crash', { method: 'POST', body: JSON.stringify({ bet, target_mult: target }) });
+    const out = document.getElementById('cr-out');
+    out.style.display = 'block';
+    out.className = 'game-out ' + (r.win ? 'win' : 'lose');
+    out.textContent = r.win
+      ? `🚀 Взлетело до ${r.crash_point}x. Ты снял на ${r.target}x. +${fmt(r.delta)} 🪙`
+      : `💥 Крэш на ${r.crash_point}x. Твой таргет ${r.target}x. ${fmt(r.delta)} 🪙`;
+    tg?.HapticFeedback?.notificationOccurred?.(r.win ? 'success' : 'error');
+    state.me.balance = r.new_balance;
+    document.getElementById('balance-display').textContent = fmt(state.me.balance);
+  } catch (e) {
+    toast(e.message);
+  }
 }
 
 function renderLeaderboard() {
@@ -441,6 +640,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (target === 'inventory') loadInventory();
     if (target === 'leaderboard') loadLeaderboard();
     if (target === 'home') loadMe();
+    if (target === 'games') loadDailyTask();
   });
 });
 

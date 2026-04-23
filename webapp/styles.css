@@ -790,6 +790,168 @@ h2 {
   font-weight: 700;
 }
 
+/* ===== games / casino ===== */
+.daily-task {
+  background: linear-gradient(135deg, rgba(245,176,66,0.1) 0%, rgba(235,75,75,0.05) 100%);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+  margin-bottom: 18px;
+}
+
+.daily-task.hidden { display: none; }
+
+.dt-header {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--accent-gold);
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.dt-prompt {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-bottom: 6px;
+}
+
+.dt-reward {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 12px;
+}
+
+.dt-input {
+  width: 100%;
+  padding: 11px 14px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  font-size: 15px;
+  margin-bottom: 10px;
+}
+
+.dt-status {
+  margin-top: 10px;
+  text-align: center;
+  font-size: 14px;
+}
+
+.game-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.game-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 12px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.game-card.active {
+  border-color: var(--accent-gold);
+  background: var(--bg-card-hover);
+}
+
+.game-card:active { transform: scale(0.97); }
+
+.game-icon {
+  font-size: 36px;
+  margin-bottom: 6px;
+}
+
+.game-name {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.game-desc {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.3;
+}
+
+.game-play {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+  margin-top: 10px;
+}
+
+.game-play h3 {
+  margin: 0 0 12px 0;
+  font-size: 17px;
+}
+
+.game-play label {
+  display: block;
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+.game-play input[type="number"], .game-play input[type="text"] {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  font-size: 15px;
+  margin-bottom: 12px;
+}
+
+.game-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.game-row button {
+  flex: 1;
+}
+
+.slots-display {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 18px 0;
+  background: var(--bg-elev);
+  border-radius: 10px;
+  margin-bottom: 12px;
+  font-size: 48px;
+  letter-spacing: 8px;
+}
+
+.cf-result {
+  text-align: center;
+  font-size: 60px;
+  padding: 20px;
+}
+
+.game-out {
+  text-align: center;
+  padding: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  margin-top: 10px;
+  border-radius: 8px;
+}
+
+.game-out.win { background: rgba(97, 223, 91, 0.15); color: #61df5b; }
+.game-out.lose { background: rgba(235, 75, 75, 0.15); color: var(--accent); }
+
 /* ===== leaderboard ===== */
 .leaderboard-list {
   display: flex;

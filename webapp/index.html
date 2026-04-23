@@ -120,6 +120,44 @@
         </div>
       </section>
 
+      <!-- view: games (casino mini-games) -->
+      <section class="view" data-view="games">
+        <h2>🎰 Игры</h2>
+        <div id="daily-task-card" class="daily-task hidden">
+          <div class="dt-header">📝 Задачка дня</div>
+          <div class="dt-prompt" id="dt-prompt">—</div>
+          <div class="dt-reward" id="dt-reward">—</div>
+          <input id="dt-answer" class="dt-input" placeholder="Твой ответ" />
+          <button id="dt-submit" class="btn big-btn daily-btn">Ответить</button>
+          <div id="dt-status" class="dt-status"></div>
+        </div>
+
+        <div class="game-grid">
+          <div class="game-card" data-game="coinflip">
+            <div class="game-icon">🪙</div>
+            <div class="game-name">Coinflip</div>
+            <div class="game-desc">50/50 — двойная ставка или потеря</div>
+          </div>
+          <div class="game-card" data-game="slots">
+            <div class="game-icon">🎰</div>
+            <div class="game-name">Слоты</div>
+            <div class="game-desc">3 колеса, 7️⃣7️⃣7️⃣ даёт x100</div>
+          </div>
+          <div class="game-card" data-game="crash">
+            <div class="game-icon">💥</div>
+            <div class="game-name">Crash</div>
+            <div class="game-desc">Ставишь таргет-множитель, ждёшь взрыва</div>
+          </div>
+          <div class="game-card" data-game="upgrade">
+            <div class="game-icon">⚡</div>
+            <div class="game-name">Upgrade</div>
+            <div class="game-desc">Рисково прокачай скин в более дорогой</div>
+          </div>
+        </div>
+
+        <div id="game-play-area"></div>
+      </section>
+
       <!-- view: leaderboard -->
       <section class="view" data-view="leaderboard">
         <h2>💎 Лидерборд</h2>
@@ -141,6 +179,10 @@
       <button class="tab" data-target="inventory">
         <span class="tab-icon">🎒</span>
         <span class="tab-label">Инвентарь</span>
+      </button>
+      <button class="tab" data-target="games">
+        <span class="tab-icon">🎰</span>
+        <span class="tab-label">Игры</span>
       </button>
       <button class="tab" data-target="leaderboard">
         <span class="tab-icon">💎</span>
