@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import random
 from io import BytesIO
 
 from aiogram import F, Router
@@ -8,6 +9,11 @@ from aiogram.types import Message
 
 from app.config import get_settings
 from app.db import repos
+from app.handlers.ai_chat import (
+    ADDRESS_HOOKS,
+    NAME_TRIGGER,
+    _ask,
+)
 from app.services.transcribe import transcribe_audio
 
 router = Router(name="voice")
@@ -76,3 +82,27 @@ async def on_voice(msg: Message) -> None:
     except Exception:
         log.exception("voice log_message failed")
     log.info("voice transcribed in chat=%s by %s (%d chars)", msg.chat.id, msg.from_user.id, len(text))
+
+    if msg.chat.type == "private":
+        await _ask(msg, text)
+        return
+
+    # Trigger detection on transcribed text — name/address hook always responds,
+    # otherwise roll the same random chime dice (with question-mark bonus).
+    trigger_hit = bool(NAME_TRIGGER.search(text)) or bool(ADDRESS_HOOKS.search(text))
+    if trigger_hit:
+        await _ask(msg, text)
+        return
+
+    if len(text.split()) < s.chime_in_min_words:
+        return
+    probability = s.chime_in_probability
+    if "?" in text:
+        probability = min(1.0, probability * 2)
+    if random.random() > probability:
+        return
+    allowed = await repos.can_chime_and_mark(msg.chat.id, s.chime_in_cooldown_seconds)
+    if not allowed:
+        return
+    log.info("voice chime-in triggered in chat=%s", msg.chat.id)
+    await _ask(msg, text)
