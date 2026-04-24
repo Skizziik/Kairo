@@ -483,7 +483,25 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.getElementById('inv-bulk-all')?.addEventListener('click', () => {
     if (!state.inventory) return;
-    state.inventory.items.forEach(it => invSelection.ids.add(it.id));
+    // Auto-enter selection mode if not already (covers the "Все first, then Продать" flow)
+    if (!invSelection.active) {
+      invSelection.active = true;
+      const modeBtn = document.getElementById('inv-select-mode');
+      if (modeBtn) {
+        modeBtn.textContent = 'Готово';
+        modeBtn.classList.add('active');
+      }
+    }
+    // Toggle on visible (filtered) items: if all already selected — deselect; else — select all
+    const visible = _sortInventory(_filterInventory(state.inventory.items));
+    const allVisibleSelected = visible.length > 0 && visible.every(it => invSelection.ids.has(it.id));
+    if (allVisibleSelected) {
+      visible.forEach(it => invSelection.ids.delete(it.id));
+      toast(`Снято выделение с ${visible.length}`);
+    } else {
+      visible.forEach(it => invSelection.ids.add(it.id));
+      toast(`✓ Выбрано ${visible.length} предметов`);
+    }
     updateBulkBar();
     renderInventory();
   });
