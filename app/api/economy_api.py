@@ -104,13 +104,15 @@ async def api_cases(user: dict = Depends(require_user)) -> list[dict]:
 
             preview_items: list[dict] = []
             if all_ids:
-                # Exclude knives/gloves — they're rare "jackpot" drops, not what
-                # the case is visually "about". Show the top regular weapons.
+                # Prefer regular weapons for the preview, but fall back to knives/gloves
+                # when the pool has too few weapons (e.g. "Нож или ничего" has only 1).
                 rows = await conn.fetch(
-                    "select id, full_name, rarity, rarity_color, image_url, base_price "
+                    "select id, full_name, rarity, rarity_color, image_url, base_price, category "
                     "from economy_skins_catalog "
-                    "where id = any($1::int[]) and category = 'weapon' "
-                    "order by base_price desc limit 5",
+                    "where id = any($1::int[]) "
+                    "order by (case when category = 'weapon' then 0 else 1 end), "
+                    "         base_price desc "
+                    "limit 5",
                     all_ids,
                 )
                 preview_items = [
