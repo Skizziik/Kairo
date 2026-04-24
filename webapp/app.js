@@ -1444,6 +1444,28 @@ async function playCoinflip(side) {
   }
 }
 
+function _showJackpotCelebration(reels, delta) {
+  // Remove any existing overlay
+  document.getElementById('jp-overlay')?.remove();
+  const sym = reels[0];
+  const el = document.createElement('div');
+  el.id = 'jp-overlay';
+  el.innerHTML = `
+    <div class="jp-overlay-card">
+      <div class="jp-overlay-header">🎉 JACKPOT 🎉</div>
+      <div class="jp-overlay-reels">${sym} ${sym} ${sym}</div>
+      <div class="jp-overlay-amount">+${fmt(delta)} 🪙</div>
+      <button class="jp-overlay-close" id="jp-close">Погнали дальше</button>
+    </div>
+  `;
+  document.body.appendChild(el);
+  const dismiss = () => el.remove();
+  el.querySelector('#jp-close').addEventListener('click', dismiss);
+  el.addEventListener('click', (e) => { if (e.target === el) dismiss(); });
+  // Auto-dismiss after 5s (user can close earlier by tap)
+  setTimeout(dismiss, 5000);
+}
+
 async function playSlots() {
   const bet = parseInt(document.getElementById('sl-bet').value || '0');
   if (bet <= 0) return toast('Поставь сумму');
@@ -1457,7 +1479,7 @@ async function playSlots() {
   display.classList.remove('sl-jackpot');
   if (btn) btn.disabled = true;
 
-  // Pure random animation — no shared state with final rendering
+  // Pure random animation
   const SYMS = ['💀', '🔫', '💣', '💎', '🏆', '7️⃣'];
   const rand = () => SYMS[Math.floor(Math.random() * SYMS.length)];
   const spinTimer = setInterval(() => {
@@ -1474,7 +1496,6 @@ async function playSlots() {
     return;
   }
 
-  // Guard: bad response shape
   if (!Array.isArray(result.reels) || result.reels.length !== 3) {
     clearInterval(spinTimer);
     if (btn) btn.disabled = false;
@@ -1482,16 +1503,14 @@ async function playSlots() {
     return;
   }
 
-  // Spin animation for ~1.4s total
+  // Spin animation ~1.4s
   await new Promise(r => setTimeout(r, 1400));
 
-  // STOP animation FIRST, then render final result — no race possible
+  // STOP animation, render server result
   clearInterval(spinTimer);
   display.textContent = `${result.reels[0]} ${result.reels[1]} ${result.reels[2]}`;
 
-  // Determine jackpot PURELY from reels on the client — don't trust outcome field.
-  // If server rolled 3 matching symbols, client MUST display jackpot. This is the
-  // single source of truth: what the user sees on the reels = what happened.
+  // Derive jackpot from reels on client — ignore server outcome field
   const isJackpot = result.reels[0] === result.reels[1] && result.reels[1] === result.reels[2];
 
   if (isJackpot) {
@@ -1501,7 +1520,6 @@ async function playSlots() {
     tg?.HapticFeedback?.impactOccurred?.('light');
   }
 
-  // Outcome banner (driven by isJackpot, not server field)
   await new Promise(r => setTimeout(r, 200));
   out.style.display = 'block';
   out.className = 'game-out ' + (isJackpot ? 'win' : 'lose');
@@ -1518,7 +1536,14 @@ async function playSlots() {
     if (bel) bel.textContent = fmt(state.me.balance);
   }
 
-  if (btn) btn.disabled = false;
+  // JACKPOT: show full-screen celebration AND keep button disabled for 3s so
+  // user can't accidentally spin over the result.
+  if (isJackpot) {
+    _showJackpotCelebration(result.reels, result.delta);
+    setTimeout(() => { if (btn) btn.disabled = false; }, 3000);
+  } else {
+    if (btn) btn.disabled = false;
+  }
 }
 
 // ============== MISSIONS ==============

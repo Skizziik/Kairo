@@ -2058,6 +2058,69 @@ h2 {
   letter-spacing: 8px;
   transition: background 0.25s, box-shadow 0.25s;
 }
+/* ============================================================
+   JACKPOT CELEBRATION OVERLAY
+   ============================================================ */
+#jp-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.85);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: jpFadeIn 0.3s ease-out;
+}
+@keyframes jpFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.jp-overlay-card {
+  background: linear-gradient(135deg, #ffb347 0%, #ff69b4 100%);
+  border-radius: 24px;
+  padding: 40px 32px;
+  text-align: center;
+  box-shadow: 0 0 80px rgba(255,199,107,0.8), 0 0 40px rgba(255,100,180,0.6);
+  animation: jpPopIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  max-width: 90vw;
+}
+@keyframes jpPopIn {
+  0% { transform: scale(0.3) rotate(-5deg); opacity: 0; }
+  60% { transform: scale(1.05) rotate(1deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0deg); }
+}
+.jp-overlay-header {
+  font-size: 28px;
+  font-weight: 900;
+  color: #0a0c14;
+  letter-spacing: 2px;
+  margin-bottom: 16px;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+.jp-overlay-reels {
+  font-size: 64px;
+  line-height: 1;
+  letter-spacing: 8px;
+  margin-bottom: 16px;
+  animation: jpPulse 0.6s ease-in-out infinite alternate;
+}
+@keyframes jpPulse { to { transform: scale(1.08); } }
+.jp-overlay-amount {
+  font-size: 32px;
+  font-weight: 900;
+  color: #0a0c14;
+  margin-bottom: 24px;
+}
+.jp-overlay-close {
+  background: #0a0c14;
+  color: #ffc76b;
+  border: 2px solid #ffc76b;
+  padding: 12px 28px;
+  border-radius: 999px;
+  font-weight: 800;
+  font-size: 15px;
+  cursor: pointer;
+}
+.jp-overlay-close:hover { background: #111; }
+
 .slots-display.sl-jackpot {
   background: linear-gradient(135deg, rgba(255,199,107,0.2), rgba(255,100,180,0.15));
   box-shadow: 0 0 40px rgba(255,199,107,0.5), inset 0 0 20px rgba(255,199,107,0.3);
