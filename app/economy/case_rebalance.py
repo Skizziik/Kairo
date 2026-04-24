@@ -18,14 +18,20 @@ from app.db.client import pool
 log = logging.getLogger(__name__)
 
 
-# Per-case overrides. Cases not listed are left untouched.
-CASE_MAX_ITEMS: dict[str, int] = {
-    "rip": 80,
+# Per-case config.
+#   max_items:       total pool size (proportional to rarity weights)
+#   min_base_price:  exclude any skin with base_price < this (hard floor on shittiness)
+# Cases not listed are left untouched.
+CASE_CONFIG: dict[str, dict] = {
+    "rip": {"max_items": 80, "min_base_price": 2500},
 }
 
 
-async def _trim_case(case_key: str, max_items: int) -> bool:
-    """Returns True if case was trimmed/changed."""
+async def _trim_case(case_key: str, cfg: dict) -> bool:
+    """Idempotent: rewrites loot_pool to match cfg. Returns True if changed."""
+    max_items = int(cfg.get("max_items") or 80)
+    min_price = int(cfg.get("min_base_price") or 0)
+
     async with pool().acquire() as conn:
         case = await conn.fetchrow(
             "select id, loot_pool from economy_cases where key = $1", case_key,
@@ -40,47 +46,65 @@ async def _trim_case(case_key: str, max_items: int) -> bool:
         by_rarity = dict(loot_pool.get("by_rarity", {}))
         rarity_weights = dict(loot_pool.get("rarity_weights", {}))
 
-        current_total = sum(len(v) for v in by_rarity.values())
-        if current_total <= max_items:
-            log.info("case rebalance: %s already %d <= %d items, skip",
-                     case_key, current_total, max_items)
-            return False
-
-        # Fetch base_prices for sorting
+        # Fetch base_prices to apply min_price filter + sort
         all_ids = [int(i) for ids in by_rarity.values() for i in ids]
+        if not all_ids:
+            return False
         rows = await conn.fetch(
             "select id, base_price from economy_skins_catalog where id = any($1::int[])",
             all_ids,
         )
         price_by_id = {int(r["id"]): int(r["base_price"]) for r in rows}
 
-        # Allocate quota per rarity proportional to weights
-        total_w = sum(rarity_weights.values()) or 1
+        # Apply price floor
+        filtered = {}
+        for rarity, ids in by_rarity.items():
+            qualifying = [int(i) for i in ids if price_by_id.get(int(i), 0) >= min_price]
+            if qualifying:
+                filtered[rarity] = qualifying
+
+        # Allocate quota per rarity proportional to weights (using filtered pool only)
+        active_weights = {k: v for k, v in rarity_weights.items() if filtered.get(k)}
+        total_w = sum(active_weights.values()) or 1
         trimmed: dict[str, list[int]] = {}
-        for rarity, weight in rarity_weights.items():
-            ids = by_rarity.get(rarity, [])
-            if not ids:
-                continue
-            quota = max(3, round(max_items * (weight / total_w)))  # at least 3 per rarity
+        for rarity, weight in active_weights.items():
+            ids = filtered[rarity]
+            quota = max(3, round(max_items * (weight / total_w)))
             sorted_ids = sorted(ids, key=lambda i: price_by_id.get(int(i), 0), reverse=True)
-            trimmed[rarity] = [int(x) for x in sorted_ids[:quota]]
+            trimmed[rarity] = sorted_ids[:min(quota, len(sorted_ids))]
 
         new_total = sum(len(v) for v in trimmed.values())
-        # Only those rarities that kept items matter; filter weights too.
         new_weights = {k: v for k, v in rarity_weights.items() if trimmed.get(k)}
+
+        current_total = sum(len(v) for v in by_rarity.values())
+        # Idempotency check: same pool? If ids/counts already match, skip write.
+        same = (
+            current_total == new_total
+            and all(set(by_rarity.get(k, [])) == set(trimmed.get(k, [])) for k in set(by_rarity) | set(trimmed))
+        )
+        if same:
+            log.info("case rebalance: %s already at target (%d), skip", case_key, new_total)
+            return False
 
         new_loot = {"by_rarity": trimmed, "rarity_weights": new_weights}
         await conn.execute(
             "update economy_cases set loot_pool = $2::jsonb where id = $1",
             int(case["id"]), json.dumps(new_loot),
         )
-    log.info("case rebalance: %s trimmed %d → %d items", case_key, current_total, new_total)
+    cheapest = min(
+        (price_by_id[i] for ids in trimmed.values() for i in ids),
+        default=0,
+    )
+    log.info(
+        "case rebalance: %s: %d → %d items (min_price %d, actual cheapest %d)",
+        case_key, current_total, new_total, min_price, cheapest,
+    )
     return True
 
 
 async def rebalance_all() -> None:
-    for key, max_items in CASE_MAX_ITEMS.items():
+    for key, cfg in CASE_CONFIG.items():
         try:
-            await _trim_case(key, max_items)
+            await _trim_case(key, cfg)
         except Exception as e:
             log.warning("case rebalance for %s failed: %s", key, e)
