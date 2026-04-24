@@ -2046,17 +2046,82 @@ h2 {
   flex: 1;
 }
 
-.slots-display {
+/* ============================================================
+   SLOT MACHINE — 3 independent reels
+   ============================================================ */
+.slots-machine {
   display: flex;
   justify-content: center;
-  gap: 8px;
-  padding: 18px 0;
-  background: var(--bg-elev);
-  border-radius: 10px;
-  margin-bottom: 12px;
-  font-size: 48px;
-  letter-spacing: 8px;
-  transition: background 0.25s, box-shadow 0.25s;
+  gap: 10px;
+  padding: 18px 12px;
+  background: linear-gradient(180deg, #0a0c14 0%, #14171f 100%);
+  border: 2px solid rgba(255,255,255,0.06);
+  border-radius: 14px;
+  margin-bottom: 14px;
+  transition: border-color 0.3s, box-shadow 0.3s, background 0.3s;
+}
+
+.slot-reel {
+  flex: 1;
+  aspect-ratio: 1;
+  max-width: 90px;
+  background: radial-gradient(circle at 50% 30%, #2a2f3d 0%, #0f1218 100%);
+  border: 2px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+  transition: border-color 0.3s, background 0.3s;
+}
+
+.slot-reel span {
+  font-size: 44px;
+  line-height: 1;
+  display: block;
+  transition: transform 0.1s;
+}
+
+.slot-reel.spinning span {
+  animation: reelSpin 0.08s linear infinite;
+  filter: blur(0.6px);
+}
+@keyframes reelSpin {
+  0%   { transform: translateY(-5px); }
+  100% { transform: translateY(5px); }
+}
+
+.slot-reel.stopped span {
+  animation: reelStop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  filter: none;
+}
+@keyframes reelStop {
+  0%   { transform: translateY(-20px) scale(0.8); }
+  55%  { transform: translateY(4px)   scale(1.18); }
+  100% { transform: translateY(0)     scale(1); }
+}
+
+.slot-reel.matched {
+  border-color: #ffc76b;
+  background: radial-gradient(circle at 50% 30%, rgba(255,199,107,0.35) 0%, rgba(255,100,180,0.2) 100%);
+  box-shadow: 0 0 28px rgba(255,199,107,0.7), inset 0 0 14px rgba(255,199,107,0.35);
+  animation: reelMatchPulse 0.9s ease-in-out infinite alternate;
+}
+@keyframes reelMatchPulse {
+  from { box-shadow: 0 0 28px rgba(255,199,107,0.7), inset 0 0 14px rgba(255,199,107,0.35); transform: scale(1); }
+  to   { box-shadow: 0 0 45px rgba(255,199,107,1.0), inset 0 0 22px rgba(255,199,107,0.55); transform: scale(1.04); }
+}
+
+.slots-machine.jackpot {
+  border-color: #ffc76b;
+  box-shadow: 0 0 50px rgba(255,199,107,0.55);
+  background: linear-gradient(180deg, rgba(255,199,107,0.1) 0%, rgba(255,100,180,0.08) 100%);
+}
+
+/* Legacy old style — kept off */
+.slots-display {
+  display: none;
 }
 /* ============================================================
    JACKPOT CELEBRATION OVERLAY
@@ -2121,15 +2186,6 @@ h2 {
 }
 .jp-overlay-close:hover { background: #111; }
 
-.slots-display.sl-jackpot {
-  background: linear-gradient(135deg, rgba(255,199,107,0.2), rgba(255,100,180,0.15));
-  box-shadow: 0 0 40px rgba(255,199,107,0.5), inset 0 0 20px rgba(255,199,107,0.3);
-  animation: slotJackpotPulse 0.6s ease-in-out 3;
-}
-@keyframes slotJackpotPulse {
-  0%, 100% { box-shadow: 0 0 40px rgba(255,199,107,0.5), inset 0 0 20px rgba(255,199,107,0.3); }
-  50% { box-shadow: 0 0 60px rgba(255,199,107,0.9), inset 0 0 30px rgba(255,199,107,0.5); }
-}
 
 .cf-result {
   text-align: center;

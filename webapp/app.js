@@ -648,7 +648,11 @@ function renderGamePlay(game, target) {
         <h3>🎰 Слоты</h3>
         <label>Ставка</label>
         <input type="number" id="sl-bet" min="1" value="100" />
-        <div class="slots-display" id="sl-display">❓ ❓ ❓</div>
+        <div class="slots-machine" id="sl-machine">
+          <div class="slot-reel" id="sl-reel-0"><span>❓</span></div>
+          <div class="slot-reel" id="sl-reel-1"><span>❓</span></div>
+          <div class="slot-reel" id="sl-reel-2"><span>❓</span></div>
+        </div>
         <button class="btn big-btn daily-btn" id="sl-spin">Крутить</button>
         <div class="game-out" id="sl-out" style="display:none"></div>
       </div>
@@ -1444,90 +1448,83 @@ async function playCoinflip(side) {
   }
 }
 
-function _showJackpotCelebration(reels, delta) {
-  // Remove any existing overlay
-  document.getElementById('jp-overlay')?.remove();
-  const sym = reels[0];
-  const el = document.createElement('div');
-  el.id = 'jp-overlay';
-  el.innerHTML = `
-    <div class="jp-overlay-card">
-      <div class="jp-overlay-header">🎉 JACKPOT 🎉</div>
-      <div class="jp-overlay-reels">${sym} ${sym} ${sym}</div>
-      <div class="jp-overlay-amount">+${fmt(delta)} 🪙</div>
-      <button class="jp-overlay-close" id="jp-close">Погнали дальше</button>
-    </div>
-  `;
-  document.body.appendChild(el);
-  const dismiss = () => el.remove();
-  el.querySelector('#jp-close').addEventListener('click', dismiss);
-  el.addEventListener('click', (e) => { if (e.target === el) dismiss(); });
-  // Auto-dismiss after 5s (user can close earlier by tap)
-  setTimeout(dismiss, 5000);
-}
+const SLOT_SYMBOLS = ['💀', '🔫', '💣', '💎', '🏆', '7️⃣'];
 
 async function playSlots() {
   const bet = parseInt(document.getElementById('sl-bet').value || '0');
   if (bet <= 0) return toast('Поставь сумму');
-  const display = document.getElementById('sl-display');
+  const machine = document.getElementById('sl-machine');
+  const reelEls = [0, 1, 2].map(i => document.getElementById(`sl-reel-${i}`));
   const out = document.getElementById('sl-out');
   const btn = document.getElementById('sl-spin');
   if (btn?.disabled) return;
 
   // Reset UI
   out.style.display = 'none';
-  display.classList.remove('sl-jackpot');
+  machine.classList.remove('jackpot');
+  reelEls.forEach(r => r.classList.remove('stopped', 'matched'));
   if (btn) btn.disabled = true;
 
-  // Pure random animation
-  const SYMS = ['💀', '🔫', '💣', '💎', '🏆', '7️⃣'];
-  const rand = () => SYMS[Math.floor(Math.random() * SYMS.length)];
-  const spinTimer = setInterval(() => {
-    display.textContent = `${rand()} ${rand()} ${rand()}`;
-  }, 80);
+  // Start independent spin on each reel
+  const spinTimers = reelEls.map(reel => {
+    const span = reel.querySelector('span');
+    reel.classList.add('spinning');
+    return setInterval(() => {
+      span.textContent = SLOT_SYMBOLS[Math.floor(Math.random() * SLOT_SYMBOLS.length)];
+    }, 70);
+  });
 
+  // Fetch server result in parallel with animation
   let result;
   try {
     result = await api('/api/casino/slots', { method: 'POST', body: JSON.stringify({ bet }) });
   } catch (e) {
-    clearInterval(spinTimer);
+    spinTimers.forEach(clearInterval);
+    reelEls.forEach(r => r.classList.remove('spinning'));
     if (btn) btn.disabled = false;
     toast(e.message);
     return;
   }
 
   if (!Array.isArray(result.reels) || result.reels.length !== 3) {
-    clearInterval(spinTimer);
+    spinTimers.forEach(clearInterval);
+    reelEls.forEach(r => r.classList.remove('spinning'));
     if (btn) btn.disabled = false;
     toast('Сервер вернул кривой ответ');
     return;
   }
 
-  // Spin animation ~1.4s
-  await new Promise(r => setTimeout(r, 1400));
+  // Stop reels one by one: 900ms, 1200ms, 1500ms from spin start
+  const stopReel = (i) => {
+    clearInterval(spinTimers[i]);
+    const span = reelEls[i].querySelector('span');
+    span.textContent = result.reels[i];
+    reelEls[i].classList.remove('spinning');
+    reelEls[i].classList.add('stopped');
+    tg?.HapticFeedback?.impactOccurred?.('light');
+  };
 
-  // STOP animation, render server result
-  clearInterval(spinTimer);
-  display.textContent = `${result.reels[0]} ${result.reels[1]} ${result.reels[2]}`;
+  await new Promise(r => setTimeout(r, 900));  stopReel(0);
+  await new Promise(r => setTimeout(r, 300));  stopReel(1);
+  await new Promise(r => setTimeout(r, 300));  stopReel(2);
 
-  // Derive jackpot from reels on client — ignore server outcome field
+  // Jackpot check: compare 3 reels
   const isJackpot = result.reels[0] === result.reels[1] && result.reels[1] === result.reels[2];
 
   if (isJackpot) {
-    display.classList.add('sl-jackpot');
+    // Highlight each reel + machine-level glow
+    reelEls.forEach(r => r.classList.add('matched'));
+    machine.classList.add('jackpot');
     tg?.HapticFeedback?.notificationOccurred?.('success');
-  } else {
-    tg?.HapticFeedback?.impactOccurred?.('light');
   }
 
-  await new Promise(r => setTimeout(r, 200));
+  // Outcome banner
+  await new Promise(r => setTimeout(r, 250));
   out.style.display = 'block';
   out.className = 'game-out ' + (isJackpot ? 'win' : 'lose');
-  if (isJackpot) {
-    out.textContent = `🎉 JACKPOT ${result.reels.join('')} +${fmt(result.delta)} 🪙`;
-  } else {
-    out.textContent = `${fmt(result.delta)} 🪙`;
-  }
+  out.textContent = isJackpot
+    ? `🎉 JACKPOT! +${fmt(result.delta)} 🪙`
+    : `${fmt(result.delta)} 🪙`;
 
   // Balance sync
   if (typeof result.new_balance === 'number') {
@@ -1536,11 +1533,9 @@ async function playSlots() {
     if (bel) bel.textContent = fmt(state.me.balance);
   }
 
-  // JACKPOT: show full-screen celebration AND keep button disabled for 3s so
-  // user can't accidentally spin over the result.
+  // On jackpot, lock button for 2.5s so next spin doesn't immediately overwrite the celebration
   if (isJackpot) {
-    _showJackpotCelebration(result.reels, result.delta);
-    setTimeout(() => { if (btn) btn.disabled = false; }, 3000);
+    setTimeout(() => { if (btn) btn.disabled = false; }, 2500);
   } else {
     if (btn) btn.disabled = false;
   }
