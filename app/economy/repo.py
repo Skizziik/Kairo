@@ -194,17 +194,40 @@ async def open_case(user_id: int, case_id: int) -> dict:
             roll = random.random()
             cum = 0.0
             chosen_rarity = None
-            # rarities must be iterated in fixed order (lowest to highest) for predictability
             rarity_order = ["mil-spec", "restricted", "classified", "covert", "exceedingly_rare", "consumer", "industrial"]
-            # Use only rarities that have weight AND items
             available = [r for r in rarity_order if rarity_weights.get(r) and by_rarity.get(r)]
             if not available:
                 return {"ok": False, "error": "Лут-пул пуст"}
-            total_weight = sum(rarity_weights[r] for r in available)
+
+            # Prestige Case Face bonus — shift weight toward top rarity
+            from app.economy import prestige as _prestige
+            forge_row = await conn.fetchrow(
+                "select case_face_lvl from forge_users where tg_id = $1", user_id
+            )
+            case_face_bonus = _prestige.case_face_bonus_pct(
+                int(forge_row["case_face_lvl"] or 0) if forge_row else 0
+            )
+            effective_weights = dict(rarity_weights)
+            if case_face_bonus > 0 and len(available) > 1:
+                TOP_PRIORITY = ["exceedingly_rare", "covert", "classified", "restricted", "mil-spec", "industrial", "consumer"]
+                top_r = next((r for r in TOP_PRIORITY if r in available), None)
+                if top_r:
+                    total_w = sum(effective_weights[r] for r in available)
+                    boost_w = total_w * case_face_bonus
+                    others_w = total_w - effective_weights[top_r]
+                    if others_w > 0:
+                        scale = max(0.0, (others_w - boost_w) / others_w)
+                        for r in available:
+                            if r == top_r:
+                                effective_weights[r] = effective_weights[r] + boost_w
+                            else:
+                                effective_weights[r] = effective_weights[r] * scale
+
+            total_weight = sum(effective_weights[r] for r in available)
             if total_weight <= 0:
                 return {"ok": False, "error": "Кривой лут-пул"}
             for r in available:
-                cum += rarity_weights[r] / total_weight
+                cum += effective_weights[r] / total_weight
                 if roll <= cum:
                     chosen_rarity = r
                     break

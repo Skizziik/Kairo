@@ -500,3 +500,26 @@ async def api_forge_tree(user: dict = Depends(require_user)) -> list[dict]:
 async def api_forge_leaderboard(user: dict = Depends(require_user)) -> list[dict]:
     _ = user
     return await _forge.leaderboard(limit=20)
+
+
+# ================ PRESTIGE ================
+from app.economy import prestige as _prestige
+
+
+@router.get("/prestige/state")
+async def api_prestige_state(user: dict = Depends(require_user)) -> dict:
+    return await _prestige.get_state(int(user["id"]))
+
+
+@router.post("/prestige/do")
+async def api_prestige_do(user: dict = Depends(require_user)) -> dict:
+    return await _prestige.do_prestige(int(user["id"]))
+
+
+class PrestigeBuyReq(BaseModel):
+    branch: str
+
+
+@router.post("/prestige/buy")
+async def api_prestige_buy(req: PrestigeBuyReq, user: dict = Depends(require_user)) -> dict:
+    return await _prestige.buy_upgrade(int(user["id"]), req.branch)

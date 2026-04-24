@@ -17,6 +17,7 @@ import random
 from datetime import date, datetime, timedelta, timezone
 
 from app.db.client import pool
+from app.economy import prestige as _prestige
 
 log = logging.getLogger(__name__)
 
@@ -360,17 +361,25 @@ async def get_state(tg_id: int) -> dict:
         await _spawn_weapon(tg_id)
         return await get_state(tg_id)
 
-    dmg = damage_at(int(row["damage_level"]))
-    crit_c = crit_chance_at(int(row["crit_level"]))
+    # Prestige bonuses — applied on top of base values for display
+    hp_pow_lvl = int(row["hammer_power_lvl"] or 0) if "hammer_power_lvl" in row else 0
+    dust_lvl = int(row["dust_magic_lvl"] or 0) if "dust_magic_lvl" in row else 0
+    bot_tune_lvl = int(row["bot_tune_lvl"] or 0) if "bot_tune_lvl" in row else 0
+    sharpen_lvl = int(row["sharpen_lvl"] or 0) if "sharpen_lvl" in row else 0
+    fortune_lvl = int(row["fortune_lvl"] or 0) if "fortune_lvl" in row else 0
+
+    dmg_base = damage_at(int(row["damage_level"]))
+    dmg = int(dmg_base * _prestige.hammer_power_mult(hp_pow_lvl))
+    crit_c = crit_chance_at(int(row["crit_level"])) + _prestige.sharpen_flat_crit(sharpen_lvl)
     crit_mult = crit_multiplier_at(int(row["crit_power_level"] or 0))
     luck_b = luck_bonus_at(int(row["luck_level"]))
-    tier_luck = tier_luck_at(int(row["tier_luck_level"] or 0))
+    tier_luck = tier_luck_at(int(row["tier_luck_level"] or 0)) + _prestige.fortune_flat_tier_luck(fortune_lvl)
     st_hunt = stattrak_chance_at(int(row["stattrak_hunter_level"] or 0))
     silver_lvl = int(row["silver_level"])
     gold_lvl = int(row["gold_level"])
     global_lvl = int(row["global_level"])
     offline_cap_lvl = int(row["offline_cap_level"])
-    afk_rate = total_afk_rate(silver_lvl, gold_lvl, global_lvl)
+    afk_rate = total_afk_rate(silver_lvl, gold_lvl, global_lvl) * _prestige.bot_tune_mult(bot_tune_lvl)
     daily_cap_today = afk_daily_cap_for(offline_cap_lvl)
 
     return {
@@ -401,6 +410,10 @@ async def get_state(tg_id: int) -> dict:
             "afk_rate_per_sec": round(afk_rate, 2),
             "offline_cap_hours": offline_hours_at(offline_cap_lvl),
             "afk_daily_cap": daily_cap_today,
+        },
+        "prestige": {
+            "level": int(row["prestige_level"] or 0) if "prestige_level" in row else 0,
+            "jetons": int(row["jetons"] or 0) if "jetons" in row else 0,
         },
         "afk": {
             "buffer": 0,
@@ -437,19 +450,21 @@ async def _spawn_weapon(tg_id: int, levels: dict | None = None) -> None:
     if levels is None:
         async with pool().acquire() as conn:
             row = await conn.fetchrow(
-                "select damage_level, tier_luck_level, stattrak_hunter_level "
+                "select damage_level, tier_luck_level, stattrak_hunter_level, fortune_lvl "
                 "from forge_users where tg_id = $1", tg_id,
             )
         dmg_lvl = int(row["damage_level"]) if row else 0
         tier_luck_lvl = int(row["tier_luck_level"] or 0) if row else 0
         st_lvl = int(row["stattrak_hunter_level"] or 0) if row else 0
+        fortune_lvl = int(row["fortune_lvl"] or 0) if row else 0
     else:
         dmg_lvl = int(levels.get("damage_level", 0))
         tier_luck_lvl = int(levels.get("tier_luck_level", 0) or 0)
         st_lvl = int(levels.get("stattrak_hunter_level", 0) or 0)
+        fortune_lvl = int(levels.get("fortune_lvl", 0) or 0)
 
     tier = _roll_tier(damage_level=dmg_lvl)
-    tier_luck_pct = tier_luck_at(tier_luck_lvl)
+    tier_luck_pct = tier_luck_at(tier_luck_lvl) + _prestige.fortune_flat_tier_luck(fortune_lvl)
     if tier_luck_pct > 0 and random.random() < tier_luck_pct:
         up_order = ["pistol", "rifle", "awp", "golden", "legendary"]
         try:
@@ -508,7 +523,8 @@ async def hit(tg_id: int) -> dict:
             row = await conn.fetchrow(
                 "select damage_level, crit_level, crit_power_level, luck_level, "
                 "current_weapon_hp, current_weapon_max_hp, current_weapon_particles, "
-                "current_weapon_stattrak, last_hit_at, total_clicks, total_crits "
+                "current_weapon_stattrak, last_hit_at, total_clicks, total_crits, "
+                "hammer_power_lvl, dust_magic_lvl, sharpen_lvl "
                 "from forge_users where tg_id = $1 for update",
                 tg_id,
             )
@@ -527,8 +543,11 @@ async def hit(tg_id: int) -> dict:
             crit_lvl = int(row["crit_level"])
             crit_power_lvl = int(row["crit_power_level"] or 0)
             luck_lvl = int(row["luck_level"])
-            base_dmg = damage_at(dmg_lvl)
-            crit_chance = crit_chance_at(crit_lvl)
+            hp_pow_mult = _prestige.hammer_power_mult(int(row["hammer_power_lvl"] or 0))
+            dust_mult = _prestige.dust_magic_mult(int(row["dust_magic_lvl"] or 0))
+            sharpen_flat = _prestige.sharpen_flat_crit(int(row["sharpen_lvl"] or 0))
+            base_dmg = int(damage_at(dmg_lvl) * hp_pow_mult)
+            crit_chance = crit_chance_at(crit_lvl) + sharpen_flat
             crit_mult = crit_multiplier_at(crit_power_lvl)
             is_crit = random.randint(1, 100) <= crit_chance
             damage = int(base_dmg * crit_mult) if is_crit else base_dmg
@@ -540,7 +559,7 @@ async def hit(tg_id: int) -> dict:
                 new_hp = 0
                 base_particles = int(row["current_weapon_particles"])
                 luck_b = luck_bonus_at(luck_lvl)
-                particles_earned = int(base_particles * (1 + luck_b / 100))
+                particles_earned = int(base_particles * (1 + luck_b / 100) * dust_mult)
 
             # Update click counters + last_hit
             await conn.execute(
@@ -562,6 +581,7 @@ async def hit(tg_id: int) -> dict:
                     update forge_users set
                       particles = particles + $2,
                       total_particles_earned = total_particles_earned + $2,
+                      run_particles_earned = run_particles_earned + $2,
                       total_breaks = total_breaks + 1
                     where tg_id = $1
                     """,
@@ -605,7 +625,8 @@ async def hit_batch(tg_id: int, count: int) -> dict:
                 "tier_luck_level, stattrak_hunter_level, "
                 "current_weapon_hp, current_weapon_max_hp, current_weapon_particles, "
                 "current_weapon_stattrak, last_hit_at, "
-                "particles, total_breaks "
+                "particles, total_breaks, "
+                "hammer_power_lvl, dust_magic_lvl, sharpen_lvl, fortune_lvl "
                 "from forge_users where tg_id = $1 for update",
                 tg_id,
             )
@@ -625,8 +646,13 @@ async def hit_batch(tg_id: int, count: int) -> dict:
             crit_lvl = int(row["crit_level"])
             crit_power_lvl = int(row["crit_power_level"] or 0)
             luck_lvl = int(row["luck_level"])
-            base_dmg = damage_at(dmg_lvl)
-            crit_chance = crit_chance_at(crit_lvl)
+            # Prestige bonuses
+            hp_pow_mult = _prestige.hammer_power_mult(int(row["hammer_power_lvl"] or 0))
+            dust_mult = _prestige.dust_magic_mult(int(row["dust_magic_lvl"] or 0))
+            sharpen = _prestige.sharpen_flat_crit(int(row["sharpen_lvl"] or 0))
+
+            base_dmg = int(damage_at(dmg_lvl) * hp_pow_mult)
+            crit_chance = crit_chance_at(crit_lvl) + sharpen
             crit_mult = crit_multiplier_at(crit_power_lvl)
             luck_b = luck_bonus_at(luck_lvl)
 
@@ -648,7 +674,8 @@ async def hit_batch(tg_id: int, count: int) -> dict:
                 cur_hp -= damage
                 if cur_hp <= 0:
                     breaks_count += 1
-                    particles_gained += int(cur_reward * (1 + luck_b / 100))
+                    # Luck bonus (upgrade) + Dust Magic (prestige) both apply
+                    particles_gained += int(cur_reward * (1 + luck_b / 100) * dust_mult)
                     needs_new_spawn = True
                     cur_hp = 0
                     break
@@ -671,6 +698,7 @@ async def hit_batch(tg_id: int, count: int) -> dict:
                     update forge_users set
                       particles = particles + $2,
                       total_particles_earned = total_particles_earned + $2,
+                      run_particles_earned = run_particles_earned + $2,
                       total_breaks = total_breaks + $3
                     where tg_id = $1
                     """,
@@ -688,6 +716,7 @@ async def hit_batch(tg_id: int, count: int) -> dict:
             "damage_level": row["damage_level"],
             "tier_luck_level": row["tier_luck_level"],
             "stattrak_hunter_level": row["stattrak_hunter_level"],
+            "fortune_lvl": row["fortune_lvl"],
         })
         async with pool().acquire() as conn:
             wrow = await conn.fetchrow(
@@ -753,19 +782,19 @@ async def _tick_afk(tg_id: int) -> tuple[int, int]:
                 "select silver_level, gold_level, global_level, offline_cap_level, "
                 "last_afk_tick_at, daily_afk_day, daily_afk_earned, damage_level, "
                 "luck_level, tier_luck_level, stattrak_hunter_level, "
-                "current_weapon_hp, current_weapon_particles "
+                "current_weapon_hp, current_weapon_particles, "
+                "bot_tune_lvl, dust_magic_lvl, fortune_lvl "
                 "from forge_users where tg_id = $1 for update",
                 tg_id,
             )
             if row is None:
                 return (0, 0)
+            # Bot tune multiplier applied to combined rate
+            bot_tune_mult = _prestige.bot_tune_mult(int(row["bot_tune_lvl"] or 0))
             rate = total_afk_rate(
                 int(row["silver_level"]), int(row["gold_level"]), int(row["global_level"])
-            )
+            ) * bot_tune_mult
             if rate <= 0:
-                # No AFK bot — don't even bother updating last_afk_tick_at (saves an UPDATE
-                # per /state poll for all users pre-unlock). On unlock, offline_cap will
-                # clamp any stale gap in elapsed_raw.
                 return (0, 0)
 
             offline_cap = offline_hours_at(int(row["offline_cap_level"])) * 3600
@@ -800,7 +829,10 @@ async def _tick_afk(tg_id: int) -> tuple[int, int]:
             damage_level = int(row["damage_level"])
             tier_luck_lvl = int(row["tier_luck_level"] or 0)
             luck_mult = 1.0 + luck_bonus_at(int(row["luck_level"])) / 100.0
-            tier_luck_pct_afk = tier_luck_at(tier_luck_lvl)
+            # Prestige bonuses for AFK farming
+            dust_mult = _prestige.dust_magic_mult(int(row["dust_magic_lvl"] or 0))
+            fortune_flat = _prestige.fortune_flat_tier_luck(int(row["fortune_lvl"] or 0))
+            tier_luck_pct_afk = tier_luck_at(tier_luck_lvl) + fortune_flat
             cur_hp = int(row["current_weapon_hp"]) if row["current_weapon_hp"] is not None else 0
             cur_particles = int(row["current_weapon_particles"]) if row["current_weapon_particles"] is not None else 0
 
@@ -813,8 +845,8 @@ async def _tick_afk(tg_id: int) -> tuple[int, int]:
             while damage_budget > 0 and cap_left > 0:
                 if damage_budget >= cur_hp:
                     damage_budget -= cur_hp
-                    # Apply luck bonus just like manual hits do
-                    lucky_reward = int(cur_particles * luck_mult)
+                    # Apply luck bonus (upgrade) + dust magic (prestige)
+                    lucky_reward = int(cur_particles * luck_mult * dust_mult)
                     award = min(lucky_reward, cap_left)
                     particles_gained += award
                     cap_left -= award
@@ -846,6 +878,7 @@ async def _tick_afk(tg_id: int) -> tuple[int, int]:
                     update forge_users set
                       particles = particles + $2,
                       total_particles_earned = total_particles_earned + $2,
+                      run_particles_earned = run_particles_earned + $2,
                       total_breaks = total_breaks + $3,
                       daily_afk_day = $4, daily_afk_earned = $5,
                       last_afk_tick_at = $6,
@@ -934,17 +967,18 @@ async def buy_upgrade(tg_id: int, branch: str) -> dict:
     async with pool().acquire() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
-                f"select particles, {column} as lvl from forge_users where tg_id = $1 for update",
+                f"select particles, {column} as lvl, discount_lvl from forge_users where tg_id = $1 for update",
                 tg_id,
             )
             if row is None:
                 return {"ok": False, "error": "No state"}
             lvl = int(row["lvl"])
             balance = int(row["particles"])
+            discount = _prestige.discount_mult(int(row["discount_lvl"] or 0))
 
             # AFK bots have unlock step
             if branch in ("silver", "gold", "global") and lvl < 0:
-                unlock_cost = cfg.get("unlock_cost", 0)
+                unlock_cost = int(cfg.get("unlock_cost", 0) * discount)
                 if balance < unlock_cost:
                     return {"ok": False, "error": "Not enough particles to unlock", "cost": unlock_cost}
                 await conn.execute(
@@ -958,7 +992,8 @@ async def buy_upgrade(tg_id: int, branch: str) -> dict:
             if lvl >= max_lvl:
                 return {"ok": False, "error": "Already max level"}
             tiers = cfg["tiers"]
-            next_level, new_effect, cost = tiers[lvl]  # tier idx = current level
+            next_level, new_effect, base_cost = tiers[lvl]  # tier idx = current level
+            cost = int(base_cost * discount)
             if balance < cost:
                 return {"ok": False, "error": "Not enough particles", "cost": cost}
             await conn.execute(
@@ -1014,12 +1049,12 @@ async def leaderboard(limit: int = 20) -> list[dict]:
         rows = await conn.fetch(
             """
             select f.tg_id, f.particles, f.total_particles_earned, f.total_breaks,
-                   f.total_crits, f.total_clicks,
+                   f.total_crits, f.total_clicks, f.prestige_level,
                    u.username, u.first_name
             from forge_users f
             left join users u on u.tg_id = f.tg_id
             where f.total_particles_earned > 0
-            order by f.total_particles_earned desc
+            order by f.prestige_level desc, f.total_particles_earned desc
             limit $1
             """,
             limit,
@@ -1034,6 +1069,7 @@ async def leaderboard(limit: int = 20) -> list[dict]:
             "total_breaks": int(r["total_breaks"]),
             "total_crits": int(r["total_crits"] or 0),
             "total_clicks": int(r["total_clicks"] or 0),
+            "prestige": int(r["prestige_level"] or 0),
         }
         for r in rows
     ]

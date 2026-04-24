@@ -13,6 +13,7 @@ from app.api.economy_api import router as economy_router
 from app.bot import get_bot, get_dispatcher
 from app.config import get_settings
 from app.db.client import close_pool, init_pool
+from app.economy import prestige as _prestige
 from app.economy.chat_events import happy_hour_loop, mystery_drop_loop
 from app.scheduler import daily_summary_loop, weekly_memory_compact_loop
 
@@ -29,6 +30,11 @@ log = logging.getLogger("kairo")
 async def lifespan(_: FastAPI):
     log.info("starting Kairo")
     await init_pool()
+    # Apply forge-prestige schema migration idempotently
+    try:
+        await _prestige.ensure_schema()
+    except Exception as e:
+        log.warning("prestige schema migration failed: %s", e)
     bot = get_bot()
     dp = get_dispatcher()
     _ = dp  # touch to register routers

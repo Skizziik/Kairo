@@ -806,6 +806,9 @@ function forgePaint(area) {
         <div class="forge-stat afk" title="AFK-бот бьёт оружие автоматом, урон/сек">
           🤖 ${s.effects.afk_rate_per_sec} dmg/с
         </div>
+        <div class="forge-stat forge-prestige-chip" style="cursor:pointer" id="forge-prestige-btn" title="Престиж — сброс прогресса за жетоны и вечные бонусы">
+          ✨ ${(s.prestige?.level || 0) > 0 ? `P${s.prestige.level}` : 'Престиж'}
+        </div>
         <div class="forge-stat" style="cursor:pointer" id="forge-lb-btn">🏆 Топ</div>
       </div>
 
@@ -845,7 +848,113 @@ function forgePaint(area) {
   document.getElementById('forge-exchange-btn').addEventListener('click', () => renderForgeExchange(area));
   document.getElementById('forge-skip-btn').addEventListener('click', onForgeSkip);
   document.getElementById('forge-lb-btn')?.addEventListener('click', () => renderForgeLeaderboard(area));
+  document.getElementById('forge-prestige-btn')?.addEventListener('click', () => renderForgePrestige(area));
   _startForgePolling();
+}
+
+// ============================================================
+// PRESTIGE SCREEN
+// ============================================================
+async function renderForgePrestige(area) {
+  _stopForgePolling();
+  area.innerHTML = `<button class="back-btn" id="prestige-back">← к кузнице</button><div class="prestige-wrap" id="prestige-root"><div class="loader">Загрузка престижа…</div></div>`;
+  document.getElementById('prestige-back').addEventListener('click', () => forgePaint(area));
+  try {
+    const st = await api('/api/prestige/state');
+    _paintPrestige(area, st);
+  } catch (e) {
+    document.getElementById('prestige-root').innerHTML = `<div class="loader">Ошибка: ${escape(e.message)}</div>`;
+  }
+}
+
+function _paintPrestige(area, st) {
+  const root = document.getElementById('prestige-root');
+  if (!root) return;
+  const next = st.next_prestige || {};
+  const canPrestige = !!next.eligible;
+  const runPct = Math.min(100, (st.run_particles / (next.threshold || 1)) * 100);
+
+  root.innerHTML = `
+    <div class="prestige-header">
+      <div class="prestige-rank">Престиж <b>${st.level}</b></div>
+      <div class="prestige-jetons">🎖 <b>${fmt(st.jetons)}</b> жетонов</div>
+    </div>
+    <div class="prestige-lifetime">За всё время заработано: <b>${fmt(st.jetons_lifetime)}</b></div>
+
+    <div class="prestige-do-card">
+      <div class="prestige-run-progress">
+        <div class="prestige-run-progress-fill" style="width:${runPct}%"></div>
+        <div class="prestige-run-progress-text">
+          ${fmt(st.run_particles)} / ${fmt(next.threshold)} particles в этом ране
+        </div>
+      </div>
+      <div class="prestige-do-reward">
+        Сбросить сейчас → <b>+${next.jetons_on_prestige || 0}</b> 🎖
+      </div>
+      <button class="btn prestige-do-btn ${canPrestige ? '' : 'locked'}" id="prestige-do-btn" ${canPrestige ? '' : 'disabled'}>
+        ${canPrestige ? '✨ Сбросить и получить жетоны' : `Нужно ${fmt(Math.max(0, next.threshold - st.run_particles))} particles`}
+      </button>
+    </div>
+
+    <div class="prestige-bonus-grid" id="prestige-bonus-grid">
+      ${st.bonuses.map(_bonusCardHtml).join('')}
+    </div>
+  `;
+
+  document.getElementById('prestige-do-btn')?.addEventListener('click', () => _doPrestige(area));
+  root.querySelectorAll('.prestige-bonus-card [data-pbuy]').forEach(btn => {
+    btn.addEventListener('click', () => _buyPrestigeBonus(area, btn.dataset.pbuy));
+  });
+}
+
+function _bonusCardHtml(b) {
+  const isMaxed = b.level >= b.max_level;
+  const canAfford = b.next_cost !== null && typeof b.next_cost === 'number';
+  const progressPct = (b.level / b.max_level) * 100;
+  const effFmt = (v) => {
+    if (v == null) return '—';
+    if (b.unit.startsWith('%')) return `+${(v).toFixed(v < 1 ? 2 : 1)}${b.unit.replace('%', '%')}`;
+    if (b.unit.includes('⚙')) return `${fmt(v)} ${b.unit}`;
+    return `${v}${b.unit}`;
+  };
+  return `
+    <div class="prestige-bonus-card">
+      <div class="prestige-bonus-head">
+        <div class="prestige-bonus-name">${escape(b.name)}</div>
+        <div class="prestige-bonus-level ${isMaxed ? 'maxed' : ''}">${b.level} / ${b.max_level}</div>
+      </div>
+      <div class="prestige-bonus-desc">${escape(b.desc)}</div>
+      <div class="prestige-bonus-progress"><div class="prestige-bonus-progress-fill" style="width:${progressPct}%"></div></div>
+      ${isMaxed
+        ? `<div class="prestige-bonus-effect maxed">МАКС — ${effFmt(b.current_total)}</div>`
+        : `<div class="prestige-bonus-effect">Сейчас: <b>${effFmt(b.current_total)}</b> → ${effFmt(b.next_total)}</div>
+           <button class="btn prestige-bonus-buy" data-pbuy="${b.key}">⬆ ${b.next_cost} 🎖</button>`}
+    </div>
+  `;
+}
+
+async function _doPrestige(area) {
+  if (!confirm('Сбросить весь прогресс Forge (уровни, ботов, оружие, particles) и получить жетоны? Lifetime-статы, инвентарь и коины сохранятся.')) return;
+  try {
+    const r = await api('/api/prestige/do', { method: 'POST' });
+    if (!r.ok) { toast(r.error || 'Не удалось'); return; }
+    tg?.HapticFeedback?.notificationOccurred?.('success');
+    toast(`✨ Престиж! +${r.jetons_earned} 🎖`);
+    // Reload prestige state + forge state silently
+    forgeState.branches = null;
+    const st = await api('/api/prestige/state');
+    _paintPrestige(area, st);
+  } catch (e) { toast(e.message); }
+}
+
+async function _buyPrestigeBonus(area, branch) {
+  try {
+    const r = await api('/api/prestige/buy', { method: 'POST', body: JSON.stringify({ branch }) });
+    if (!r.ok) { toast(r.error || 'Не удалось'); return; }
+    tg?.HapticFeedback?.impactOccurred?.('medium');
+    const st = await api('/api/prestige/state');
+    _paintPrestige(area, st);
+  } catch (e) { toast(e.message); }
 }
 
 async function onForgeSkip() {
@@ -880,11 +989,14 @@ async function renderForgeLeaderboard(area) {
     list.innerHTML = top.map((r, i) => {
       const name = r.username ? '@' + r.username : (r.first_name || 'user' + r.tg_id);
       const rank = medals[i] || `#${i + 1}`;
+      const prestigeBadge = (r.prestige || 0) > 0
+        ? `<span class="lb-prestige-badge" title="Престиж">✨P${r.prestige}</span>`
+        : '';
       return `
         <div class="branch-card" style="padding:10px 14px">
           <div style="display:flex;justify-content:space-between;align-items:center">
             <div>
-              <div style="font-weight:800;font-size:15px">${rank} ${escape(name)}</div>
+              <div style="font-weight:800;font-size:15px">${rank} ${escape(name)} ${prestigeBadge}</div>
               <div style="font-size:12px;color:var(--text-dim);margin-top:2px">
                 Разобрано: ${fmt(r.total_breaks)} · Всего: ${fmt(r.total_earned)} ⚙️
               </div>
