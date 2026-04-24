@@ -23,12 +23,12 @@ log = logging.getLogger(__name__)
 #   min_base_price:  exclude any skin with base_price < this (hard floor on shittiness)
 # Cases not listed are left untouched.
 CASE_CONFIG: dict[str, dict] = {
-    # min_base_price filters true trash (consumer/industrial @ 8-50 base).
-    # Keeping this low lets restricted (125-500 base) stay in the pool for real variance.
-    # RIP weapon_set=None → all weapons + knives/gloves eligible by rarity.
+    # No absolute price floor — catalog base_prices may be on any anchor scale.
+    # Instead rely on top-N-by-price selection inside each rarity to exclude the
+    # real trash naturally (bottom of restricted bucket is never picked).
     "rip": {
         "max_items": 80,
-        "min_base_price": 100,
+        "min_base_price": 0,
         "rarities": ["restricted", "classified", "covert", "exceedingly_rare"],
     },
 }
