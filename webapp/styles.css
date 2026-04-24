@@ -1596,6 +1596,205 @@ h2 {
   background: rgba(255,199,107,0.25);
 }
 
+/* ============================================================
+   GEAR SCREEN (shop + inventory + equipped panel)
+   ============================================================ */
+.gear-wrap {
+  padding: 8px 0 100px 0;
+}
+.gear-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 4px 8px 12px;
+}
+.gear-tab {
+  flex: 1;
+  padding: 10px 6px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-dim);
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.gear-tab.active {
+  background: linear-gradient(135deg, #7dd3fc 0%, #a78bfa 100%);
+  color: #0a0c14;
+  border-color: transparent;
+}
+
+.gear-slot-group {
+  margin-bottom: 16px;
+  padding: 0 8px;
+}
+.gear-slot-title {
+  font-size: 15px;
+  font-weight: 800;
+  padding: 6px 4px 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.gear-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  padding: 0 8px;
+}
+.gear-card {
+  background: var(--bg-card);
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  transition: transform 0.1s;
+}
+.gear-card:hover {
+  transform: translateY(-2px);
+}
+.gear-card-icon {
+  font-size: 42px;
+  line-height: 1;
+  margin-bottom: 6px;
+  text-shadow: 0 0 10px currentColor;
+}
+.gear-card-name {
+  font-weight: 800;
+  font-size: 13px;
+  margin-bottom: 2px;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.gear-card-rarity {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.gear-card-affixes {
+  margin-bottom: 10px;
+  width: 100%;
+  min-height: 32px;
+}
+.gear-affix {
+  font-size: 11px;
+  color: #9dc;
+  padding: 2px 0;
+  line-height: 1.25;
+}
+.gear-card-action {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gear-card-action .btn {
+  font-size: 12px;
+  padding: 7px;
+  width: 100%;
+}
+.gear-buy-btn {
+  background: linear-gradient(135deg, #7dd3fc, #a78bfa);
+  color: #0a0c14;
+  font-weight: 800;
+  border: 0;
+}
+.gear-inv-btn {
+  font-size: 11px;
+}
+.gear-owned-tag {
+  font-size: 11px;
+  font-weight: 700;
+  color: #5ee894;
+  padding: 6px;
+  background: rgba(94,232,148,0.1);
+  border-radius: 6px;
+}
+.btn.danger {
+  background: rgba(235,75,75,0.15);
+  color: #eb4b4b;
+  border: 1px solid rgba(235,75,75,0.3);
+}
+.btn.danger:hover { background: rgba(235,75,75,0.25); }
+
+/* Equipped panel */
+.gear-equipped-panel {
+  margin: 0 8px 10px;
+  padding: 12px;
+  background: linear-gradient(135deg, rgba(125,211,252,0.07), rgba(167,139,250,0.07));
+  border: 1px solid rgba(125,211,252,0.2);
+  border-radius: 14px;
+}
+.gear-equipped-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.gear-slot-box {
+  text-align: center;
+}
+.gear-slot-label {
+  font-size: 9px;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gear-slot-icon {
+  font-size: 24px;
+  line-height: 44px;
+  height: 44px;
+  width: 100%;
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-shadow: 0 0 8px currentColor;
+}
+.gear-slot-icon.empty {
+  color: var(--text-dim);
+  text-shadow: none;
+  font-size: 18px;
+}
+.gear-slot-box.filled .gear-slot-icon {
+  border-style: solid;
+  background: rgba(0,0,0,0.3);
+}
+.gear-slot-name {
+  font-size: 9px;
+  margin-top: 3px;
+  line-height: 1.1;
+  max-height: 22px;
+  overflow: hidden;
+}
+
+.gear-affix-totals {
+  padding-top: 8px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  line-height: 1.8;
+}
+.gear-total-affix {
+  display: inline-block;
+  margin: 2px 4px 2px 0;
+  padding: 3px 8px;
+  background: rgba(0,0,0,0.3);
+  border-radius: 999px;
+  font-size: 11px;
+  color: #9dc;
+}
+
 .lb-prestige-badge {
   display: inline-block;
   margin-left: 4px;

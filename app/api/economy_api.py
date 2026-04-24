@@ -523,3 +523,45 @@ class PrestigeBuyReq(BaseModel):
 @router.post("/prestige/buy")
 async def api_prestige_buy(req: PrestigeBuyReq, user: dict = Depends(require_user)) -> dict:
     return await _prestige.buy_upgrade(int(user["id"]), req.branch)
+
+
+# ================ GEAR ================
+from app.economy import gear as _gear
+
+
+@router.get("/gear/shop")
+async def api_gear_shop(user: dict = Depends(require_user)) -> dict:
+    return await _gear.get_shop(int(user["id"]))
+
+
+@router.get("/gear/inventory")
+async def api_gear_inventory(user: dict = Depends(require_user)) -> dict:
+    return await _gear.get_inventory(int(user["id"]))
+
+
+class GearBuyReq(BaseModel):
+    item_key: str
+
+
+@router.post("/gear/buy")
+async def api_gear_buy(req: GearBuyReq, user: dict = Depends(require_user)) -> dict:
+    return await _gear.buy(int(user["id"]), req.item_key)
+
+
+class GearInvIdReq(BaseModel):
+    inv_id: int
+
+
+@router.post("/gear/equip")
+async def api_gear_equip(req: GearInvIdReq, user: dict = Depends(require_user)) -> dict:
+    return await _gear.equip(int(user["id"]), req.inv_id)
+
+
+@router.post("/gear/unequip")
+async def api_gear_unequip(req: GearInvIdReq, user: dict = Depends(require_user)) -> dict:
+    return await _gear.unequip(int(user["id"]), req.inv_id)
+
+
+@router.post("/gear/sell")
+async def api_gear_sell(req: GearInvIdReq, user: dict = Depends(require_user)) -> dict:
+    return await _gear.sell(int(user["id"]), req.inv_id)

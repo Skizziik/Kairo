@@ -22,6 +22,21 @@ from app.economy import prestige as _prestige
 log = logging.getLogger(__name__)
 
 
+def _parse_gear_affixes(raw) -> dict:
+    """forge_users.gear_affixes may be dict (asyncpg) or str (fallback)."""
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        import json as _json
+        try:
+            return _json.loads(raw) or {}
+        except Exception:
+            return {}
+    return {}
+
+
 # ============================================================
 # WEAPON TIER CONFIG (what spawns on the anvil)
 # ============================================================
@@ -367,20 +382,33 @@ async def get_state(tg_id: int) -> dict:
     bot_tune_lvl = int(row["bot_tune_lvl"] or 0) if "bot_tune_lvl" in row else 0
     sharpen_lvl = int(row["sharpen_lvl"] or 0) if "sharpen_lvl" in row else 0
     fortune_lvl = int(row["fortune_lvl"] or 0) if "fortune_lvl" in row else 0
+    gear = _parse_gear_affixes(row["gear_affixes"]) if "gear_affixes" in row else {}
+
+    # Gear multipliers (% values from items are whole percentage points)
+    g_dmg   = 1 + float(gear.get("dmg", 0)) / 100
+    g_part  = 1 + float(gear.get("particles", 0)) / 100
+    g_crit  = float(gear.get("crit", 0))
+    g_crit_dmg = 1 + float(gear.get("crit_dmg", 0)) / 100
+    g_afk   = 1 + float(gear.get("afk", 0)) / 100
+    g_tier_luck = float(gear.get("tier_luck", 0)) / 100
+    g_st_hunter = float(gear.get("st_hunter", 0)) / 100
+    g_afk_cap = 1 + float(gear.get("afk_cap", 0)) / 100
+    g_offline_h = int(gear.get("offline_hours", 0))
 
     dmg_base = damage_at(int(row["damage_level"]))
-    dmg = int(dmg_base * _prestige.hammer_power_mult(hp_pow_lvl))
-    crit_c = crit_chance_at(int(row["crit_level"])) + _prestige.sharpen_flat_crit(sharpen_lvl)
-    crit_mult = crit_multiplier_at(int(row["crit_power_level"] or 0))
+    dmg = int(dmg_base * _prestige.hammer_power_mult(hp_pow_lvl) * g_dmg)
+    crit_c = crit_chance_at(int(row["crit_level"])) + _prestige.sharpen_flat_crit(sharpen_lvl) + int(g_crit)
+    crit_mult = crit_multiplier_at(int(row["crit_power_level"] or 0)) * g_crit_dmg
     luck_b = luck_bonus_at(int(row["luck_level"]))
-    tier_luck = tier_luck_at(int(row["tier_luck_level"] or 0)) + _prestige.fortune_flat_tier_luck(fortune_lvl)
-    st_hunt = stattrak_chance_at(int(row["stattrak_hunter_level"] or 0))
+    tier_luck = tier_luck_at(int(row["tier_luck_level"] or 0)) + _prestige.fortune_flat_tier_luck(fortune_lvl) + g_tier_luck
+    st_hunt = stattrak_chance_at(int(row["stattrak_hunter_level"] or 0)) + g_st_hunter
     silver_lvl = int(row["silver_level"])
     gold_lvl = int(row["gold_level"])
     global_lvl = int(row["global_level"])
     offline_cap_lvl = int(row["offline_cap_level"])
-    afk_rate = total_afk_rate(silver_lvl, gold_lvl, global_lvl) * _prestige.bot_tune_mult(bot_tune_lvl)
-    daily_cap_today = afk_daily_cap_for(offline_cap_lvl)
+    afk_rate = total_afk_rate(silver_lvl, gold_lvl, global_lvl) * _prestige.bot_tune_mult(bot_tune_lvl) * g_afk
+    daily_cap_today = int(afk_daily_cap_for(offline_cap_lvl) * g_afk_cap)
+    offline_h_total = offline_hours_at(offline_cap_lvl) + g_offline_h
 
     return {
         "particles": int(row["particles"]),
@@ -408,7 +436,7 @@ async def get_state(tg_id: int) -> dict:
             "tier_luck_pct": round(tier_luck * 100, 1),
             "stattrak_chance_pct": round(st_hunt * 100, 1),
             "afk_rate_per_sec": round(afk_rate, 2),
-            "offline_cap_hours": offline_hours_at(offline_cap_lvl),
+            "offline_cap_hours": offline_h_total,
             "afk_daily_cap": daily_cap_today,
         },
         "prestige": {
@@ -450,21 +478,28 @@ async def _spawn_weapon(tg_id: int, levels: dict | None = None) -> None:
     if levels is None:
         async with pool().acquire() as conn:
             row = await conn.fetchrow(
-                "select damage_level, tier_luck_level, stattrak_hunter_level, fortune_lvl "
-                "from forge_users where tg_id = $1", tg_id,
+                "select damage_level, tier_luck_level, stattrak_hunter_level, "
+                "fortune_lvl, gear_affixes from forge_users where tg_id = $1", tg_id,
             )
         dmg_lvl = int(row["damage_level"]) if row else 0
         tier_luck_lvl = int(row["tier_luck_level"] or 0) if row else 0
         st_lvl = int(row["stattrak_hunter_level"] or 0) if row else 0
         fortune_lvl = int(row["fortune_lvl"] or 0) if row else 0
+        gear = _parse_gear_affixes(row["gear_affixes"]) if row else {}
     else:
         dmg_lvl = int(levels.get("damage_level", 0))
         tier_luck_lvl = int(levels.get("tier_luck_level", 0) or 0)
         st_lvl = int(levels.get("stattrak_hunter_level", 0) or 0)
         fortune_lvl = int(levels.get("fortune_lvl", 0) or 0)
+        gear = levels.get("gear_affixes") or {}
+        if not isinstance(gear, dict):
+            gear = _parse_gear_affixes(gear)
+
+    gear_tier_luck = float(gear.get("tier_luck", 0)) / 100
+    gear_st_hunter = float(gear.get("st_hunter", 0)) / 100
 
     tier = _roll_tier(damage_level=dmg_lvl)
-    tier_luck_pct = tier_luck_at(tier_luck_lvl) + _prestige.fortune_flat_tier_luck(fortune_lvl)
+    tier_luck_pct = tier_luck_at(tier_luck_lvl) + _prestige.fortune_flat_tier_luck(fortune_lvl) + gear_tier_luck
     if tier_luck_pct > 0 and random.random() < tier_luck_pct:
         up_order = ["pistol", "rifle", "awp", "golden", "legendary"]
         try:
@@ -489,7 +524,7 @@ async def _spawn_weapon(tg_id: int, levels: dict | None = None) -> None:
     if not skin_pool:
         return
     skin_id = random.choice(skin_pool)
-    st_chance = stattrak_chance_at(st_lvl)
+    st_chance = stattrak_chance_at(st_lvl) + gear_st_hunter
     stattrak = random.random() < st_chance
     particles = cfg["particles"]
     if stattrak:
@@ -524,7 +559,7 @@ async def hit(tg_id: int) -> dict:
                 "select damage_level, crit_level, crit_power_level, luck_level, "
                 "current_weapon_hp, current_weapon_max_hp, current_weapon_particles, "
                 "current_weapon_stattrak, last_hit_at, total_clicks, total_crits, "
-                "hammer_power_lvl, dust_magic_lvl, sharpen_lvl "
+                "hammer_power_lvl, dust_magic_lvl, sharpen_lvl, gear_affixes "
                 "from forge_users where tg_id = $1 for update",
                 tg_id,
             )
@@ -546,9 +581,15 @@ async def hit(tg_id: int) -> dict:
             hp_pow_mult = _prestige.hammer_power_mult(int(row["hammer_power_lvl"] or 0))
             dust_mult = _prestige.dust_magic_mult(int(row["dust_magic_lvl"] or 0))
             sharpen_flat = _prestige.sharpen_flat_crit(int(row["sharpen_lvl"] or 0))
-            base_dmg = int(damage_at(dmg_lvl) * hp_pow_mult)
-            crit_chance = crit_chance_at(crit_lvl) + sharpen_flat
-            crit_mult = crit_multiplier_at(crit_power_lvl)
+            _gear = _parse_gear_affixes(row["gear_affixes"])
+            gear_dmg = 1 + float(_gear.get("dmg", 0)) / 100
+            gear_part = 1 + float(_gear.get("particles", 0)) / 100
+            gear_crit = int(_gear.get("crit", 0))
+            gear_crit_dmg = 1 + float(_gear.get("crit_dmg", 0)) / 100
+
+            base_dmg = int(damage_at(dmg_lvl) * hp_pow_mult * gear_dmg)
+            crit_chance = crit_chance_at(crit_lvl) + sharpen_flat + gear_crit
+            crit_mult = crit_multiplier_at(crit_power_lvl) * gear_crit_dmg
             is_crit = random.randint(1, 100) <= crit_chance
             damage = int(base_dmg * crit_mult) if is_crit else base_dmg
 
@@ -559,7 +600,7 @@ async def hit(tg_id: int) -> dict:
                 new_hp = 0
                 base_particles = int(row["current_weapon_particles"])
                 luck_b = luck_bonus_at(luck_lvl)
-                particles_earned = int(base_particles * (1 + luck_b / 100) * dust_mult)
+                particles_earned = int(base_particles * (1 + luck_b / 100) * dust_mult * gear_part)
 
             # Update click counters + last_hit
             await conn.execute(
@@ -626,7 +667,8 @@ async def hit_batch(tg_id: int, count: int) -> dict:
                 "current_weapon_hp, current_weapon_max_hp, current_weapon_particles, "
                 "current_weapon_stattrak, last_hit_at, "
                 "particles, total_breaks, "
-                "hammer_power_lvl, dust_magic_lvl, sharpen_lvl, fortune_lvl "
+                "hammer_power_lvl, dust_magic_lvl, sharpen_lvl, fortune_lvl, "
+                "gear_affixes "
                 "from forge_users where tg_id = $1 for update",
                 tg_id,
             )
@@ -650,10 +692,16 @@ async def hit_batch(tg_id: int, count: int) -> dict:
             hp_pow_mult = _prestige.hammer_power_mult(int(row["hammer_power_lvl"] or 0))
             dust_mult = _prestige.dust_magic_mult(int(row["dust_magic_lvl"] or 0))
             sharpen = _prestige.sharpen_flat_crit(int(row["sharpen_lvl"] or 0))
+            # Gear affixes
+            _gear = _parse_gear_affixes(row["gear_affixes"])
+            gear_dmg = 1 + float(_gear.get("dmg", 0)) / 100
+            gear_part = 1 + float(_gear.get("particles", 0)) / 100
+            gear_crit = int(_gear.get("crit", 0))
+            gear_crit_dmg = 1 + float(_gear.get("crit_dmg", 0)) / 100
 
-            base_dmg = int(damage_at(dmg_lvl) * hp_pow_mult)
-            crit_chance = crit_chance_at(crit_lvl) + sharpen
-            crit_mult = crit_multiplier_at(crit_power_lvl)
+            base_dmg = int(damage_at(dmg_lvl) * hp_pow_mult * gear_dmg)
+            crit_chance = crit_chance_at(crit_lvl) + sharpen + gear_crit
+            crit_mult = crit_multiplier_at(crit_power_lvl) * gear_crit_dmg
             luck_b = luck_bonus_at(luck_lvl)
 
             cur_hp = int(row["current_weapon_hp"])
@@ -674,8 +722,8 @@ async def hit_batch(tg_id: int, count: int) -> dict:
                 cur_hp -= damage
                 if cur_hp <= 0:
                     breaks_count += 1
-                    # Luck bonus (upgrade) + Dust Magic (prestige) both apply
-                    particles_gained += int(cur_reward * (1 + luck_b / 100) * dust_mult)
+                    # Luck (upgrade) + Dust Magic (prestige) + gear.particles all apply
+                    particles_gained += int(cur_reward * (1 + luck_b / 100) * dust_mult * gear_part)
                     needs_new_spawn = True
                     cur_hp = 0
                     break
@@ -717,6 +765,7 @@ async def hit_batch(tg_id: int, count: int) -> dict:
             "tier_luck_level": row["tier_luck_level"],
             "stattrak_hunter_level": row["stattrak_hunter_level"],
             "fortune_lvl": row["fortune_lvl"],
+            "gear_affixes": row["gear_affixes"],
         })
         async with pool().acquire() as conn:
             wrow = await conn.fetchrow(
@@ -783,7 +832,7 @@ async def _tick_afk(tg_id: int) -> tuple[int, int]:
                 "last_afk_tick_at, daily_afk_day, daily_afk_earned, damage_level, "
                 "luck_level, tier_luck_level, stattrak_hunter_level, "
                 "current_weapon_hp, current_weapon_particles, "
-                "bot_tune_lvl, dust_magic_lvl, fortune_lvl "
+                "bot_tune_lvl, dust_magic_lvl, fortune_lvl, gear_affixes "
                 "from forge_users where tg_id = $1 for update",
                 tg_id,
             )
@@ -791,13 +840,20 @@ async def _tick_afk(tg_id: int) -> tuple[int, int]:
                 return (0, 0)
             # Bot tune multiplier applied to combined rate
             bot_tune_mult = _prestige.bot_tune_mult(int(row["bot_tune_lvl"] or 0))
+            # Gear affixes
+            _gear = _parse_gear_affixes(row["gear_affixes"])
+            gear_afk = 1 + float(_gear.get("afk", 0)) / 100
+            gear_part = 1 + float(_gear.get("particles", 0)) / 100
+            gear_tier_luck = float(_gear.get("tier_luck", 0)) / 100
+            gear_afk_cap_mult = 1 + float(_gear.get("afk_cap", 0)) / 100
+            gear_offline_h = int(_gear.get("offline_hours", 0))
             rate = total_afk_rate(
                 int(row["silver_level"]), int(row["gold_level"]), int(row["global_level"])
-            ) * bot_tune_mult
+            ) * bot_tune_mult * gear_afk
             if rate <= 0:
                 return (0, 0)
 
-            offline_cap = offline_hours_at(int(row["offline_cap_level"])) * 3600
+            offline_cap = (offline_hours_at(int(row["offline_cap_level"])) + gear_offline_h) * 3600
             last_tick = row["last_afk_tick_at"]
             elapsed_raw = 0.0 if last_tick is None else (now - last_tick).total_seconds()
             elapsed = min(elapsed_raw, offline_cap)
@@ -823,16 +879,16 @@ async def _tick_afk(tg_id: int) -> tuple[int, int]:
                     tick_advance_to = now
 
             daily_earned = 0 if row["daily_afk_day"] != today else int(row["daily_afk_earned"] or 0)
-            daily_cap = afk_daily_cap_for(int(row["offline_cap_level"] or 0))
+            daily_cap = int(afk_daily_cap_for(int(row["offline_cap_level"] or 0)) * gear_afk_cap_mult)
             cap_left = max(0, daily_cap - daily_earned)
 
             damage_level = int(row["damage_level"])
             tier_luck_lvl = int(row["tier_luck_level"] or 0)
             luck_mult = 1.0 + luck_bonus_at(int(row["luck_level"])) / 100.0
-            # Prestige bonuses for AFK farming
-            dust_mult = _prestige.dust_magic_mult(int(row["dust_magic_lvl"] or 0))
+            # Prestige + gear bonuses for AFK farming
+            dust_mult = _prestige.dust_magic_mult(int(row["dust_magic_lvl"] or 0)) * gear_part
             fortune_flat = _prestige.fortune_flat_tier_luck(int(row["fortune_lvl"] or 0))
-            tier_luck_pct_afk = tier_luck_at(tier_luck_lvl) + fortune_flat
+            tier_luck_pct_afk = tier_luck_at(tier_luck_lvl) + fortune_flat + gear_tier_luck
             cur_hp = int(row["current_weapon_hp"]) if row["current_weapon_hp"] is not None else 0
             cur_particles = int(row["current_weapon_particles"]) if row["current_weapon_particles"] is not None else 0
 
@@ -1011,16 +1067,18 @@ async def buy_upgrade(tg_id: int, branch: str) -> dict:
 async def exchange(tg_id: int, particle_amount: int) -> dict:
     if particle_amount < EXCHANGE_RATE:
         return {"ok": False, "error": f"Min {EXCHANGE_RATE} particles"}
-    particle_amount = (particle_amount // EXCHANGE_RATE) * EXCHANGE_RATE  # round down to multiple
-    coins_given = particle_amount // EXCHANGE_RATE
+    particle_amount = (particle_amount // EXCHANGE_RATE) * EXCHANGE_RATE
     async with pool().acquire() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
-                "select particles from forge_users where tg_id = $1 for update",
+                "select particles, gear_affixes from forge_users where tg_id = $1 for update",
                 tg_id,
             )
             if row is None or int(row["particles"]) < particle_amount:
                 return {"ok": False, "error": "Not enough particles"}
+            gear = _parse_gear_affixes(row["gear_affixes"])
+            coin_gain_mult = 1 + float(gear.get("coin_gain", 0)) / 100
+            coins_given = int((particle_amount // EXCHANGE_RATE) * coin_gain_mult)
             await conn.execute(
                 "update forge_users set particles = particles - $2 where tg_id = $1",
                 tg_id, particle_amount,

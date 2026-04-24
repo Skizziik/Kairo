@@ -838,6 +838,7 @@ function forgePaint(area) {
 
       <div class="forge-actions">
         <button class="btn secondary" id="forge-upgrades-btn">🛠 Апгрейды</button>
+        <button class="btn secondary" id="forge-gear-btn">🛒 Шмот</button>
         <button class="btn" id="forge-exchange-btn" style="background:linear-gradient(135deg,#7dd3fc 0%,#a78bfa 100%);color:#0a0c14;border:0;font-weight:800">💱 Обмен</button>
       </div>
     </div>
@@ -846,6 +847,7 @@ function forgePaint(area) {
   document.getElementById('weapon-img').addEventListener('click', onForgeHit);
   document.getElementById('forge-upgrades-btn').addEventListener('click', () => renderForgeUpgrades(area));
   document.getElementById('forge-exchange-btn').addEventListener('click', () => renderForgeExchange(area));
+  document.getElementById('forge-gear-btn').addEventListener('click', () => renderGear(area));
   document.getElementById('forge-skip-btn').addEventListener('click', onForgeSkip);
   document.getElementById('forge-lb-btn')?.addEventListener('click', () => renderForgeLeaderboard(area));
   document.getElementById('forge-prestige-btn')?.addEventListener('click', () => renderForgePrestige(area));
@@ -1751,6 +1753,163 @@ function escape(s) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+// ============================================================
+// GEAR SCREEN (shop + inventory + equipped panel)
+// ============================================================
+let gearState = { tab: 'shop', shop: null, inventory: null };
+
+async function renderGear(area) {
+  _stopForgePolling();
+  gearState.tab = 'shop';
+  area.innerHTML = `
+    <button class="back-btn" id="gear-back">← к кузнице</button>
+    <div class="gear-wrap" id="gear-root">
+      <div class="gear-tabs">
+        <button class="gear-tab active" data-gtab="shop">🛒 Магазин</button>
+        <button class="gear-tab" data-gtab="inventory">🎒 Инвентарь</button>
+      </div>
+      <div id="gear-panel"><div class="loader">Загружаем шмот…</div></div>
+    </div>
+  `;
+  document.getElementById('gear-back').addEventListener('click', () => forgePaint(area));
+  area.querySelectorAll('.gear-tab').forEach(t => {
+    t.addEventListener('click', () => {
+      gearState.tab = t.dataset.gtab;
+      area.querySelectorAll('.gear-tab').forEach(tt => tt.classList.toggle('active', tt === t));
+      _paintGearPanel(area);
+    });
+  });
+  _paintGearPanel(area);
+}
+
+async function _paintGearPanel(area) {
+  const panel = document.getElementById('gear-panel');
+  if (!panel) return;
+  panel.innerHTML = `<div class="loader">Загрузка…</div>`;
+  try {
+    if (gearState.tab === 'shop') {
+      gearState.shop = await api('/api/gear/shop');
+      _renderGearShop(area, gearState.shop);
+    } else {
+      gearState.inventory = await api('/api/gear/inventory');
+      _renderGearInventory(area, gearState.inventory);
+    }
+  } catch (e) {
+    panel.innerHTML = `<div class="loader">Ошибка: ${escape(e.message)}</div>`;
+  }
+}
+
+function _gearItemCardHtml(it, ctx) {
+  // ctx: { mode: 'shop'|'inv', owned?, inv_id?, equipped? }
+  const rarityStyle = `border-color:${it.rarity_color}; box-shadow:0 0 12px ${it.rarity_color}44`;
+  const affixHtml = it.affixes.map(a => `<div class="gear-affix">${escape(a.label)}</div>`).join('');
+  let actionHtml = '';
+  if (ctx.mode === 'shop') {
+    if (ctx.owned) {
+      actionHtml = `<div class="gear-owned-tag">✓ Есть в инвентаре</div>`;
+    } else {
+      actionHtml = `<button class="btn gear-buy-btn" data-buy="${it.key}">Купить · ${fmt(it.price)} 💰</button>`;
+    }
+  } else if (ctx.mode === 'inv') {
+    const equipBtn = ctx.equipped
+      ? `<button class="btn secondary gear-inv-btn" data-unequip="${ctx.inv_id}">Снять</button>`
+      : `<button class="btn gear-inv-btn" data-equip="${ctx.inv_id}">Надеть</button>`;
+    actionHtml = `${equipBtn}<button class="btn danger gear-inv-btn" data-sell="${ctx.inv_id}">Продать · ${fmt(it.sell_price)} 💰</button>`;
+  }
+  return `
+    <div class="gear-card" style="${rarityStyle}">
+      <div class="gear-card-icon" style="color:${it.rarity_color}">${it.icon}</div>
+      <div class="gear-card-name">${escape(it.name)}</div>
+      <div class="gear-card-rarity" style="color:${it.rarity_color}">${escape(it.rarity_label)}</div>
+      <div class="gear-card-affixes">${affixHtml}</div>
+      <div class="gear-card-action">${actionHtml}</div>
+    </div>
+  `;
+}
+
+function _renderGearShop(area, data) {
+  const panel = document.getElementById('gear-panel');
+  if (!panel) return;
+  panel.innerHTML = data.slots.map(s => `
+    <div class="gear-slot-group">
+      <div class="gear-slot-title">${escape(s.label)}</div>
+      <div class="gear-card-grid">
+        ${s.items.map(it => _gearItemCardHtml(it, { mode: 'shop', owned: it.owned })).join('')}
+      </div>
+    </div>
+  `).join('');
+  panel.querySelectorAll('[data-buy]').forEach(b => {
+    b.addEventListener('click', async () => {
+      if (!confirm(`Купить предмет?`)) return;
+      try {
+        const r = await api('/api/gear/buy', { method: 'POST', body: JSON.stringify({ item_key: b.dataset.buy }) });
+        if (!r.ok) { toast(r.error || 'Не удалось'); return; }
+        tg?.HapticFeedback?.notificationOccurred?.('success');
+        toast(r.auto_equipped ? '✓ Куплено и надето!' : '✓ Куплено, лежит в инвентаре');
+        await _paintGearPanel(area);
+      } catch (e) { toast(e.message); }
+    });
+  });
+}
+
+function _renderGearInventory(area, data) {
+  const panel = document.getElementById('gear-panel');
+  if (!panel) return;
+  // Equipped panel + total affixes
+  const equippedHtml = data.equipped.map(e => `
+    <div class="gear-slot-box ${e.item ? 'filled' : 'empty'}">
+      <div class="gear-slot-label">${escape(e.label)}</div>
+      ${e.item
+        ? `<div class="gear-slot-icon" style="color:${e.item.rarity_color};border-color:${e.item.rarity_color}">${e.item.icon}</div>
+           <div class="gear-slot-name" style="color:${e.item.rarity_color}">${escape(e.item.name)}</div>`
+        : `<div class="gear-slot-icon empty">—</div><div class="gear-slot-name">пусто</div>`}
+    </div>
+  `).join('');
+
+  const totalsHtml = data.affix_totals.length
+    ? data.affix_totals.map(t => `<span class="gear-total-affix">${escape(t.label)}</span>`).join('')
+    : '<span style="color:var(--text-dim)">Ничего не надето</span>';
+
+  const ownedGrid = data.items.length
+    ? data.items.map(it => _gearItemCardHtml(it, { mode: 'inv', inv_id: it.inv_id, equipped: it.equipped })).join('')
+    : '<div class="loader">Инвентарь пуст. Купи что-нибудь в магазине!</div>';
+
+  panel.innerHTML = `
+    <div class="gear-equipped-panel">
+      <div class="gear-equipped-grid">${equippedHtml}</div>
+      <div class="gear-affix-totals">${totalsHtml}</div>
+    </div>
+    <div class="gear-slot-title" style="margin-top:18px">🎒 Всё что у тебя есть</div>
+    <div class="gear-card-grid">${ownedGrid}</div>
+  `;
+
+  panel.querySelectorAll('[data-equip]').forEach(b => b.addEventListener('click', async () => {
+    try {
+      const r = await api('/api/gear/equip', { method: 'POST', body: JSON.stringify({ inv_id: parseInt(b.dataset.equip) }) });
+      if (!r.ok) { toast(r.error || 'Не удалось'); return; }
+      tg?.HapticFeedback?.impactOccurred?.('medium');
+      await _paintGearPanel(area);
+    } catch (e) { toast(e.message); }
+  }));
+  panel.querySelectorAll('[data-unequip]').forEach(b => b.addEventListener('click', async () => {
+    try {
+      const r = await api('/api/gear/unequip', { method: 'POST', body: JSON.stringify({ inv_id: parseInt(b.dataset.unequip) }) });
+      if (!r.ok) { toast(r.error || 'Не удалось'); return; }
+      await _paintGearPanel(area);
+    } catch (e) { toast(e.message); }
+  }));
+  panel.querySelectorAll('[data-sell]').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('Продать? Получишь 50% от цены покупки.')) return;
+    try {
+      const r = await api('/api/gear/sell', { method: 'POST', body: JSON.stringify({ inv_id: parseInt(b.dataset.sell) }) });
+      if (!r.ok) { toast(r.error || 'Не удалось'); return; }
+      tg?.HapticFeedback?.notificationOccurred?.('success');
+      toast(`+${fmt(r.refund)} 💰`);
+      await _paintGearPanel(area);
+    } catch (e) { toast(e.message); }
+  }));
 }
 
 // ================= init =================

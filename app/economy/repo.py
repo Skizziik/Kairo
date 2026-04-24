@@ -182,7 +182,21 @@ async def open_case(user_id: int, case_id: int) -> dict:
                 "select balance from economy_users where tg_id = $1 for update",
                 user_id,
             )
-            if user_row is None or int(user_row["balance"]) < case["price"]:
+            # Gear case_discount: reduces effective case price
+            case_mult = 1.0
+            try:
+                gr = await conn.fetchrow(
+                    "select gear_affixes from forge_users where tg_id = $1", user_id,
+                )
+                if gr and gr["gear_affixes"]:
+                    ga = gr["gear_affixes"]
+                    if isinstance(ga, str):
+                        ga = json.loads(ga) if ga else {}
+                    case_mult = max(0.0, 1.0 - float(ga.get("case_discount", 0)) / 100)
+            except Exception:
+                pass
+            effective_price = max(1, int(case["price"] * case_mult))
+            if user_row is None or int(user_row["balance"]) < effective_price:
                 return {"ok": False, "error": "Не хватает коинов"}
 
             # roll rarity
@@ -254,13 +268,13 @@ async def open_case(user_id: int, case_id: int) -> dict:
 
             price = compute_price(int(skin["base_price"]), fl, wear_name, st)
 
-            # deduct balance
+            # deduct balance (discounted if gear case_discount is active)
             new_bal_row = await conn.fetchrow(
                 "update economy_users set "
                 "  balance = balance - $2, total_spent = total_spent + $2, "
                 "  cases_opened = cases_opened + 1 "
                 "where tg_id = $1 returning balance",
-                user_id, case["price"],
+                user_id, effective_price,
             )
             new_bal = int(new_bal_row["balance"])
 
@@ -268,7 +282,7 @@ async def open_case(user_id: int, case_id: int) -> dict:
             await conn.execute(
                 "insert into economy_transactions (user_id, amount, kind, reason, ref_id, balance_after) "
                 "values ($1, $2, 'case', $3, $4, $5)",
-                user_id, -int(case["price"]), case["name"], case["id"], new_bal,
+                user_id, -effective_price, case["name"], case["id"], new_bal,
             )
 
             # insert inventory item
@@ -361,6 +375,20 @@ async def sell_bulk_to_dealer(user_id: int, inventory_ids: list[int]) -> dict:
     unique_ids = list({int(x) for x in inventory_ids})
     total_payout = 0
     sold_count = 0
+    # Gear sell_bonus — look up on forge_users if present
+    sell_mult = 1.0
+    try:
+        async with pool().acquire() as conn0:
+            gr = await conn0.fetchrow(
+                "select gear_affixes from forge_users where tg_id = $1", user_id,
+            )
+            if gr and gr["gear_affixes"]:
+                ga = gr["gear_affixes"]
+                if isinstance(ga, str):
+                    ga = json.loads(ga) if ga else {}
+                sell_mult = 1.0 + float(ga.get("sell_bonus", 0)) / 100
+    except Exception:
+        pass
     async with pool().acquire() as conn:
         async with conn.transaction():
             rows = await conn.fetch(
@@ -373,7 +401,7 @@ async def sell_bulk_to_dealer(user_id: int, inventory_ids: list[int]) -> dict:
                 if r["locked"]:
                     continue
                 to_delete.append(int(r["id"]))
-                total_payout += int(round(int(r["price"]) * DEALER_PRICE_FRACTION))
+                total_payout += int(round(int(r["price"]) * DEALER_PRICE_FRACTION * sell_mult))
                 sold_count += 1
             if not to_delete:
                 return {"ok": False, "error": "Nothing to sell"}
@@ -410,7 +438,20 @@ async def sell_to_dealer(user_id: int, inventory_id: int) -> dict:
                 return {"ok": False, "error": "Not your item"}
             if item["locked"]:
                 return {"ok": False, "error": "Item is locked (on market or in trade)"}
-            payout = max(1, int(round(int(item["price"]) * DEALER_PRICE_FRACTION)))
+            # Gear sell_bonus (fetch inline; JSONB may be dict or str)
+            sell_mult = 1.0
+            try:
+                gr = await conn.fetchrow(
+                    "select gear_affixes from forge_users where tg_id = $1", user_id,
+                )
+                if gr and gr["gear_affixes"]:
+                    ga = gr["gear_affixes"]
+                    if isinstance(ga, str):
+                        ga = json.loads(ga) if ga else {}
+                    sell_mult = 1.0 + float(ga.get("sell_bonus", 0)) / 100
+            except Exception:
+                pass
+            payout = max(1, int(round(int(item["price"]) * DEALER_PRICE_FRACTION * sell_mult)))
             await conn.execute("delete from economy_inventory where id = $1", inventory_id)
             new_bal_row = await conn.fetchrow(
                 "update economy_users set balance = balance + $2, total_earned = total_earned + $2 "
