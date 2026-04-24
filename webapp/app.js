@@ -1507,6 +1507,16 @@ async function playSlots() {
   }
   tg?.HapticFeedback?.impactOccurred?.('medium');
 
+  // DEBUG: show raw server response under reels for 8 seconds
+  let dbg = document.getElementById('sl-debug');
+  if (!dbg) {
+    dbg = document.createElement('div');
+    dbg.id = 'sl-debug';
+    dbg.style.cssText = 'font-size:11px;color:#7dd3fc;padding:4px 8px;text-align:center;font-family:monospace;opacity:0.7;';
+    display.parentElement?.insertBefore(dbg, display.nextSibling);
+  }
+  dbg.textContent = `[v7e468] server: reels=[${result.reels.join(',')}] outcome=${result.outcome} delta=${result.delta}`;
+
   // Show outcome
   await new Promise(r => setTimeout(r, 250));
   out.style.display = 'block';

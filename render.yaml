@@ -62,6 +62,18 @@ services:
       - path: /*
         name: X-Frame-Options
         value: ALLOWALL
+      - path: /*.js
+        name: Cache-Control
+        value: no-cache, no-store, must-revalidate
+      - path: /*.css
+        name: Cache-Control
+        value: no-cache, no-store, must-revalidate
+      - path: /
+        name: Cache-Control
+        value: no-cache, no-store, must-revalidate
+      - path: /*.html
+        name: Cache-Control
+        value: no-cache, no-store, must-revalidate
       - path: /*
         name: Cache-Control
         value: public, max-age=60
