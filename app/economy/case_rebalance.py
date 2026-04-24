@@ -108,3 +108,110 @@ async def rebalance_all() -> None:
             await _trim_case(key, cfg)
         except Exception as e:
             log.warning("case rebalance for %s failed: %s", key, e)
+    # Ensure special handcrafted cases exist
+    try:
+        await ensure_knife_or_nothing()
+    except Exception as e:
+        log.warning("knife_or_nothing seed failed: %s", e)
+
+
+# ============================================================
+# "НОЖ ИЛИ НИЧЕГО" — handcrafted 2-item lottery case
+# ============================================================
+
+KNIFE_OR_NOTHING_KEY = "knife_or_nothing"
+KNIFE_OR_NOTHING_PRICE = 299
+KNIFE_OR_NOTHING_IMAGE = (
+    "https://community.akamai.steamstatic.com/economy/image/"
+    "i0CoZ81Ui0m-9KwlBY1L_18myuGuq1wfhWSaZgMttyVfPaERSR0Wqmu7LAocGJKz2lu_XsnXwtmkJjSU"
+    "91dh8bj35VTqVBP4io_frnEVvqf_a6VoIfGSXz7Hlbwg57QwSS_mxhl15jiGyN37c3_GZw91W8BwRflK7EfKsa2sfw"
+)
+
+
+async def ensure_knife_or_nothing() -> None:
+    """Idempotent seeder for the 'НОЖ ИЛИ НИЧЕГО' case.
+    Pool = exactly 2 skins: top-priced knife (2%) + cheapest weapon (98%)."""
+    async with pool().acquire() as conn:
+        # Pick the most expensive knife (base_price) available in the catalog
+        knife = await conn.fetchrow(
+            "select id, rarity, base_price from economy_skins_catalog "
+            "where category = 'knife' and active order by base_price desc limit 1",
+        )
+        # Pick the cheapest weapon (any weapon category, lowest base_price)
+        cheap = await conn.fetchrow(
+            "select id, rarity, base_price from economy_skins_catalog "
+            "where category = 'weapon' and active order by base_price asc limit 1",
+        )
+        if knife is None or cheap is None:
+            log.warning("knife_or_nothing: catalog missing knife or cheap weapon, skip")
+            return
+
+        knife_rarity = knife["rarity"]
+        cheap_rarity = cheap["rarity"]
+        if knife_rarity == cheap_rarity:
+            # Unlikely (knives = exceedingly_rare, cheapest = consumer/mil-spec),
+            # but guard against both mapping to the same bucket — would break probabilities.
+            log.warning("knife_or_nothing: knife and cheap share rarity %s, skipping seed", knife_rarity)
+            return
+
+        loot_pool = {
+            "by_rarity": {
+                knife_rarity: [int(knife["id"])],
+                cheap_rarity: [int(cheap["id"])],
+            },
+            "rarity_weights": {
+                knife_rarity: 0.02,
+                cheap_rarity: 0.98,
+            },
+        }
+
+        existing = await conn.fetchrow(
+            "select id, loot_pool, price from economy_cases where key = $1",
+            KNIFE_OR_NOTHING_KEY,
+        )
+
+        description = (
+            f"2% нож (база {int(knife['base_price']):,} ⚙), 98% хуита (база {int(cheap['base_price']):,} ⚙). "
+            "Скретч-офф: либо джекпот, либо в унитаз."
+        ).replace(",", " ")
+
+        if existing is None:
+            await conn.execute(
+                """
+                insert into economy_cases (key, name, description, price, image_url, loot_pool, stat_trak_chance)
+                values ($1, $2, $3, $4, $5, $6::jsonb, $7)
+                """,
+                KNIFE_OR_NOTHING_KEY,
+                "🔪 Нож или ничего",
+                description,
+                KNIFE_OR_NOTHING_PRICE,
+                KNIFE_OR_NOTHING_IMAGE,
+                json.dumps(loot_pool),
+                0.0,
+            )
+            log.info("knife_or_nothing: created (knife=%d base=%d, cheap=%d base=%d)",
+                     int(knife["id"]), int(knife["base_price"]),
+                     int(cheap["id"]), int(cheap["base_price"]))
+        else:
+            # Idempotency: only update if pool/price/description differ
+            cur_pool = existing["loot_pool"]
+            if isinstance(cur_pool, str):
+                cur_pool = json.loads(cur_pool)
+            if cur_pool == loot_pool and int(existing["price"]) == KNIFE_OR_NOTHING_PRICE:
+                return
+            await conn.execute(
+                """
+                update economy_cases set
+                    name = $2, description = $3, price = $4, image_url = $5,
+                    loot_pool = $6::jsonb, stat_trak_chance = $7
+                where id = $1
+                """,
+                int(existing["id"]),
+                "🔪 Нож или ничего",
+                description,
+                KNIFE_OR_NOTHING_PRICE,
+                KNIFE_OR_NOTHING_IMAGE,
+                json.dumps(loot_pool),
+                0.0,
+            )
+            log.info("knife_or_nothing: updated")

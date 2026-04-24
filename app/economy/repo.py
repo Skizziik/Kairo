@@ -208,7 +208,10 @@ async def open_case(user_id: int, case_id: int) -> dict:
             roll = random.random()
             cum = 0.0
             chosen_rarity = None
-            rarity_order = ["mil-spec", "restricted", "classified", "covert", "exceedingly_rare", "consumer", "industrial"]
+            # Iterate low → high, but also include any case-specific rarities not in the base list.
+            rarity_order = ["consumer", "industrial", "mil-spec", "restricted", "classified", "covert", "exceedingly_rare"]
+            extra_rarities = [r for r in rarity_weights.keys() if r not in rarity_order]
+            rarity_order = rarity_order + extra_rarities
             available = [r for r in rarity_order if rarity_weights.get(r) and by_rarity.get(r)]
             if not available:
                 return {"ok": False, "error": "Лут-пул пуст"}
