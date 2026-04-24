@@ -2056,6 +2056,16 @@ h2 {
   margin-bottom: 12px;
   font-size: 48px;
   letter-spacing: 8px;
+  transition: background 0.25s, box-shadow 0.25s;
+}
+.slots-display.sl-jackpot {
+  background: linear-gradient(135deg, rgba(255,199,107,0.2), rgba(255,100,180,0.15));
+  box-shadow: 0 0 40px rgba(255,199,107,0.5), inset 0 0 20px rgba(255,199,107,0.3);
+  animation: slotJackpotPulse 0.6s ease-in-out 3;
+}
+@keyframes slotJackpotPulse {
+  0%, 100% { box-shadow: 0 0 40px rgba(255,199,107,0.5), inset 0 0 20px rgba(255,199,107,0.3); }
+  50% { box-shadow: 0 0 60px rgba(255,199,107,0.9), inset 0 0 30px rgba(255,199,107,0.5); }
 }
 
 .cf-result {

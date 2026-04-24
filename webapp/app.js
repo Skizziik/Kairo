@@ -1474,7 +1474,30 @@ async function playSlots() {
   tg?.HapticFeedback?.impactOccurred?.('light');
   await new Promise(r => setTimeout(r, 380));
   clearInterval(spinInterval);
-  reels[2] = result.reels[2]; draw();
+  reels[2] = result.reels[2];
+
+  // FINAL RENDER: bypass the reels[] closure and set display text directly from
+  // server response so there's zero chance of an intermediate animation frame
+  // sneaking in. Repaint synchronously via requestAnimationFrame.
+  const finalText = result.reels.join(' ');
+  display.textContent = finalText;
+  await new Promise(r => requestAnimationFrame(() => r()));
+  // Guarantee one more paint cycle so the stop frame is the server's reels
+  display.textContent = finalText;
+
+  // Sanity: if server said jackpot but reels don't actually match, alert loud.
+  // Catches any client/server string-encoding drift (emoji normalization etc).
+  const matched = result.reels[0] === result.reels[1] && result.reels[1] === result.reels[2];
+  if (result.outcome === 'jackpot' && !matched) {
+    toast('⚠ Баг: сервер сказал jackpot, но reels разные. Сделай скрин и скинь.');
+    console.warn('slot inconsistency:', result);
+  }
+
+  // Highlight jackpot visually
+  display.classList.remove('sl-jackpot');
+  if (matched && result.outcome === 'jackpot') {
+    display.classList.add('sl-jackpot');
+  }
   tg?.HapticFeedback?.impactOccurred?.('medium');
 
   // Show outcome
@@ -1482,10 +1505,8 @@ async function playSlots() {
   out.style.display = 'block';
   out.className = 'game-out ' + (result.delta > 0 ? 'win' : 'lose');
   out.textContent = result.outcome === 'jackpot'
-    ? `🎉 JACKPOT +${fmt(result.delta)} 🪙`
-    : result.outcome === 'pair'
-      ? `Пара +${fmt(result.delta)} 🪙`
-      : `${fmt(result.delta)} 🪙`;
+    ? `🎉 JACKPOT ${result.reels[0]}${result.reels[0]}${result.reels[0]} +${fmt(result.delta)} 🪙`
+    : `${fmt(result.delta)} 🪙`;
   tg?.HapticFeedback?.notificationOccurred?.(
     result.outcome === 'jackpot' ? 'success' : (result.delta > 0 ? 'warning' : 'error')
   );
