@@ -678,7 +678,7 @@ function _stopForgePolling() {
 
 function _startForgePolling() {
   _stopForgePolling();
-  // Every 5s while Forge is visible, re-fetch state to show AFK damage on HP bar.
+  // Every 1s while Forge is visible, re-fetch state to show AFK damage on HP bar.
   forgeState.pollTimer = setInterval(async () => {
     const activeView = document.querySelector('.view.active')?.dataset.view;
     if (activeView !== 'games' || !document.getElementById('weapon-img')) {
@@ -707,7 +707,7 @@ function _startForgePolling() {
     } catch (e) {
       /* silent, try again next tick */
     }
-  }, 5000);
+  }, 1000);
 }
 
 async function renderForge(area) {
