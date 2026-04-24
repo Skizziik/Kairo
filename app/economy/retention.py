@@ -518,20 +518,12 @@ async def pvp_leaderboard(metric: str = "total_winnings", limit: int = 10) -> li
 async def increment_stattrak_kills_on_win(user_id: int, increment: int = 1) -> int:
     """For every StatTrak item the user owns, add +1 kill. Realistic vibe."""
     async with pool().acquire() as conn:
-        row = await conn.fetchrow(
-            "update economy_inventory set kills = kills + $2 "
-            "where user_id = $1 and stat_trak = true and not locked "
-            "returning count(*)" if False else "",
-            user_id, increment,
-        )
-    # asyncpg returns None if no rows — use execute() for count
-    async with pool().acquire() as conn:
         result = await conn.execute(
             "update economy_inventory set kills = kills + $2 "
             "where user_id = $1 and stat_trak = true and not locked",
             user_id, increment,
         )
-    # result is like "UPDATE N"
+    # asyncpg returns command tag like "UPDATE N" — parse out the row count
     try:
         return int(result.split()[-1])
     except Exception:
