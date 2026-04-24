@@ -661,7 +661,8 @@ function renderGamePlay(game, target) {
 const forgeState = {
   state: null,
   branches: null,
-  pendingHits: 0,
+  pendingClicks: 0,
+  flushTimer: null,
   lastHitAt: 0,
   comboCount: 0,
   comboResetTimer: null,
@@ -693,6 +694,11 @@ function _stopForgePolling() {
     cancelAnimationFrame(forgeState.animFrame);
     forgeState.animFrame = null;
   }
+  if (forgeState.flushTimer) {
+    clearTimeout(forgeState.flushTimer);
+    forgeState.flushTimer = null;
+  }
+  forgeState.pendingClicks = 0;
 }
 
 function _startForgePolling() {
@@ -881,14 +887,28 @@ async function renderForgeLeaderboard(area) {
   }
 }
 
-async function onForgeHit(e) {
+const MAX_ACTIVE_POPUPS = 18;  // cap DOM children to prevent GC thrash
+function _pruneEffects(wrap) {
+  if (!wrap) return;
+  const popups = wrap.querySelectorAll('.dmg-popup');
+  if (popups.length > MAX_ACTIVE_POPUPS) {
+    for (let i = 0; i < popups.length - MAX_ACTIVE_POPUPS; i++) popups[i].remove();
+  }
+  const dots = wrap.querySelectorAll('.particle-dot');
+  if (dots.length > MAX_ACTIVE_POPUPS) {
+    for (let i = 0; i < dots.length - MAX_ACTIVE_POPUPS; i++) dots[i].remove();
+  }
+}
+
+function onForgeHit(e) {
   const now = Date.now();
-  if (now - forgeState.lastHitAt < 75) return;  // visual anti-double
+  if (now - forgeState.lastHitAt < 55) return;  // anti-double
   forgeState.lastHitAt = now;
 
   const img = document.getElementById('weapon-img');
   const wrap = document.getElementById('weapon-wrap');
-  if (!img) return;
+  const s = forgeState.state;
+  if (!img || !s?.weapon || !s.effects) return;
 
   // Combo logic (purely visual)
   forgeState.comboCount += 1;
@@ -903,52 +923,84 @@ async function onForgeHit(e) {
     if (comboEl) comboEl.classList.remove('active');
   }, 1500);
 
+  // ----- OPTIMISTIC LOCAL PREDICTION -----
+  const baseDmg = s.effects.damage || 1;
+  const critPct = s.effects.crit_chance || 0;
+  const critMult = s.effects.crit_multiplier || 3;
+  const isCrit = Math.random() * 100 < critPct;
+  const damage = isCrit ? Math.round(baseDmg * critMult) : baseDmg;
+
+  // Apply to local HP immediately (no network wait)
+  const curHp = Math.max(0, (forgeState.displayedHp ?? s.weapon.hp) - damage);
+  forgeState.displayedHp = curHp;
+  forgeState.state.weapon.hp = Math.max(0, s.weapon.hp - damage);
+  _renderHpDisplay(curHp, s.weapon.max_hp);
+
+  tg?.HapticFeedback?.impactOccurred?.(isCrit ? 'heavy' : 'light');
+
+  // Shake animation
+  img.classList.remove('hit', 'crit-hit');
+  void img.offsetWidth;
+  img.classList.add(isCrit ? 'crit-hit' : 'hit');
+
+  // Damage popup
+  _pruneEffects(wrap);
+  const popup = document.createElement('div');
+  popup.className = 'dmg-popup' + (isCrit ? ' crit' : '');
+  popup.textContent = isCrit ? `CRIT -${damage}` : `-${damage}`;
+  const wrapRect = wrap.getBoundingClientRect();
+  const imgRect = img.getBoundingClientRect();
+  popup.style.left = (imgRect.left - wrapRect.left + imgRect.width * 0.5 + (Math.random()*60-30)) + 'px';
+  popup.style.top = (imgRect.top - wrapRect.top + imgRect.height * 0.3) + 'px';
+  wrap.appendChild(popup);
+  setTimeout(() => popup.remove(), 600);
+
+  // Queue the click for the next batch flush
+  forgeState.pendingClicks = (forgeState.pendingClicks || 0) + 1;
+  _scheduleForgeFlush();
+}
+
+// Batch flusher — collects optimistic clicks and sends them to server every ~150ms
+function _scheduleForgeFlush() {
+  if (forgeState.flushTimer) return;
+  forgeState.flushTimer = setTimeout(_flushForgeBatch, 150);
+}
+
+async function _flushForgeBatch() {
+  forgeState.flushTimer = null;
+  const count = forgeState.pendingClicks || 0;
+  if (count <= 0) return;
+  forgeState.pendingClicks = 0;
+
   try {
-    const r = await api('/api/forge/hit', { method: 'POST' });
-    if (!r.ok) return;
+    const r = await api('/api/forge/hit_batch', { method: 'POST', body: JSON.stringify({ count }) });
+    if (!r.ok) {
+      // Don't undo optimistic UI — next server poll will reconcile.
+      return;
+    }
 
-    tg?.HapticFeedback?.impactOccurred?.(r.crit ? 'heavy' : 'light');
+    const wrap = document.getElementById('weapon-wrap');
+    const img = document.getElementById('weapon-img');
 
-    // Shake animation
-    img.classList.remove('hit', 'crit-hit');
-    void img.offsetWidth;  // reflow
-    img.classList.add(r.crit ? 'crit-hit' : 'hit');
-
-    // Damage popup
-    const popup = document.createElement('div');
-    popup.className = 'dmg-popup' + (r.crit ? ' crit' : '');
-    popup.textContent = r.crit ? `CRIT -${r.damage}` : `-${r.damage}`;
-    const rect = wrap.getBoundingClientRect();
-    const imgRect = img.getBoundingClientRect();
-    popup.style.left = (imgRect.left - rect.left + imgRect.width * 0.5 + (Math.random()*60-30)) + 'px';
-    popup.style.top = (imgRect.top - rect.top + imgRect.height * 0.3) + 'px';
-    wrap.appendChild(popup);
-    setTimeout(() => popup.remove(), 600);
-
-    // HP bar update
-    forgeState.state.weapon.hp = r.new_hp;
-    forgeState.displayedHp = r.new_hp;
-    _renderHpDisplay(r.new_hp, forgeState.state.weapon.max_hp);
-
-    if (r.broken) {
-      // Explosion: breaking animation + particles flying out
+    // Break visuals — if server reports at least one break in this batch
+    if (r.breaks > 0 && wrap && img) {
       img.classList.add('breaking');
       tg?.HapticFeedback?.notificationOccurred?.('success');
-      for (let i = 0; i < 16; i++) {
+      _pruneEffects(wrap);
+      for (let i = 0; i < 14; i++) {
         const dot = document.createElement('div');
         dot.className = 'particle-dot';
+        const wrapRect = wrap.getBoundingClientRect();
         const imgRect = img.getBoundingClientRect();
-        const rect = wrap.getBoundingClientRect();
-        dot.style.left = (imgRect.left - rect.left + imgRect.width * 0.5) + 'px';
-        dot.style.top = (imgRect.top - rect.top + imgRect.height * 0.5) + 'px';
-        const angle = (Math.PI * 2 / 16) * i;
+        dot.style.left = (imgRect.left - wrapRect.left + imgRect.width * 0.5) + 'px';
+        dot.style.top = (imgRect.top - wrapRect.top + imgRect.height * 0.5) + 'px';
+        const angle = (Math.PI * 2 / 14) * i;
         const distance = 80 + Math.random() * 80;
         dot.style.setProperty('--dx', Math.cos(angle) * distance + 'px');
         dot.style.setProperty('--dy', Math.sin(angle) * distance + 'px');
         wrap.appendChild(dot);
         setTimeout(() => dot.remove(), 900);
       }
-      // Particles earned popup (center)
       const bigPop = document.createElement('div');
       bigPop.className = 'dmg-popup crit';
       bigPop.style.color = '#7dd3fc';
@@ -958,26 +1010,35 @@ async function onForgeHit(e) {
       bigPop.style.transform = 'translate(-50%, -50%)';
       wrap.appendChild(bigPop);
       setTimeout(() => bigPop.remove(), 600);
+    }
 
-      forgeState.state.particles += r.particles_earned;
-      forgeState.state.total_breaks += 1;
-      updateForgeStatsBar();
+    // Reconcile state from server
+    if (r.particles !== undefined) forgeState.state.particles = r.particles;
+    if (r.total_breaks !== undefined) forgeState.state.total_breaks = r.total_breaks;
+    updateForgeStatsBar();
 
-      // In-place swap after break anim: fetch new weapon data and just replace
-      // image/name/HP, no full re-render. Keeps scroll position.
-      setTimeout(async () => {
-        try {
-          const fresh = await api('/api/forge/state');
-          forgeState.state = fresh;
-          swapWeaponInPlace(fresh.weapon);
-        } catch (err) {
-          // silent — keep old UI till next hit retry
-        }
-      }, 550);
+    if (r.weapon) {
+      const oldId = forgeState.state.weapon?.skin_id;
+      const swap = r.weapon.skin_id !== oldId;
+      if (swap) {
+        setTimeout(() => {
+          forgeState.state.weapon = r.weapon;
+          forgeState.displayedHp = r.weapon.hp;
+          swapWeaponInPlace(r.weapon);
+        }, r.breaks > 0 ? 450 : 0);
+      } else {
+        // Same weapon — sync HP from server truth
+        forgeState.state.weapon.hp = r.weapon.hp;
+        forgeState.displayedHp = r.weapon.hp;
+        _renderHpDisplay(r.weapon.hp, r.weapon.max_hp);
+      }
     }
   } catch (e) {
-    toast(e.message);
+    // Silent — optimistic UI stays, next poll reconciles
   }
+
+  // If more clicks landed during the flush, queue another
+  if (forgeState.pendingClicks > 0) _scheduleForgeFlush();
 }
 
 function swapWeaponInPlace(w) {

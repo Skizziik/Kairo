@@ -453,6 +453,15 @@ async def api_forge_hit(user: dict = Depends(require_user)) -> dict:
     return await _forge.hit(int(user["id"]))
 
 
+class ForgeHitBatchReq(BaseModel):
+    count: int = Field(..., ge=1, le=30)
+
+
+@router.post("/forge/hit_batch")
+async def api_forge_hit_batch(req: ForgeHitBatchReq, user: dict = Depends(require_user)) -> dict:
+    return await _forge.hit_batch(int(user["id"]), req.count)
+
+
 @router.post("/forge/claim_afk")
 async def api_forge_claim_afk(user: dict = Depends(require_user)) -> dict:
     return await _forge.claim_afk(int(user["id"]))

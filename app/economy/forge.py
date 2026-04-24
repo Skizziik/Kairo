@@ -575,6 +575,121 @@ async def hit(tg_id: int) -> dict:
 
 
 # ============================================================
+# HIT BATCH — many clicks in one transaction
+# ============================================================
+
+MAX_BATCH_SIZE = 30  # clients shouldn't be able to claim > ~10 clicks/sec for long
+
+
+async def hit_batch(tg_id: int, count: int) -> dict:
+    """Apply up to `count` clicks in a single transaction. Rate-limited by elapsed
+    time since last batch. Returns aggregate result + final weapon state."""
+    if count <= 0:
+        return {"ok": False, "error": "Zero count"}
+    count = min(int(count), MAX_BATCH_SIZE)
+
+    now = datetime.now(timezone.utc)
+    needs_new_spawn = False
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "select damage_level, crit_level, crit_power_level, luck_level, "
+                "current_weapon_hp, current_weapon_max_hp, current_weapon_particles, "
+                "current_weapon_stattrak, last_hit_at, total_clicks, total_crits "
+                "from forge_users where tg_id = $1 for update",
+                tg_id,
+            )
+            if row is None:
+                return {"ok": False, "error": "No state — open the forge first"}
+            if row["current_weapon_hp"] is None:
+                return {"ok": False, "error": "No weapon — open the forge first"}
+
+            # Rate limit: cap count by how many MIN_HIT_INTERVAL_MS windows fit into elapsed
+            if row["last_hit_at"] is not None:
+                gap_ms = (now - row["last_hit_at"]).total_seconds() * 1000
+                max_allowed = max(1, int(gap_ms / MIN_HIT_INTERVAL_MS))
+                count = min(count, max_allowed)
+            if count <= 0:
+                return {"ok": False, "error": "Too fast"}
+
+            dmg_lvl = int(row["damage_level"])
+            crit_lvl = int(row["crit_level"])
+            crit_power_lvl = int(row["crit_power_level"] or 0)
+            luck_lvl = int(row["luck_level"])
+            base_dmg = damage_at(dmg_lvl)
+            crit_chance = crit_chance_at(crit_lvl)
+            crit_mult = crit_multiplier_at(crit_power_lvl)
+            luck_b = luck_bonus_at(luck_lvl)
+
+            cur_hp = int(row["current_weapon_hp"])
+            cur_max_hp = int(row["current_weapon_max_hp"])
+            cur_reward = int(row["current_weapon_particles"])
+
+            total_damage = 0
+            total_crits = 0
+            breaks_count = 0
+            particles_gained = 0
+
+            for _ in range(count):
+                is_crit = random.randint(1, 100) <= crit_chance
+                damage = int(base_dmg * crit_mult) if is_crit else base_dmg
+                total_damage += damage
+                if is_crit:
+                    total_crits += 1
+                cur_hp -= damage
+                if cur_hp <= 0:
+                    breaks_count += 1
+                    particles_gained += int(cur_reward * (1 + luck_b / 100))
+                    needs_new_spawn = True
+                    # Any remaining clicks in this batch hit an "empty anvil" — we spawn
+                    # the next weapon AFTER the txn, so remaining clicks are wasted.
+                    # This mirrors the single-click behavior where one break ends turn.
+                    cur_hp = 0
+                    break
+
+            # Update aggregates
+            await conn.execute(
+                """
+                update forge_users set
+                  current_weapon_hp = $2,
+                  total_clicks = total_clicks + $3,
+                  total_crits = total_crits + $4,
+                  last_hit_at = $5,
+                  updated_at = now()
+                where tg_id = $1
+                """,
+                tg_id, cur_hp, count, total_crits, now,
+            )
+            if breaks_count > 0:
+                await conn.execute(
+                    """
+                    update forge_users set
+                      particles = particles + $2,
+                      total_particles_earned = total_particles_earned + $2,
+                      total_breaks = total_breaks + $3
+                    where tg_id = $1
+                    """,
+                    tg_id, particles_gained, breaks_count,
+                )
+    if needs_new_spawn:
+        await _spawn_weapon(tg_id)
+
+    # Return fresh state snapshot so client can reconcile without an extra roundtrip
+    fresh = await get_state(tg_id)
+    return {
+        "ok": True,
+        "applied": count,
+        "damage": total_damage,
+        "crits": total_crits,
+        "breaks": breaks_count,
+        "particles_earned": particles_gained,
+        "weapon": fresh.get("weapon"),
+        "particles": fresh.get("particles"),
+        "total_breaks": fresh.get("total_breaks"),
+    }
+
+
+# ============================================================
 # AFK tick (called on state fetch)
 # ============================================================
 
