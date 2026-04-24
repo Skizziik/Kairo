@@ -23,16 +23,25 @@ log = logging.getLogger(__name__)
 #   min_base_price:  exclude any skin with base_price < this (hard floor on shittiness)
 # Cases not listed are left untouched.
 CASE_CONFIG: dict[str, dict] = {
-    # min_base_price 500 filters out true garbage (consumer Glocks at base 100)
-    # but keeps cheap restricted/classified so there's real loss variance.
-    "rip": {"max_items": 80, "min_base_price": 500},
+    # min_base_price filters true trash (consumer/industrial @ 8-50 base).
+    # Keeping this low lets restricted (125-500 base) stay in the pool for real variance.
+    # RIP weapon_set=None → all weapons + knives/gloves eligible by rarity.
+    "rip": {
+        "max_items": 80,
+        "min_base_price": 100,
+        "rarities": ["restricted", "classified", "covert", "exceedingly_rare"],
+    },
 }
 
 
 async def _trim_case(case_key: str, cfg: dict) -> bool:
-    """Idempotent: rewrites loot_pool to match cfg. Returns True if changed."""
+    """Idempotent: rebuilds loot_pool fresh from the CATALOG (not from the
+    case's current stale pool), so re-running with different thresholds
+    restores items that earlier aggressive filters removed. Returns True if
+    pool actually changed."""
     max_items = int(cfg.get("max_items") or 80)
     min_price = int(cfg.get("min_base_price") or 0)
+    rarities_allowed = cfg.get("rarities")
 
     async with pool().acquire() as conn:
         case = await conn.fetchrow(
@@ -45,44 +54,43 @@ async def _trim_case(case_key: str, cfg: dict) -> bool:
         loot_pool = case["loot_pool"]
         if isinstance(loot_pool, str):
             loot_pool = json.loads(loot_pool)
-        by_rarity = dict(loot_pool.get("by_rarity", {}))
         rarity_weights = dict(loot_pool.get("rarity_weights", {}))
+        # If cfg specifies allowed rarities, use those; else use current weights' keys
+        if rarities_allowed is None:
+            rarities_allowed = list(rarity_weights.keys())
 
-        # Fetch base_prices to apply min_price filter + sort
-        all_ids = [int(i) for ids in by_rarity.values() for i in ids]
-        if not all_ids:
-            return False
-        rows = await conn.fetch(
-            "select id, base_price from economy_skins_catalog where id = any($1::int[])",
-            all_ids,
+        # Rebuild pool fresh from catalog (don't trust current by_rarity — might
+        # be stale from a prior rebalance with different thresholds).
+        catalog_rows = await conn.fetch(
+            "select id, rarity, base_price "
+            "from economy_skins_catalog "
+            "where active and rarity = any($1::text[]) and base_price >= $2 "
+            "order by base_price desc",
+            rarities_allowed, min_price,
         )
-        price_by_id = {int(r["id"]): int(r["base_price"]) for r in rows}
+        ids_by_rarity: dict[str, list[tuple[int, int]]] = {}  # rarity -> [(id, price), ...]
+        for r in catalog_rows:
+            ids_by_rarity.setdefault(r["rarity"], []).append((int(r["id"]), int(r["base_price"])))
 
-        # Apply price floor
-        filtered = {}
-        for rarity, ids in by_rarity.items():
-            qualifying = [int(i) for i in ids if price_by_id.get(int(i), 0) >= min_price]
-            if qualifying:
-                filtered[rarity] = qualifying
-
-        # Allocate quota per rarity proportional to weights (using filtered pool only)
-        active_weights = {k: v for k, v in rarity_weights.items() if filtered.get(k)}
+        # Allocate quotas proportional to rarity weights (only rarities with items)
+        active_weights = {k: v for k, v in rarity_weights.items() if ids_by_rarity.get(k)}
         total_w = sum(active_weights.values()) or 1
         trimmed: dict[str, list[int]] = {}
         for rarity, weight in active_weights.items():
-            ids = filtered[rarity]
             quota = max(3, round(max_items * (weight / total_w)))
-            sorted_ids = sorted(ids, key=lambda i: price_by_id.get(int(i), 0), reverse=True)
-            trimmed[rarity] = sorted_ids[:min(quota, len(sorted_ids))]
+            items = ids_by_rarity[rarity]  # already sorted by price desc
+            trimmed[rarity] = [i for i, _ in items[:min(quota, len(items))]]
 
         new_total = sum(len(v) for v in trimmed.values())
         new_weights = {k: v for k, v in rarity_weights.items() if trimmed.get(k)}
 
-        current_total = sum(len(v) for v in by_rarity.values())
-        # Idempotency check: same pool? If ids/counts already match, skip write.
+        # Idempotency: compare with current state
+        by_rarity_cur = dict(loot_pool.get("by_rarity", {}))
+        current_total = sum(len(v) for v in by_rarity_cur.values())
         same = (
             current_total == new_total
-            and all(set(by_rarity.get(k, [])) == set(trimmed.get(k, [])) for k in set(by_rarity) | set(trimmed))
+            and all(set(by_rarity_cur.get(k, [])) == set(trimmed.get(k, []))
+                    for k in set(by_rarity_cur) | set(trimmed))
         )
         if same:
             log.info("case rebalance: %s already at target (%d), skip", case_key, new_total)
@@ -93,13 +101,19 @@ async def _trim_case(case_key: str, cfg: dict) -> bool:
             "update economy_cases set loot_pool = $2::jsonb where id = $1",
             int(case["id"]), json.dumps(new_loot),
         )
-    cheapest = min(
-        (price_by_id[i] for ids in trimmed.values() for i in ids),
-        default=0,
-    )
+    # Find the cheapest item kept (for logging)
+    cheapest = 0
+    for rarity, ids in trimmed.items():
+        for iid in ids:
+            for catid, p in ids_by_rarity.get(rarity, []):
+                if catid == iid:
+                    if cheapest == 0 or p < cheapest:
+                        cheapest = p
+                    break
+    per_rarity = {k: len(v) for k, v in trimmed.items()}
     log.info(
-        "case rebalance: %s: %d → %d items (min_price %d, actual cheapest %d)",
-        case_key, current_total, new_total, min_price, cheapest,
+        "case rebalance: %s: %d → %d items (min_price %d, cheapest kept %d, per-rarity %s)",
+        case_key, current_total, new_total, min_price, cheapest, per_rarity,
     )
     return True
 
