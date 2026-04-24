@@ -2193,10 +2193,18 @@ async function _spinAnimation(finalGrid, duration = 1000) {
   _renderMegaslotGrid(finalGrid);
 }
 
-async function _animateTumbles(tumbles, withInitialSpin = true, spinMs = 900) {
-  if (tumbles.length === 0) return;
-  if (withInitialSpin) {
-    await _spinAnimation(tumbles[0].grid, spinMs);
+async function _animateSpin(spinData, spinMs = 900) {
+  // Always play spin animation, even if no wins happened
+  const tumbles = spinData.tumbles || [];
+  const finalGrid = tumbles.length > 0 ? tumbles[0].grid : spinData.final_grid;
+  if (!finalGrid) return;
+
+  await _spinAnimation(finalGrid, spinMs);
+
+  // If no tumbles at all (pure loss), we're done — just display the stopped grid
+  if (tumbles.length === 0) {
+    _renderMegaslotGrid(finalGrid);
+    return;
   }
 
   for (let i = 0; i < tumbles.length; i++) {
@@ -2205,12 +2213,9 @@ async function _animateTumbles(tumbles, withInitialSpin = true, spinMs = 900) {
     _renderMegaslotGrid(t.grid, { orbs: t.orbs, winningSymbols: winSyms });
 
     if (t.wins && t.wins.length > 0) {
-      // Flash winning symbols
       await _sleep(500);
-      // Explosion
       document.querySelectorAll('.ms-cell.winning').forEach(el => el.classList.add('exploding'));
       await _sleep(280);
-      // Post-tumble grid (new symbols fell in)
       if (t.post_grid) {
         _renderMegaslotGrid(t.post_grid);
         const gridEl = document.getElementById('ms-grid');
@@ -2256,9 +2261,9 @@ async function playMegaslot(bonusBuy) {
       document.getElementById('balance-display').textContent = fmt(state.me.balance);
     }
 
-    // Base spin animation (skipped on bonus buy)
+    // Base spin animation (skipped on bonus buy) — plays even on no-win spins
     if (r.base_spin) {
-      await _animateTumbles(r.base_spin.tumbles, true);
+      await _animateSpin(r.base_spin, 900);
       if (r.base_spin.final_win > 0) {
         out.textContent = `+${fmt(r.base_spin.final_win)} 🪙`;
         out.className = 'megaslot-out win';
@@ -2283,8 +2288,7 @@ async function playMegaslot(bonusBuy) {
         const s = r.fs.spins[i];
         spinsLeft--;
         document.getElementById('ms-fs-left').textContent = spinsLeft;
-        // Faster spin animation during FS — 15 spins would take forever otherwise
-        await _animateTumbles(s.tumbles, true, 400);
+        await _animateSpin(s, 400);
         document.getElementById('ms-fs-mult').textContent = '×' + (s.persistent_mult || 0);
       }
 
