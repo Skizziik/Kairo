@@ -23,13 +23,18 @@ log = logging.getLogger(__name__)
 #   min_base_price:  exclude any skin with base_price < this (hard floor on shittiness)
 # Cases not listed are left untouched.
 CASE_CONFIG: dict[str, dict] = {
-    # No absolute price floor — catalog base_prices may be on any anchor scale.
-    # Instead rely on top-N-by-price selection inside each rarity to exclude the
-    # real trash naturally (bottom of restricted bucket is never picked).
+    # Source-of-truth weights for RIP. If earlier aggressive rebalances dropped
+    # some rarity from the DB weights, we must restore from here — otherwise
+    # the "missing" rarity (e.g. restricted) can't be rolled even if catalog has items.
     "rip": {
         "max_items": 80,
         "min_base_price": 0,
-        "rarities": ["restricted", "classified", "covert", "exceedingly_rare"],
+        "rarity_weights": {
+            "restricted":       0.25,
+            "classified":       0.35,
+            "covert":           0.30,
+            "exceedingly_rare": 0.10,
+        },
     },
 }
 
@@ -41,7 +46,9 @@ async def _trim_case(case_key: str, cfg: dict) -> bool:
     pool actually changed."""
     max_items = int(cfg.get("max_items") or 80)
     min_price = int(cfg.get("min_base_price") or 0)
-    rarities_allowed = cfg.get("rarities")
+    # Prefer explicit weights from cfg — the DB copy may have been corrupted by an
+    # earlier rebalance run that dropped empty rarities.
+    forced_weights = cfg.get("rarity_weights")
 
     async with pool().acquire() as conn:
         case = await conn.fetchrow(
@@ -54,10 +61,8 @@ async def _trim_case(case_key: str, cfg: dict) -> bool:
         loot_pool = case["loot_pool"]
         if isinstance(loot_pool, str):
             loot_pool = json.loads(loot_pool)
-        rarity_weights = dict(loot_pool.get("rarity_weights", {}))
-        # If cfg specifies allowed rarities, use those; else use current weights' keys
-        if rarities_allowed is None:
-            rarities_allowed = list(rarity_weights.keys())
+        rarity_weights = dict(forced_weights) if forced_weights else dict(loot_pool.get("rarity_weights", {}))
+        rarities_allowed = cfg.get("rarities") or list(rarity_weights.keys())
 
         # Rebuild pool fresh from catalog (don't trust current by_rarity — might
         # be stale from a prior rebalance with different thresholds).
