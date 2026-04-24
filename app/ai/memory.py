@@ -165,7 +165,8 @@ async def answer_as_rip(
         {"role": "system", "content": system},
         {"role": "user", "content": question},
     ]
-    answer = await llm.chat(messages, temperature=0.8, max_tokens=500)
+    # Lower temp + max_tokens so replies stay short and chat-like.
+    answer = await llm.chat(messages, temperature=0.65, max_tokens=200)
     answer = _sanitize(answer)
 
     # If banned phrases slipped through, ask the model to rewrite.
