@@ -245,8 +245,9 @@ async function openCasePreview(caseId) {
         <h2 class="case-preview-name">${escape(data.name)}</h2>
         <div class="case-preview-desc">${escape(data.description || '')}</div>
       </div>
+      <div class="case-preview-summary">Всего в пуле: <b>${data.items.length}</b> скинов</div>
       <div class="case-preview-items">
-        ${data.items.slice(0, 60).map(it => {
+        ${data.items.map(it => {
           const parts = (it.name || '').split('|').map(s => s.trim());
           const weapon = parts[0] || '';
           const skin = parts[1] || it.name;

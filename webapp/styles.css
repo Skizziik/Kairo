@@ -428,6 +428,14 @@ h2 {
   line-height: 1.4;
 }
 
+.case-preview-summary {
+  padding: 4px 12px 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
+}
+.case-preview-summary b { color: #7dd3fc; }
+
 .case-preview-items {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
