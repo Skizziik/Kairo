@@ -747,11 +747,8 @@ function forgePaint(area) {
     <div class="forge-screen">
       <div class="forge-top">
         <div class="forge-stat particles">⚙️ <span id="hud-particles">${fmt(s.particles)}</span></div>
-        <div class="forge-stat afk" title="AFK-боты копят в буфер, забирай кнопкой 📦">
-          🤖 ${s.effects.afk_rate_per_sec}/с
-        </div>
-        <div class="forge-stat buffer ${s.afk.buffer > 0 ? '' : 'dim'}" id="afk-claim-btn">
-          📦 <span id="hud-buffer">${fmt(s.afk.buffer)}</span> →
+        <div class="forge-stat afk" title="AFK-бот бьёт оружие автоматом, урон/сек">
+          🤖 ${s.effects.afk_rate_per_sec} dmg/с
         </div>
         <div class="forge-stat" style="cursor:pointer" id="forge-lb-btn">🏆 Топ</div>
       </div>
