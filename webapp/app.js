@@ -1691,22 +1691,33 @@ async function playCrash() {
   if (bet <= 0 || target < 1.01) return toast('Ставка > 0, таргет >= 1.01');
   const btn = document.getElementById('cr-play');
   if (btn?.disabled) return;
-  if (btn) btn.disabled = true;
+  const origText = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Жду результат…'; }
+  const out = document.getElementById('cr-out');
+  if (out) {
+    out.style.display = 'block';
+    out.className = 'game-out';
+    out.textContent = '⏳ Ракета разгоняется…';
+  }
   try {
     const r = await api('/api/casino/crash', { method: 'POST', body: JSON.stringify({ bet, target_mult: target }) });
-    const out = document.getElementById('cr-out');
-    out.style.display = 'block';
-    out.className = 'game-out ' + (r.win ? 'win' : 'lose');
-    out.textContent = r.win
+    const winText = r.win
       ? `🚀 Взлетело до ${r.crash_point}x. Ты снял на ${r.target}x. +${fmt(r.delta)} 🪙`
       : `💥 Крэш на ${r.crash_point}x. Твой таргет ${r.target}x. ${fmt(r.delta)} 🪙`;
+    if (out) {
+      out.className = 'game-out ' + (r.win ? 'win' : 'lose');
+      out.textContent = winText;
+    }
+    // Toast regardless of current view — so if user navigated away they still see the result
+    toast(winText, 4000);
     tg?.HapticFeedback?.notificationOccurred?.(r.win ? 'success' : 'error');
     state.me.balance = r.new_balance;
     document.getElementById('balance-display').textContent = fmt(state.me.balance);
   } catch (e) {
+    if (out) { out.className = 'game-out lose'; out.textContent = 'Ошибка: ' + e.message; }
     toast(e.message);
   } finally {
-    if (btn) btn.disabled = false;
+    if (btn) { btn.disabled = false; btn.textContent = origText; }
   }
 }
 
