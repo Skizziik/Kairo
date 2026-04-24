@@ -1449,86 +1449,71 @@ async function playSlots() {
   if (bet <= 0) return toast('Поставь сумму');
   const display = document.getElementById('sl-display');
   const out = document.getElementById('sl-out');
-  out.style.display = 'none';
   const btn = document.getElementById('sl-spin');
+  if (btn?.disabled) return;
+
+  // Reset UI
+  out.style.display = 'none';
+  display.classList.remove('sl-jackpot');
   if (btn) btn.disabled = true;
 
-  const symbols = ['💀', '🔫', '💣', '💎', '🏆', '7️⃣'];
-  const reels = ['', '', ''];
-  const randSym = () => symbols[Math.floor(Math.random() * symbols.length)];
-  const draw = () => { display.textContent = reels.map(s => s || randSym()).join(' '); };
+  // Pure random animation — no shared state with final rendering
+  const SYMS = ['💀', '🔫', '💣', '💎', '🏆', '7️⃣'];
+  const rand = () => SYMS[Math.floor(Math.random() * SYMS.length)];
+  const spinTimer = setInterval(() => {
+    display.textContent = `${rand()} ${rand()} ${rand()}`;
+  }, 80);
 
-  // Start spin
-  let spinInterval = setInterval(draw, 75);
-
-  // Fetch server result in parallel with visual spin
   let result;
   try {
     result = await api('/api/casino/slots', { method: 'POST', body: JSON.stringify({ bet }) });
   } catch (e) {
-    clearInterval(spinInterval);
+    clearInterval(spinTimer);
     if (btn) btn.disabled = false;
     toast(e.message);
     return;
   }
 
-  // Spin for ~1.5s total, then stop reels one by one
-  await new Promise(r => setTimeout(r, 800));
-  reels[0] = result.reels[0]; draw();
-  tg?.HapticFeedback?.impactOccurred?.('light');
-  await new Promise(r => setTimeout(r, 380));
-  reels[1] = result.reels[1]; draw();
-  tg?.HapticFeedback?.impactOccurred?.('light');
-  await new Promise(r => setTimeout(r, 380));
-  clearInterval(spinInterval);
-  reels[2] = result.reels[2];
-
-  // FINAL RENDER: bypass the reels[] closure and set display text directly from
-  // server response so there's zero chance of an intermediate animation frame
-  // sneaking in. Repaint synchronously via requestAnimationFrame.
-  const finalText = result.reels.join(' ');
-  display.textContent = finalText;
-  await new Promise(r => requestAnimationFrame(() => r()));
-  // Guarantee one more paint cycle so the stop frame is the server's reels
-  display.textContent = finalText;
-
-  // Sanity: if server said jackpot but reels don't actually match, alert loud.
-  // Catches any client/server string-encoding drift (emoji normalization etc).
-  const matched = result.reels[0] === result.reels[1] && result.reels[1] === result.reels[2];
-  if (result.outcome === 'jackpot' && !matched) {
-    toast('⚠ Баг: сервер сказал jackpot, но reels разные. Сделай скрин и скинь.');
-    console.warn('slot inconsistency:', result);
+  // Guard: bad response shape
+  if (!Array.isArray(result.reels) || result.reels.length !== 3) {
+    clearInterval(spinTimer);
+    if (btn) btn.disabled = false;
+    toast('Сервер вернул кривой ответ');
+    return;
   }
 
-  // Highlight jackpot visually
-  display.classList.remove('sl-jackpot');
-  if (matched && result.outcome === 'jackpot') {
+  // Spin animation for ~1.4s total
+  await new Promise(r => setTimeout(r, 1400));
+
+  // STOP animation FIRST, then render final result — no race possible
+  clearInterval(spinTimer);
+  display.textContent = `${result.reels[0]} ${result.reels[1]} ${result.reels[2]}`;
+
+  // Visuals
+  if (result.outcome === 'jackpot') {
     display.classList.add('sl-jackpot');
+    tg?.HapticFeedback?.notificationOccurred?.('success');
+  } else {
+    tg?.HapticFeedback?.impactOccurred?.('light');
   }
-  tg?.HapticFeedback?.impactOccurred?.('medium');
 
-  // DEBUG: show raw server response under reels for 8 seconds
-  let dbg = document.getElementById('sl-debug');
-  if (!dbg) {
-    dbg = document.createElement('div');
-    dbg.id = 'sl-debug';
-    dbg.style.cssText = 'font-size:11px;color:#7dd3fc;padding:4px 8px;text-align:center;font-family:monospace;opacity:0.7;';
-    display.parentElement?.insertBefore(dbg, display.nextSibling);
-  }
-  dbg.textContent = `[v7e468] server: reels=[${result.reels.join(',')}] outcome=${result.outcome} delta=${result.delta}`;
-
-  // Show outcome
-  await new Promise(r => setTimeout(r, 250));
+  // Outcome banner
+  await new Promise(r => setTimeout(r, 200));
   out.style.display = 'block';
   out.className = 'game-out ' + (result.delta > 0 ? 'win' : 'lose');
-  out.textContent = result.outcome === 'jackpot'
-    ? `🎉 JACKPOT ${result.reels[0]}${result.reels[0]}${result.reels[0]} +${fmt(result.delta)} 🪙`
-    : `${fmt(result.delta)} 🪙`;
-  tg?.HapticFeedback?.notificationOccurred?.(
-    result.outcome === 'jackpot' ? 'success' : (result.delta > 0 ? 'warning' : 'error')
-  );
-  state.me.balance = result.new_balance;
-  document.getElementById('balance-display').textContent = fmt(state.me.balance);
+  if (result.outcome === 'jackpot') {
+    out.textContent = `🎉 JACKPOT ${result.reels.join('')} +${fmt(result.delta)} 🪙`;
+  } else {
+    out.textContent = `${fmt(result.delta)} 🪙`;
+  }
+
+  // Balance sync
+  if (typeof result.new_balance === 'number') {
+    state.me.balance = result.new_balance;
+    const bel = document.getElementById('balance-display');
+    if (bel) bel.textContent = fmt(state.me.balance);
+  }
+
   if (btn) btn.disabled = false;
 }
 
