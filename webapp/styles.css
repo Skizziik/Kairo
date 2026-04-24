@@ -1437,6 +1437,12 @@ h2 {
   color: #ffc76b;
   font-weight: 700;
 }
+.forge-gear-chip {
+  background: linear-gradient(135deg, rgba(125,211,252,0.12), rgba(94,232,148,0.1));
+  border: 1px solid rgba(125,211,252,0.3);
+  color: #7dd3fc;
+  font-weight: 700;
+}
 
 .prestige-wrap {
   padding: 8px 0 100px 0;

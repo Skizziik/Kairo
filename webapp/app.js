@@ -809,6 +809,7 @@ function forgePaint(area) {
         <div class="forge-stat forge-prestige-chip" style="cursor:pointer" id="forge-prestige-btn" title="Престиж — сброс прогресса за жетоны и вечные бонусы">
           ✨ ${(s.prestige?.level || 0) > 0 ? `P${s.prestige.level}` : 'Престиж'}
         </div>
+        <div class="forge-stat forge-gear-chip" style="cursor:pointer" id="forge-gear-btn" title="Шмот — магазин и инвентарь экипировки">🛒 Шмот</div>
         <div class="forge-stat" style="cursor:pointer" id="forge-lb-btn">🏆 Топ</div>
       </div>
 
@@ -838,7 +839,6 @@ function forgePaint(area) {
 
       <div class="forge-actions">
         <button class="btn secondary" id="forge-upgrades-btn">🛠 Апгрейды</button>
-        <button class="btn secondary" id="forge-gear-btn">🛒 Шмот</button>
         <button class="btn" id="forge-exchange-btn" style="background:linear-gradient(135deg,#7dd3fc 0%,#a78bfa 100%);color:#0a0c14;border:0;font-weight:800">💱 Обмен</button>
       </div>
     </div>
