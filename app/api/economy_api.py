@@ -576,11 +576,12 @@ from app.economy import megaslot as _megaslot
 class MegaslotSpinReq(BaseModel):
     bet: int = Field(..., ge=1)
     bonus_buy: bool = False
+    bonus_type: str = "regular"  # regular | premium
 
 
 @router.post("/casino/megaslot/spin")
 async def api_megaslot_spin(req: MegaslotSpinReq, user: dict = Depends(require_user)) -> dict:
-    return await _megaslot.spin(int(user["id"]), req.bet, req.bonus_buy)
+    return await _megaslot.spin(int(user["id"]), req.bet, req.bonus_buy, req.bonus_type)
 
 
 @router.get("/casino/megaslot/config")

@@ -2087,6 +2087,100 @@ h2 {
 .ms-buy-chip:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(254,202,87,0.55); }
 .ms-buy-chip:active { transform: translateY(0); }
 .ms-buy-chip:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Bonus buy modal (pick between regular / premium) */
+.ms-bonus-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: msBonusFade 0.2s ease-out;
+}
+@keyframes msBonusFade { from { opacity: 0; } to { opacity: 1; } }
+.ms-bonus-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.75);
+}
+.ms-bonus-card {
+  position: relative;
+  background: linear-gradient(180deg, #14171f 0%, #0a0c14 100%);
+  border: 1px solid rgba(255,199,107,0.4);
+  border-radius: 16px;
+  padding: 20px;
+  max-width: 380px;
+  width: 90vw;
+  box-shadow: 0 0 40px rgba(255,199,107,0.3);
+  animation: msBonusPop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes msBonusPop {
+  0%   { transform: scale(0.8); opacity: 0; }
+  100% { transform: scale(1);   opacity: 1; }
+}
+.ms-bonus-title {
+  font-size: 18px;
+  font-weight: 900;
+  color: #ffc76b;
+  text-align: center;
+  margin-bottom: 14px;
+}
+.ms-bonus-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.ms-bonus-opt {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  padding: 14px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.ms-bonus-opt:hover {
+  background: rgba(255,199,107,0.08);
+  border-color: rgba(255,199,107,0.3);
+  transform: translateY(-1px);
+}
+.ms-bonus-opt.premium {
+  background: linear-gradient(135deg, rgba(255,199,107,0.12), rgba(255,100,180,0.1));
+  border-color: rgba(255,199,107,0.45);
+}
+.ms-bonus-opt.premium:hover {
+  background: linear-gradient(135deg, rgba(255,199,107,0.2), rgba(255,100,180,0.16));
+  box-shadow: 0 0 20px rgba(255,199,107,0.3);
+}
+.mb-opt-name {
+  font-size: 16px;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+.mb-opt-spec {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+.mb-opt-spec b { color: #ffc76b; font-size: 14px; }
+.mb-opt-cost {
+  font-size: 15px;
+  font-weight: 700;
+  color: #feca57;
+}
+.ms-bonus-cancel {
+  width: 100%;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 10px;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
 .megaslot-fs-bar {
   display: flex;
   justify-content: space-between;

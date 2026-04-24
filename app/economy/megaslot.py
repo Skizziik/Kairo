@@ -85,8 +85,19 @@ ORBS: list[tuple[int, float]] = [
 ORB_CHANCE_BASE = 0.06  # 6% per tumble in base
 ORB_CHANCE_FS = 0.22    # 22% per tumble in FS — this is where multiplier builds up
 
-MAX_WIN_CAP = 5000      # bet multiplier hard cap
-BONUS_BUY_COST_MULT = 70   # cost as bet multiplier for instant FS (lower so BB RTP ≈ base RTP)
+MAX_WIN_CAP = 5000
+
+# Bonus buy variants
+BONUS_BUY_REGULAR = {
+    "cost_mult": 70,     # 70× bet
+    "spins": 15,         # classic Gates of Olympus FS count
+    "start_mult": 0,     # multiplier starts at 0, accumulates as orbs land
+}
+BONUS_BUY_PREMIUM = {
+    "cost_mult": 220,    # 220× bet
+    "spins": 25,         # more spins
+    "start_mult": 10,    # starts at x10, accumulates on top
+}
 
 
 # ============================================================
@@ -284,13 +295,26 @@ def _resolve_spin(
 # MAIN ENTRY: play a full session (base spin + optional FS)
 # ============================================================
 
-async def spin(user_id: int, bet: int, bonus_buy: bool = False) -> dict:
+async def spin(user_id: int, bet: int, bonus_buy: bool = False, bonus_type: str = "regular") -> dict:
     """Full play: deduct cost, run base spin (unless bonus_buy), trigger FS if 4+ scatters,
-    accumulate multipliers during FS, credit winnings, return full visualization data."""
+    accumulate multipliers during FS, credit winnings, return full visualization data.
+
+    bonus_type: "regular" (15 spins, start x0, cost 70×) or "premium" (25 spins, start x10, cost 220×).
+    Only used when bonus_buy=True.
+    """
     if bet <= 0:
         return {"ok": False, "error": "Bet must be positive"}
 
-    cost = bet * BONUS_BUY_COST_MULT if bonus_buy else bet
+    # Resolve bonus buy parameters
+    bb = BONUS_BUY_PREMIUM if bonus_type == "premium" else BONUS_BUY_REGULAR
+    if bonus_buy:
+        cost = bet * bb["cost_mult"]
+        fs_spins_count = bb["spins"]
+        fs_start_mult = bb["start_mult"]
+    else:
+        cost = bet
+        fs_spins_count = FS_SPINS_AWARDED  # scatter-triggered FS use default 15
+        fs_start_mult = 0
 
     async with pool().acquire() as conn:
         bal_row = await conn.fetchrow(
@@ -303,7 +327,7 @@ async def spin(user_id: int, bet: int, bonus_buy: bool = False) -> dict:
     base_spin = None
     scatter_payout = 0
     fs_triggered = bonus_buy
-    fs_trigger_reason = "bonus_buy" if bonus_buy else None
+    fs_trigger_reason = ("bonus_buy_" + bonus_type) if bonus_buy else None
 
     total_win = 0
 
@@ -324,8 +348,8 @@ async def spin(user_id: int, bet: int, bonus_buy: bool = False) -> dict:
     # ========== FREE SPINS ==========
     fs_data = None
     if fs_triggered:
-        fs_spins_left = FS_SPINS_AWARDED
-        persistent_mult = 0
+        fs_spins_left = fs_spins_count
+        persistent_mult = fs_start_mult
         fs_spins: list[dict] = []
         fs_total_base = 0  # raw win amount (before applying accumulated mult)
 
@@ -354,6 +378,9 @@ async def spin(user_id: int, bet: int, bonus_buy: bool = False) -> dict:
             "applied_mult": fs_final_mult,
             "final_win": fs_final_win,
             "trigger_reason": fs_trigger_reason,
+            "start_mult": fs_start_mult,
+            "spins_count": fs_spins_count,
+            "variant": bonus_type if bonus_buy else "scatter",
         }
 
     # ========== APPLY MAX WIN CAP ==========
@@ -458,7 +485,7 @@ async def get_config() -> dict:
         "symbols": [
             {
                 "key": k,
-                "icon": ic,  # fallback emoji
+                "icon": ic,
                 "name": n,
                 "image_url": images.get(k, ""),
             }
@@ -468,7 +495,8 @@ async def get_config() -> dict:
         "scatter_payout": SCATTER_PAYOUT,
         "scatter_fs_trigger": SCATTER_FS_TRIGGER,
         "fs_spins_awarded": FS_SPINS_AWARDED,
-        "bonus_buy_cost_mult": BONUS_BUY_COST_MULT,
+        "bonus_buy_regular": BONUS_BUY_REGULAR,
+        "bonus_buy_premium": BONUS_BUY_PREMIUM,
         "max_win_mult": MAX_WIN_CAP,
         "orb_values": [v for v, _ in ORBS],
     }

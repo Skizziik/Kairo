@@ -2018,8 +2018,8 @@ async function renderMegaslot(area) {
     <div class="megaslot-wrap">
       <div class="megaslot-header">
         <h3>⚡ CS Gates</h3>
-        <button class="ms-buy-chip" id="ms-buy" title="Купить бонус = мгновенные 15 free spins">
-          ⚡ Купить<br><span id="ms-buy-cost">7 000 🪙</span>
+        <button class="ms-buy-chip" id="ms-buy" title="Купить бонус = мгновенные FS">
+          ⚡ Купить<br><span>бонус</span>
         </button>
       </div>
       <div class="megaslot-fs-bar" id="ms-fs-bar" style="display:none">
@@ -2073,17 +2073,50 @@ async function renderMegaslot(area) {
   }
 
   _renderMegaslotGrid(_randomGrid());
-  const updateBuyCost = () => {
-    const el = document.getElementById('ms-buy-cost');
-    if (el) el.textContent = fmt(_megaslotState.bet * 70) + ' 🪙';
-  };
-  updateBuyCost();
   document.getElementById('ms-bet').addEventListener('input', (e) => {
     _megaslotState.bet = Math.max(10, parseInt(e.target.value) || 100);
-    updateBuyCost();
   });
-  document.getElementById('ms-spin').addEventListener('click', () => playMegaslot(false));
-  document.getElementById('ms-buy').addEventListener('click', () => playMegaslot(true));
+  document.getElementById('ms-spin').addEventListener('click', () => playMegaslot(false, null));
+  document.getElementById('ms-buy').addEventListener('click', _openBonusBuyModal);
+}
+
+function _openBonusBuyModal() {
+  if (_megaslotState.busy) return;
+  const bet = _megaslotState.bet;
+  const regCost = bet * 70;
+  const premCost = bet * 220;
+  const el = document.createElement('div');
+  el.className = 'ms-bonus-modal';
+  el.innerHTML = `
+    <div class="ms-bonus-backdrop"></div>
+    <div class="ms-bonus-card">
+      <div class="ms-bonus-title">⚡ Выбери бонус</div>
+      <div class="ms-bonus-options">
+        <button class="ms-bonus-opt" data-kind="regular">
+          <div class="mb-opt-name">🎁 Обычный</div>
+          <div class="mb-opt-spec">15 круток · старт ×0 (накапливается)</div>
+          <div class="mb-opt-cost">${fmt(regCost)} 🪙</div>
+        </button>
+        <button class="ms-bonus-opt premium" data-kind="premium">
+          <div class="mb-opt-name">💎 Премиум</div>
+          <div class="mb-opt-spec">25 круток · старт <b>×10</b> (+ накапливается)</div>
+          <div class="mb-opt-cost">${fmt(premCost)} 🪙</div>
+        </button>
+      </div>
+      <button class="ms-bonus-cancel">Отмена</button>
+    </div>
+  `;
+  document.body.appendChild(el);
+  const close = () => el.remove();
+  el.querySelector('.ms-bonus-backdrop').addEventListener('click', close);
+  el.querySelector('.ms-bonus-cancel').addEventListener('click', close);
+  el.querySelectorAll('.ms-bonus-opt').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const kind = btn.dataset.kind;
+      close();
+      playMegaslot(true, kind);
+    });
+  });
 }
 
 function _randomGrid() {
@@ -2260,12 +2293,13 @@ async function _animateSpin(spinData, spinMs = 900, colDelay = 160) {
   }
 }
 
-async function playMegaslot(bonusBuy) {
+async function playMegaslot(bonusBuy, bonusType) {
   if (_megaslotState.busy) return;
   const bet = _megaslotState.bet;
   if (bet <= 0) return toast('Поставь сумму');
-  const cost = bonusBuy ? bet * 70 : bet;
-  if (bonusBuy && !confirm(`Купить бонус за ${fmt(cost)} 🪙?`)) return;
+  const costMult = bonusBuy ? (bonusType === 'premium' ? 220 : 70) : 1;
+  const cost = bet * costMult;
+  // (modal already confirmed for bonus buy; no confirm() needed here)
 
   _megaslotState.busy = true;
   const spinBtn = document.getElementById('ms-spin');
@@ -2278,7 +2312,9 @@ async function playMegaslot(bonusBuy) {
 
   try {
     const r = await api('/api/casino/megaslot/spin', {
-      method: 'POST', body: JSON.stringify({ bet, bonus_buy: bonusBuy }),
+      method: 'POST', body: JSON.stringify({
+        bet, bonus_buy: bonusBuy, bonus_type: bonusType || 'regular',
+      }),
     });
     if (!r.ok) {
       toast(r.error || 'Ошибка');
@@ -2307,9 +2343,11 @@ async function playMegaslot(bonusBuy) {
       const fsBar = document.getElementById('ms-fs-bar');
       fsBar.style.display = 'flex';
       document.getElementById('ms-fs-left').textContent = r.fs.spins.length;
-      document.getElementById('ms-fs-mult').textContent = '×0';
+      const startMult = r.fs.start_mult || 0;
+      document.getElementById('ms-fs-mult').textContent = '×' + startMult;
       tg?.HapticFeedback?.notificationOccurred?.('success');
-      out.textContent = `🎰 FREE SPINS — ${r.fs.spins.length} круток!`;
+      const variantLabel = r.fs.variant === 'premium' ? '💎 ПРЕМИУМ ' : '';
+      out.textContent = `🎰 ${variantLabel}FREE SPINS — ${r.fs.spins.length} круток!`;
       out.className = 'megaslot-out win';
       await _sleep(1200);
 
