@@ -2163,10 +2163,17 @@ async function _spinAnimation(finalGrid, baseDuration = 900, colDelay = 160) {
   if (!gridEl) return;
 
   const SYMS = ['milspec', 'classified', 'covert', 'm4', 'gloves', 'ak', 'awp', 'knife'];
-  const STRIP_FILLER = baseDuration < 500 ? 14 : 22;  // shorter strip for faster spins
+  const STRIP_FILLER = baseDuration < 500 ? 14 : 22;
   const ROWS = 5;
 
-  // Build 6 vertical strip columns
+  // Lock current grid box dimensions so switching display modes doesn't cause a resize jump
+  const rect = gridEl.getBoundingClientRect();
+  gridEl.style.height = rect.height + 'px';
+  // Compute cell height from locked dimensions so reel strip aligns perfectly with 5 rows
+  const colHeight = rect.height - 20;  // minus 10px padding top+bottom
+  const cellH = colHeight / ROWS;
+  gridEl.style.setProperty('--ms-cell-h', cellH + 'px');
+
   gridEl.classList.add('reel-mode');
   let html = '';
   for (let c = 0; c < 6; c++) {
@@ -2183,10 +2190,6 @@ async function _spinAnimation(finalGrid, baseDuration = 900, colDelay = 160) {
 
   // Force layout so initial transform sticks
   gridEl.getBoundingClientRect();
-
-  // Measure one cell height (all equal aspect-ratio)
-  const anyCell = gridEl.querySelector('.ms-strip-cell');
-  const cellH = anyCell ? anyCell.getBoundingClientRect().height : 50;
 
   // Animate each column: translate strip so final 5 land in view
   const targetY = STRIP_FILLER * cellH;
@@ -2217,6 +2220,7 @@ async function _spinAnimation(finalGrid, baseDuration = 900, colDelay = 160) {
 
   // Switch back to regular grid mode for tumble animations
   gridEl.classList.remove('reel-mode');
+  gridEl.style.height = '';  // release locked height
   _renderMegaslotGrid(finalGrid);
 }
 
@@ -2329,12 +2333,21 @@ async function playMegaslot(bonusBuy) {
 
     // Final summary
     await _sleep(800);
-    const delta = r.delta;
     const capped = r.capped ? ' (MAX WIN!)' : '';
-    out.textContent = delta >= 0
-      ? `✅ Итого: +${fmt(delta)} 🪙${capped}`
-      : `❌ -${fmt(-delta)} 🪙`;
-    out.className = 'megaslot-out ' + (delta >= 0 ? 'win' : 'lose');
+    if (r.bonus_buy) {
+      // For bonus buy, show the raw win (not the net after buy cost)
+      const tw = r.total_win || 0;
+      out.textContent = tw > 0
+        ? `🎁 Выигрыш с бонуса: +${fmt(tw)} 🪙${capped}`
+        : `🎁 Бонус ничего не дал :(`;
+      out.className = 'megaslot-out ' + (tw > 0 ? 'win big' : 'lose');
+    } else {
+      const delta = r.delta;
+      out.textContent = delta >= 0
+        ? `✅ Итого: +${fmt(delta)} 🪙${capped}`
+        : `❌ ${fmt(delta)} 🪙`;
+      out.className = 'megaslot-out ' + (delta >= 0 ? 'win' : 'lose');
+    }
   } catch (e) {
     toast(e.message);
   } finally {

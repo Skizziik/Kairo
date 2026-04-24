@@ -2309,10 +2309,11 @@ h2 {
   display: flex;
   gap: 4px;
   padding: 10px;
+  box-sizing: border-box;
 }
 .ms-col {
   flex: 1;
-  aspect-ratio: 6 / 30;  /* width : height = 1 : 5 (5 cells tall, 1 wide) */
+  height: 100%;  /* fill the locked grid height (set by JS before switching modes) */
   position: relative;
   overflow: hidden;
   border-radius: 8px;
@@ -2346,7 +2347,8 @@ h2 {
 }
 .ms-strip-cell {
   width: 100%;
-  aspect-ratio: 1;
+  height: var(--ms-cell-h, 60px);  /* set by JS on .megaslot-grid to match grid row height exactly */
+  flex: 0 0 var(--ms-cell-h, 60px);
   display: flex;
   align-items: center;
   justify-content: center;
