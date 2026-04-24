@@ -770,15 +770,16 @@ function forgePaint(area) {
       </div>
 
       <div class="forge-effects-bar">
-        <span>⚒ ${s.effects.damage} dmg</span>
-        <span>🎯 ${s.effects.crit_chance}% crit</span>
+        <span>⚒ ${s.effects.damage}</span>
+        <span>🎯 ${s.effects.crit_chance}% (x${s.effects.crit_multiplier || 3})</span>
         <span>🍀 +${s.effects.luck_bonus_pct}%</span>
         <span>Разобрано: ${s.total_breaks}</span>
       </div>
 
       <div class="forge-actions">
+        <button class="btn secondary" id="forge-skip-btn" title="Пропустить (10% particles)">⏭ Скип</button>
         <button class="btn secondary" id="forge-upgrades-btn">🛠 Апгрейды</button>
-        <button class="btn" id="forge-exchange-btn" style="background:linear-gradient(135deg,#7dd3fc 0%,#a78bfa 100%);color:#0a0c14;border:0;font-weight:800">💱 Обменять на 🪙</button>
+        <button class="btn" id="forge-exchange-btn" style="background:linear-gradient(135deg,#7dd3fc 0%,#a78bfa 100%);color:#0a0c14;border:0;font-weight:800">💱 Обмен</button>
       </div>
     </div>
   `;
@@ -786,8 +787,26 @@ function forgePaint(area) {
   document.getElementById('weapon-img').addEventListener('click', onForgeHit);
   document.getElementById('forge-upgrades-btn').addEventListener('click', () => renderForgeUpgrades(area));
   document.getElementById('forge-exchange-btn').addEventListener('click', () => renderForgeExchange(area));
+  document.getElementById('forge-skip-btn').addEventListener('click', onForgeSkip);
   document.getElementById('forge-lb-btn')?.addEventListener('click', () => renderForgeLeaderboard(area));
   _startForgePolling();
+}
+
+async function onForgeSkip() {
+  if (!confirm('Пропустить оружие? Получишь 10% particles и спавнится новое.')) return;
+  try {
+    const r = await api('/api/forge/skip', { method: 'POST' });
+    if (r.ok) {
+      tg?.HapticFeedback?.impactOccurred?.('light');
+      toast(`+${fmt(r.refund)} ⚙️`);
+      const fresh = await api('/api/forge/state');
+      forgeState.state = fresh;
+      swapWeaponInPlace(fresh.weapon);
+      updateForgeStatsBar();
+    } else {
+      toast(r.error || 'Нельзя');
+    }
+  } catch (e) { toast(e.message); }
 }
 
 async function renderForgeLeaderboard(area) {

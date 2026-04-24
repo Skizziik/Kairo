@@ -175,22 +175,65 @@ SILVER_UPGRADE_TIERS = _build_tiers(
     cost_fn=lambda L: 100 * (1.35 ** (L - 1)),
     round_effect=False,
 )
-GOLD_UNLOCK_COST = 12000
+GOLD_UNLOCK_COST = 8000
 GOLD_BASE_RATE = 1.0
 GOLD_UPGRADE_TIERS = _build_tiers(
     max_level=20,
     effect_fn=lambda L: 1.0 + L * 0.5,        # +0.5/sec per level → max 11/sec
-    cost_fn=lambda L: 800 * (1.38 ** (L - 1)),
+    cost_fn=lambda L: 250 * (1.3 ** (L - 1)),  # was 800*1.38, total ~ now ~250k
     round_effect=False,
 )
-GLOBAL_UNLOCK_COST = 100000
+GLOBAL_UNLOCK_COST = 60000
 GLOBAL_BASE_RATE = 4.0
 GLOBAL_UPGRADE_TIERS = _build_tiers(
     max_level=20,
     effect_fn=lambda L: 4.0 + L * 1.5,        # +1.5/sec per level → max 34/sec
-    cost_fn=lambda L: 8000 * (1.4 ** (L - 1)),
+    cost_fn=lambda L: 1500 * (1.3 ** (L - 1)),  # was 8000*1.4, total ~ now ~2M
     round_effect=False,
 )
+
+# ===== New branches (wiring up existing DB columns) =====
+
+# Crit power — crit multiplier grows from x3 base
+CRIT_POWER_TIERS = _build_tiers(
+    max_level=10,
+    effect_fn=lambda L: 3.0 + L * 0.3,        # x3.3, x3.6, ... x6.0 at L10
+    cost_fn=lambda L: 150 * (1.45 ** (L - 1)),
+    round_effect=False,
+)
+
+# StatTrak hunter — chance of ST weapon spawning
+STATTRAK_HUNTER_TIERS = _build_tiers(
+    max_level=10,
+    effect_fn=lambda L: 5 + L,                # 6% … 15% (base 5)
+    cost_fn=lambda L: 200 * (1.42 ** (L - 1)),
+)
+
+# Tier luck — shifts spawn toward higher tiers
+TIER_LUCK_TIERS = _build_tiers(
+    max_level=10,
+    effect_fn=lambda L: L * 2,                # +2%..+20% "tier shift up" chance
+    cost_fn=lambda L: 500 * (1.45 ** (L - 1)),
+)
+
+
+def crit_multiplier_at(level: int) -> float:
+    if level <= 0:
+        return 3.0
+    return CRIT_POWER_TIERS[min(level, 10) - 1][1]
+
+
+def stattrak_chance_at(level: int) -> float:
+    base = STATTRAK_SPAWN_CHANCE_BASE
+    if level <= 0:
+        return base
+    return STATTRAK_HUNTER_TIERS[min(level, 10) - 1][1] / 100.0
+
+
+def tier_luck_at(level: int) -> float:
+    if level <= 0:
+        return 0.0
+    return TIER_LUCK_TIERS[min(level, 10) - 1][1] / 100.0
 
 
 def damage_at(level: int) -> int:
@@ -247,13 +290,16 @@ def total_afk_rate(silver_lvl: int, gold_lvl: int, global_lvl: int) -> float:
 
 # Branches catalog for UI / API
 UPGRADE_BRANCHES = {
-    "damage":      {"name": "⚒ Молот",        "description": "Урон за клик",       "unit": "dmg",   "tiers": DAMAGE_TIERS},
-    "crit":        {"name": "🎯 Крит",         "description": "Шанс x3 урона",      "unit": "%",     "tiers": CRIT_TIERS},
-    "luck":        {"name": "🍀 Удача",        "description": "Бонус к particles",  "unit": "%",     "tiers": LUCK_TIERS},
-    "offline_cap": {"name": "⏰ Сон бота",     "description": "Часы оффлайн фарма",  "unit": "ч",     "tiers": OFFLINE_TIERS},
-    "silver":      {"name": "🥉 Silver-бот",   "description": "Автофарм",           "unit": "/сек",  "tiers": SILVER_UPGRADE_TIERS, "unlock_cost": SILVER_UNLOCK_COST},
-    "gold":        {"name": "🥈 Gold-бот",     "description": "Автофарм+",          "unit": "/сек",  "tiers": GOLD_UPGRADE_TIERS,   "unlock_cost": GOLD_UNLOCK_COST},
-    "global":      {"name": "🥇 Global-бот",   "description": "Автофарм++",         "unit": "/сек",  "tiers": GLOBAL_UPGRADE_TIERS, "unlock_cost": GLOBAL_UNLOCK_COST},
+    "damage":          {"name": "⚒ Молот",        "description": "Урон за клик",                   "unit": "dmg",  "tiers": DAMAGE_TIERS},
+    "crit":            {"name": "🎯 Крит",         "description": "Шанс критического удара",        "unit": "%",    "tiers": CRIT_TIERS},
+    "crit_power":      {"name": "💥 Сила Крита",   "description": "Множитель урона крита (база x3)", "unit": "x",    "tiers": CRIT_POWER_TIERS},
+    "luck":            {"name": "🍀 Удача",        "description": "Бонус к particles",              "unit": "%",    "tiers": LUCK_TIERS},
+    "tier_luck":       {"name": "🔮 Везение",      "description": "Шанс спавна лучшего тира",       "unit": "%",    "tiers": TIER_LUCK_TIERS},
+    "stattrak_hunter": {"name": "🎯 Охотник ST™",  "description": "Шанс ST™-оружия (особый дроп)",  "unit": "%",    "tiers": STATTRAK_HUNTER_TIERS},
+    "offline_cap":     {"name": "⏰ Ночная смена", "description": "Часы AFK + daily cap",           "unit": "ч",    "tiers": OFFLINE_TIERS},
+    "silver":          {"name": "🥉 Silver-бот",   "description": "Автофарм",                      "unit": "/сек", "tiers": SILVER_UPGRADE_TIERS, "unlock_cost": SILVER_UNLOCK_COST},
+    "gold":            {"name": "🥈 Gold-бот",     "description": "Автофарм+",                     "unit": "/сек", "tiers": GOLD_UPGRADE_TIERS,   "unlock_cost": GOLD_UNLOCK_COST},
+    "global":          {"name": "🥇 Global-бот",   "description": "Автофарм++",                    "unit": "/сек", "tiers": GLOBAL_UPGRADE_TIERS, "unlock_cost": GLOBAL_UNLOCK_COST},
 }
 
 # Dynamic max_level populated from actual tiers
@@ -265,10 +311,20 @@ for _key, _cfg in UPGRADE_BRANCHES.items():
 # ============================================================
 
 EXCHANGE_RATE = 10  # 10 particles = 1 coin
-AFK_DAILY_CAP = 30000
+AFK_DAILY_CAP_BASE = 30000
 MIN_HIT_INTERVAL_MS = 70  # max ~14 hits/sec allowed (anti-autoclick is softer, UX)
-STATTRAK_SPAWN_CHANCE = 0.05
+STATTRAK_SPAWN_CHANCE_BASE = 0.05
 STATTRAK_PARTICLE_MULT = 2.0
+
+# Daily cap extender — offline_cap_level also grows AFK daily cap
+AFK_DAILY_CAP_PER_OFFLINE_LEVEL = 15000  # +15k per level → L8 = 30k + 120k = 150k
+
+def afk_daily_cap_for(offline_cap_level: int) -> int:
+    return AFK_DAILY_CAP_BASE + max(0, offline_cap_level) * AFK_DAILY_CAP_PER_OFFLINE_LEVEL
+
+
+# Legacy alias kept for minimal diff (not used in new code but referenced elsewhere)
+AFK_DAILY_CAP = AFK_DAILY_CAP_BASE
 
 
 # ============================================================
@@ -305,11 +361,16 @@ async def get_state(tg_id: int) -> dict:
 
     dmg = damage_at(int(row["damage_level"]))
     crit_c = crit_chance_at(int(row["crit_level"]))
+    crit_mult = crit_multiplier_at(int(row["crit_power_level"] or 0))
     luck_b = luck_bonus_at(int(row["luck_level"]))
+    tier_luck = tier_luck_at(int(row["tier_luck_level"] or 0))
+    st_hunt = stattrak_chance_at(int(row["stattrak_hunter_level"] or 0))
     silver_lvl = int(row["silver_level"])
     gold_lvl = int(row["gold_level"])
     global_lvl = int(row["global_level"])
+    offline_cap_lvl = int(row["offline_cap_level"])
     afk_rate = total_afk_rate(silver_lvl, gold_lvl, global_lvl)
+    daily_cap_today = afk_daily_cap_for(offline_cap_lvl)
 
     return {
         "particles": int(row["particles"]),
@@ -320,8 +381,11 @@ async def get_state(tg_id: int) -> dict:
         "levels": {
             "damage": int(row["damage_level"]),
             "crit": int(row["crit_level"]),
+            "crit_power": int(row["crit_power_level"] or 0),
             "luck": int(row["luck_level"]),
-            "offline_cap": int(row["offline_cap_level"]),
+            "tier_luck": int(row["tier_luck_level"] or 0),
+            "stattrak_hunter": int(row["stattrak_hunter_level"] or 0),
+            "offline_cap": offline_cap_lvl,
             "silver": silver_lvl,
             "gold": gold_lvl,
             "global": global_lvl,
@@ -329,16 +393,20 @@ async def get_state(tg_id: int) -> dict:
         "effects": {
             "damage": dmg,
             "crit_chance": crit_c,
+            "crit_multiplier": crit_mult,
             "luck_bonus_pct": luck_b,
+            "tier_luck_pct": round(tier_luck * 100, 1),
+            "stattrak_chance_pct": round(st_hunt * 100, 1),
             "afk_rate_per_sec": round(afk_rate, 2),
-            "offline_cap_hours": offline_hours_at(int(row["offline_cap_level"])),
+            "offline_cap_hours": offline_hours_at(offline_cap_lvl),
+            "afk_daily_cap": daily_cap_today,
         },
         "afk": {
             "buffer": 0,
             "just_gained": int(afk_gained),
             "just_broken": int(afk_breaks),
             "daily_earned": int(row["daily_afk_earned"] or 0),
-            "daily_cap": AFK_DAILY_CAP,
+            "daily_cap": daily_cap_today,
         },
         "weapon": {
             "skin_id": int(row["current_skin_id"]),
@@ -359,18 +427,35 @@ async def get_state(tg_id: int) -> dict:
 
 
 async def _spawn_weapon(tg_id: int) -> None:
-    """Pick a new weapon from the catalog matching a rolled tier."""
-    # Read user's damage level to filter tier eligibility
+    """Pick a new weapon, honoring damage_level gate, tier_luck (boost to higher tier)
+    and stattrak_hunter (boosted ST spawn chance)."""
     async with pool().acquire() as conn:
-        dmg_lvl_row = await conn.fetchrow(
-            "select damage_level from forge_users where tg_id = $1", tg_id,
+        row = await conn.fetchrow(
+            "select damage_level, tier_luck_level, stattrak_hunter_level "
+            "from forge_users where tg_id = $1", tg_id,
         )
-    dmg_lvl = int(dmg_lvl_row["damage_level"]) if dmg_lvl_row else 0
+    dmg_lvl = int(row["damage_level"]) if row else 0
+    tier_luck_lvl = int(row["tier_luck_level"] or 0) if row else 0
+    st_lvl = int(row["stattrak_hunter_level"] or 0) if row else 0
+
     tier = _roll_tier(damage_level=dmg_lvl)
+    # Tier luck — chance to bump tier up one notch (pistol → rifle → awp → golden → legendary)
+    tier_luck_pct = tier_luck_at(tier_luck_lvl)
+    if tier_luck_pct > 0 and random.random() < tier_luck_pct:
+        up_order = ["pistol", "rifle", "awp", "golden", "legendary"]
+        try:
+            idx = up_order.index(tier)
+            if idx + 1 < len(up_order):
+                next_tier = up_order[idx + 1]
+                # Only bump if user's damage allows
+                if dmg_lvl >= TIER_CONFIG[next_tier].get("min_damage_level", 0):
+                    tier = next_tier
+        except ValueError:
+            pass
+
     cfg = TIER_CONFIG[tier]
     skin_pool = await _get_skin_pool(tier)
     if not skin_pool:
-        # fallback: try next lower tier
         for fallback in ["awp", "rifle", "pistol"]:
             pool_fb = await _get_skin_pool(fallback)
             if pool_fb:
@@ -379,9 +464,10 @@ async def _spawn_weapon(tg_id: int) -> None:
                 cfg = TIER_CONFIG[tier]
                 break
     if not skin_pool:
-        return  # catalog empty — impossible after seed
+        return
     skin_id = random.choice(skin_pool)
-    stattrak = random.random() < STATTRAK_SPAWN_CHANCE
+    st_chance = stattrak_chance_at(st_lvl)
+    stattrak = random.random() < st_chance
     particles = cfg["particles"]
     if stattrak:
         particles = int(particles * STATTRAK_PARTICLE_MULT)
@@ -412,7 +498,7 @@ async def hit(tg_id: int) -> dict:
     async with pool().acquire() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
-                "select damage_level, crit_level, luck_level, "
+                "select damage_level, crit_level, crit_power_level, luck_level, "
                 "current_weapon_hp, current_weapon_max_hp, current_weapon_particles, "
                 "current_weapon_stattrak, last_hit_at, total_clicks, total_crits "
                 "from forge_users where tg_id = $1 for update",
@@ -431,11 +517,13 @@ async def hit(tg_id: int) -> dict:
 
             dmg_lvl = int(row["damage_level"])
             crit_lvl = int(row["crit_level"])
+            crit_power_lvl = int(row["crit_power_level"] or 0)
             luck_lvl = int(row["luck_level"])
             base_dmg = damage_at(dmg_lvl)
             crit_chance = crit_chance_at(crit_lvl)
+            crit_mult = crit_multiplier_at(crit_power_lvl)
             is_crit = random.randint(1, 100) <= crit_chance
-            damage = base_dmg * 3 if is_crit else base_dmg
+            damage = int(base_dmg * crit_mult) if is_crit else base_dmg
 
             new_hp = int(row["current_weapon_hp"]) - damage
             broken = new_hp <= 0
@@ -503,7 +591,8 @@ async def _tick_afk(tg_id: int) -> tuple[int, int]:
             row = await conn.fetchrow(
                 "select silver_level, gold_level, global_level, offline_cap_level, "
                 "last_afk_tick_at, daily_afk_day, daily_afk_earned, damage_level, "
-                "luck_level, current_weapon_hp, current_weapon_particles "
+                "luck_level, tier_luck_level, stattrak_hunter_level, "
+                "current_weapon_hp, current_weapon_particles "
                 "from forge_users where tg_id = $1 for update",
                 tg_id,
             )
@@ -532,10 +621,13 @@ async def _tick_afk(tg_id: int) -> tuple[int, int]:
                 return (0, 0)
 
             daily_earned = 0 if row["daily_afk_day"] != today else int(row["daily_afk_earned"] or 0)
-            cap_left = max(0, AFK_DAILY_CAP - daily_earned)
+            daily_cap = afk_daily_cap_for(int(row["offline_cap_level"] or 0))
+            cap_left = max(0, daily_cap - daily_earned)
 
             damage_level = int(row["damage_level"])
+            tier_luck_lvl = int(row["tier_luck_level"] or 0)
             luck_mult = 1.0 + luck_bonus_at(int(row["luck_level"])) / 100.0
+            tier_luck_pct_afk = tier_luck_at(tier_luck_lvl)
             cur_hp = int(row["current_weapon_hp"]) if row["current_weapon_hp"] is not None else 0
             cur_particles = int(row["current_weapon_particles"]) if row["current_weapon_particles"] is not None else 0
 
@@ -556,6 +648,17 @@ async def _tick_afk(tg_id: int) -> tuple[int, int]:
                     breaks += 1
                     needs_new_spawn = True
                     tier = _roll_tier(damage_level)
+                    # Apply tier_luck boost during AFK simulation too
+                    if tier_luck_pct_afk > 0 and random.random() < tier_luck_pct_afk:
+                        up_order = ["pistol", "rifle", "awp", "golden", "legendary"]
+                        try:
+                            idx = up_order.index(tier)
+                            if idx + 1 < len(up_order):
+                                next_tier = up_order[idx + 1]
+                                if damage_level >= TIER_CONFIG[next_tier].get("min_damage_level", 0):
+                                    tier = next_tier
+                        except ValueError:
+                            pass
                     cfg = TIER_CONFIG[tier]
                     cur_hp = cfg["hp"]
                     cur_particles = cfg["particles"]
@@ -640,6 +743,9 @@ async def buy_upgrade(tg_id: int, branch: str) -> dict:
     cfg = UPGRADE_BRANCHES[branch]
     column = {
         "damage": "damage_level", "crit": "crit_level", "luck": "luck_level",
+        "crit_power": "crit_power_level",
+        "stattrak_hunter": "stattrak_hunter_level",
+        "tier_luck": "tier_luck_level",
         "offline_cap": "offline_cap_level",
         "silver": "silver_level", "gold": "gold_level", "global": "global_level",
     }[branch]
