@@ -2023,8 +2023,14 @@ async function renderMegaslot(area) {
         </button>
       </div>
       <div class="megaslot-fs-bar" id="ms-fs-bar" style="display:none">
-        <div class="ms-fs-label">FREE SPINS <span id="ms-fs-left">0</span></div>
-        <div class="ms-fs-mult">✨ Множитель: <b id="ms-fs-mult">×0</b></div>
+        <div class="ms-fs-row">
+          <div class="ms-fs-label">FREE SPINS <span id="ms-fs-left">0</span></div>
+          <div class="ms-fs-mult">✨ <b id="ms-fs-mult">×0</b></div>
+        </div>
+        <div class="ms-fs-row subtle">
+          <div>База: <b id="ms-fs-base">0 🪙</b></div>
+          <div>→ Итого: <b id="ms-fs-projected">0 🪙</b></div>
+        </div>
       </div>
       <div class="megaslot-grid" id="ms-grid"></div>
       <div class="megaslot-out" id="ms-out"></div>
@@ -2330,10 +2336,22 @@ async function playMegaslot(bonusBuy, bonusType) {
     // Base spin animation (skipped on bonus buy) — plays even on no-win spins
     if (r.base_spin) {
       await _animateSpin(r.base_spin, 900);
+
+      // Show running win during tumble cascades
+      const tumbles = r.base_spin.tumbles || [];
+      let running = 0;
+      for (const t of tumbles) {
+        if (t.win_amount && t.win_amount > 0) {
+          running += t.win_amount;
+          out.textContent = `+${fmt(running)} 🪙`;
+          out.className = 'megaslot-out win';
+          tg?.HapticFeedback?.impactOccurred?.('light');
+        }
+      }
+      // Include orbs multiplier in final base spin total
       if (r.base_spin.final_win > 0) {
         out.textContent = `+${fmt(r.base_spin.final_win)} 🪙`;
         out.className = 'megaslot-out win';
-        tg?.HapticFeedback?.impactOccurred?.('light');
         await _sleep(600);
       }
     }
@@ -2341,10 +2359,12 @@ async function playMegaslot(bonusBuy, bonusType) {
     // Free spins sequence
     if (r.fs) {
       const fsBar = document.getElementById('ms-fs-bar');
-      fsBar.style.display = 'flex';
+      fsBar.style.display = 'block';
       document.getElementById('ms-fs-left').textContent = r.fs.spins.length;
       const startMult = r.fs.start_mult || 0;
       document.getElementById('ms-fs-mult').textContent = '×' + startMult;
+      document.getElementById('ms-fs-base').textContent = '0 🪙';
+      document.getElementById('ms-fs-projected').textContent = '0 🪙';
       tg?.HapticFeedback?.notificationOccurred?.('success');
       const variantLabel = r.fs.variant === 'premium' ? '💎 ПРЕМИУМ ' : '';
       out.textContent = `🎰 ${variantLabel}FREE SPINS — ${r.fs.spins.length} круток!`;
@@ -2352,13 +2372,21 @@ async function playMegaslot(bonusBuy, bonusType) {
       await _sleep(1200);
 
       let spinsLeft = r.fs.spins.length;
+      let accumBase = 0;
       for (let i = 0; i < r.fs.spins.length; i++) {
         const s = r.fs.spins[i];
         spinsLeft--;
         document.getElementById('ms-fs-left').textContent = spinsLeft;
         // Faster spin for FS: shorter base + tight column spacing
         await _animateSpin(s, 350, 70);
-        document.getElementById('ms-fs-mult').textContent = '×' + (s.persistent_mult || 0);
+        // Update after this FS spin: accumulated base + current multiplier → projected total
+        accumBase += (s.final_win || 0);
+        const mult = s.persistent_mult || 0;
+        const effectiveMult = mult > 0 ? mult : 1;
+        const projected = accumBase * effectiveMult;
+        document.getElementById('ms-fs-mult').textContent = '×' + mult;
+        document.getElementById('ms-fs-base').textContent = fmt(accumBase) + ' 🪙';
+        document.getElementById('ms-fs-projected').textContent = fmt(projected) + ' 🪙';
       }
 
       await _sleep(500);
