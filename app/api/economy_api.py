@@ -567,3 +567,23 @@ async def api_gear_unequip(req: GearInvIdReq, user: dict = Depends(require_user)
 @router.post("/gear/sell")
 async def api_gear_sell(req: GearInvIdReq, user: dict = Depends(require_user)) -> dict:
     return await _gear.sell(int(user["id"]), req.inv_id)
+
+
+# ================ MEGASLOT (CS Gates — Zeus-style) ================
+from app.economy import megaslot as _megaslot
+
+
+class MegaslotSpinReq(BaseModel):
+    bet: int = Field(..., ge=1)
+    bonus_buy: bool = False
+
+
+@router.post("/casino/megaslot/spin")
+async def api_megaslot_spin(req: MegaslotSpinReq, user: dict = Depends(require_user)) -> dict:
+    return await _megaslot.spin(int(user["id"]), req.bet, req.bonus_buy)
+
+
+@router.get("/casino/megaslot/config")
+async def api_megaslot_config(user: dict = Depends(require_user)) -> dict:
+    _ = user
+    return _megaslot.get_config()

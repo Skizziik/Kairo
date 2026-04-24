@@ -681,6 +681,8 @@ function renderGamePlay(game, target) {
         </p>
       </div>
     `;
+  } else if (game === 'megaslot') {
+    renderMegaslot(area);
   } else if (game === 'forge') {
     renderForge(area);
   }
@@ -1987,6 +1989,216 @@ function _renderGearInventory(area, data) {
       await _paintGearPanel(area);
     } catch (e) { toast(e.message); }
   }));
+}
+
+// ============================================================
+// 🎰 CS GATES (megaslot)
+// ============================================================
+
+const MEGASLOT_ICON = {
+  scatter: '💣', milspec: '🟦', classified: '🟪', covert: '🟥',
+  m4: '🔫', gloves: '🧤', ak: '🎯', awp: '🏆', knife: '🔪',
+};
+
+let _megaslotState = { busy: false, bet: 100 };
+
+async function renderMegaslot(area) {
+  area.innerHTML = `
+    <div class="megaslot-wrap">
+      <div class="megaslot-header">
+        <h3>⚡ CS Gates — pay anywhere 6×5</h3>
+        <div class="megaslot-fs-bar" id="ms-fs-bar" style="display:none">
+          <div class="ms-fs-label">FREE SPINS <span id="ms-fs-left">0</span></div>
+          <div class="ms-fs-mult">✨ Множитель: <b id="ms-fs-mult">×0</b></div>
+        </div>
+      </div>
+      <div class="megaslot-grid" id="ms-grid"></div>
+      <div class="megaslot-controls">
+        <div class="ms-bet-row">
+          <label>Ставка</label>
+          <input type="number" id="ms-bet" min="10" step="10" value="100" />
+        </div>
+        <button class="btn big-btn daily-btn" id="ms-spin">🎰 Крутить</button>
+        <button class="btn ms-buy-btn" id="ms-buy">⚡ Купить бонус (×70)</button>
+      </div>
+      <div class="megaslot-out" id="ms-out"></div>
+      <details class="megaslot-rules">
+        <summary>📖 Правила</summary>
+        <div class="ms-rules-body">
+          <b>Pay-anywhere:</b> 8+ одинаковых символов где угодно на поле = выигрыш.<br>
+          <b>Tumble:</b> выигравшие символы исчезают, падают новые — каскад продолжается.<br>
+          <b>💣 Scatter:</b> 4+ бомбы = 15 бесплатных круток + мгновенная выплата.<br>
+          <b>Orb:</b> случайный множитель ×2 до ×500 падает на поле. Во FS множители накапливаются!<br>
+          <b>Макс. выигрыш:</b> ×5000 ставки.
+        </div>
+      </details>
+    </div>
+  `;
+  _renderMegaslotGrid(_randomGrid());
+  document.getElementById('ms-bet').addEventListener('change', (e) => {
+    _megaslotState.bet = Math.max(10, parseInt(e.target.value) || 100);
+  });
+  document.getElementById('ms-spin').addEventListener('click', () => playMegaslot(false));
+  document.getElementById('ms-buy').addEventListener('click', () => playMegaslot(true));
+}
+
+function _randomGrid() {
+  const syms = ['milspec', 'classified', 'covert', 'm4', 'gloves', 'ak', 'awp', 'knife'];
+  const grid = [];
+  for (let c = 0; c < 6; c++) {
+    const col = [];
+    for (let r = 0; r < 5; r++) col.push(syms[Math.floor(Math.random() * syms.length)]);
+    grid.push(col);
+  }
+  return grid;
+}
+
+function _renderMegaslotGrid(grid, options = {}) {
+  const gridEl = document.getElementById('ms-grid');
+  if (!gridEl) return;
+  const orbMap = new Map();  // `${c},${r}` -> orb value
+  (options.orbs || []).forEach(o => orbMap.set(`${o.col},${o.row}`, o.value));
+  const winPositions = options.winningSymbols
+    ? (() => {
+        const set = new Set();
+        for (let c = 0; c < 6; c++) {
+          for (let r = 0; r < 5; r++) {
+            if (options.winningSymbols.has(grid[c][r])) set.add(`${c},${r}`);
+          }
+        }
+        return set;
+      })()
+    : null;
+
+  let html = '';
+  for (let r = 0; r < 5; r++) {
+    for (let c = 0; c < 6; c++) {
+      const sym = grid[c][r];
+      const icon = MEGASLOT_ICON[sym] || '?';
+      const key = `${c},${r}`;
+      const orbVal = orbMap.get(key);
+      const classes = ['ms-cell'];
+      if (winPositions?.has(key)) classes.push('winning');
+      if (orbVal) classes.push('has-orb');
+      html += `<div class="${classes.join(' ')}" data-cr="${key}">
+        <span class="ms-cell-sym">${icon}</span>
+        ${orbVal ? `<span class="ms-orb">×${orbVal}</span>` : ''}
+      </div>`;
+    }
+  }
+  gridEl.innerHTML = html;
+}
+
+async function _animateTumbles(tumbles) {
+  for (const t of tumbles) {
+    const winSyms = new Set((t.wins || []).map(w => w.symbol));
+    _renderMegaslotGrid(t.grid, { orbs: t.orbs, winningSymbols: winSyms });
+
+    if (t.wins && t.wins.length > 0) {
+      // Flash winning symbols
+      await _sleep(500);
+      // Show explosion effect
+      document.querySelectorAll('.ms-cell.winning').forEach(el => el.classList.add('exploding'));
+      await _sleep(250);
+    } else if (t.orbs && t.orbs.length > 0) {
+      // Just show the orb
+      await _sleep(400);
+    }
+
+    // Render post-tumble grid if wins happened
+    if (t.post_grid) {
+      _renderMegaslotGrid(t.post_grid);
+      await _sleep(250);
+    }
+  }
+}
+
+function _sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function playMegaslot(bonusBuy) {
+  if (_megaslotState.busy) return;
+  const bet = _megaslotState.bet;
+  if (bet <= 0) return toast('Поставь сумму');
+  const cost = bonusBuy ? bet * 70 : bet;
+  if (bonusBuy && !confirm(`Купить бонус за ${fmt(cost)} 🪙?`)) return;
+
+  _megaslotState.busy = true;
+  const spinBtn = document.getElementById('ms-spin');
+  const buyBtn = document.getElementById('ms-buy');
+  const out = document.getElementById('ms-out');
+  if (spinBtn) spinBtn.disabled = true;
+  if (buyBtn) buyBtn.disabled = true;
+  out.textContent = '';
+  out.className = 'megaslot-out';
+
+  try {
+    const r = await api('/api/casino/megaslot/spin', {
+      method: 'POST', body: JSON.stringify({ bet, bonus_buy: bonusBuy }),
+    });
+    if (!r.ok) {
+      toast(r.error || 'Ошибка');
+      return;
+    }
+
+    // Update balance
+    if (typeof r.new_balance === 'number') {
+      state.me.balance = r.new_balance;
+      document.getElementById('balance-display').textContent = fmt(state.me.balance);
+    }
+
+    // Base spin animation (skipped on bonus buy)
+    if (r.base_spin) {
+      await _animateTumbles(r.base_spin.tumbles);
+      if (r.base_spin.final_win > 0) {
+        out.textContent = `+${fmt(r.base_spin.final_win)} 🪙`;
+        out.className = 'megaslot-out win';
+        tg?.HapticFeedback?.impactOccurred?.('light');
+        await _sleep(600);
+      }
+    }
+
+    // Free spins sequence
+    if (r.fs) {
+      const fsBar = document.getElementById('ms-fs-bar');
+      fsBar.style.display = 'flex';
+      document.getElementById('ms-fs-left').textContent = r.fs.spins.length;
+      document.getElementById('ms-fs-mult').textContent = '×0';
+      tg?.HapticFeedback?.notificationOccurred?.('success');
+      out.textContent = `🎰 FREE SPINS — ${r.fs.spins.length} круток!`;
+      out.className = 'megaslot-out win';
+      await _sleep(1200);
+
+      let spinsLeft = r.fs.spins.length;
+      for (const s of r.fs.spins) {
+        spinsLeft--;
+        document.getElementById('ms-fs-left').textContent = spinsLeft;
+        await _animateTumbles(s.tumbles);
+        document.getElementById('ms-fs-mult').textContent = '×' + (s.persistent_mult || 0);
+      }
+
+      await _sleep(500);
+      out.textContent = `🎉 FS итог: ${fmt(r.fs.total_base)} × ${r.fs.applied_mult} = +${fmt(r.fs.final_win)} 🪙`;
+      out.className = 'megaslot-out win big';
+      tg?.HapticFeedback?.notificationOccurred?.('success');
+
+      fsBar.style.display = 'none';
+    }
+
+    // Final summary
+    await _sleep(800);
+    const delta = r.delta;
+    const capped = r.capped ? ' (MAX WIN!)' : '';
+    out.textContent = delta >= 0
+      ? `✅ Итого: +${fmt(delta)} 🪙${capped}`
+      : `❌ -${fmt(-delta)} 🪙`;
+    out.className = 'megaslot-out ' + (delta >= 0 ? 'win' : 'lose');
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    _megaslotState.busy = false;
+    if (spinBtn) spinBtn.disabled = false;
+    if (buyBtn) buyBtn.disabled = false;
+  }
 }
 
 // ================= init =================
