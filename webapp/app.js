@@ -2156,50 +2156,76 @@ function _renderMegaslotGrid(grid, options = {}) {
 
 function _sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// Spin animation — shuffles random symbols on the grid for duration ms,
-// then columns stop sequentially at the final grid (left to right)
-async function _spinAnimation(finalGrid, duration = 1000) {
+// Proper casino-style spin: each column has a vertical strip of symbols that
+// scrolls down with CSS transform. Columns stop sequentially with smooth easing.
+async function _spinAnimation(finalGrid, baseDuration = 900, colDelay = 160) {
   const gridEl = document.getElementById('ms-grid');
   if (!gridEl) return;
-  gridEl.classList.add('spinning');
-  const syms = ['milspec', 'classified', 'covert', 'm4', 'gloves', 'ak', 'awp', 'knife'];
-  const randGrid = () => Array.from({length: 6}, () =>
-    Array.from({length: 5}, () => syms[Math.floor(Math.random() * syms.length)]));
 
-  // Rapid shuffle phase
-  const shuffleInterval = setInterval(() => {
-    _renderMegaslotGrid(randGrid());
-  }, 70);
-  await _sleep(duration);
-  clearInterval(shuffleInterval);
+  const SYMS = ['milspec', 'classified', 'covert', 'm4', 'gloves', 'ak', 'awp', 'knife'];
+  const STRIP_FILLER = baseDuration < 500 ? 14 : 22;  // shorter strip for faster spins
+  const ROWS = 5;
 
-  // Columns stop one by one (left → right) at final grid
-  // Build a grid that reveals columns progressively
-  const revealedCols = new Set();
+  // Build 6 vertical strip columns
+  gridEl.classList.add('reel-mode');
+  let html = '';
   for (let c = 0; c < 6; c++) {
-    revealedCols.add(c);
-    const g = Array.from({length: 6}, (_, ci) => {
-      if (revealedCols.has(ci)) return finalGrid[ci];
-      return Array.from({length: 5}, () => syms[Math.floor(Math.random() * syms.length)]);
-    });
-    _renderMegaslotGrid(g);
-    const col = gridEl.querySelectorAll(`.ms-cell[data-cr^="${c},"]`);
-    col.forEach(el => el.classList.add('col-stop'));
-    tg?.HapticFeedback?.impactOccurred?.('light');
-    await _sleep(120);
+    const fillers = Array.from({length: STRIP_FILLER}, () => SYMS[Math.floor(Math.random() * SYMS.length)]);
+    const stripArr = [...fillers, ...finalGrid[c]];  // final 5 at the bottom
+    const cellsHtml = stripArr.map(s =>
+      `<div class="ms-strip-cell">${_renderMegaslotSymbolHtml(s)}</div>`
+    ).join('');
+    html += `<div class="ms-col" data-col="${c}">
+      <div class="ms-strip" id="ms-strip-${c}" style="transform:translateY(0)">${cellsHtml}</div>
+    </div>`;
   }
-  gridEl.classList.remove('spinning');
-  // Final clean render
+  gridEl.innerHTML = html;
+
+  // Force layout so initial transform sticks
+  gridEl.getBoundingClientRect();
+
+  // Measure one cell height (all equal aspect-ratio)
+  const anyCell = gridEl.querySelector('.ms-strip-cell');
+  const cellH = anyCell ? anyCell.getBoundingClientRect().height : 50;
+
+  // Animate each column: translate strip so final 5 land in view
+  const targetY = STRIP_FILLER * cellH;
+  const stops = [];
+  for (let c = 0; c < 6; c++) {
+    const strip = document.getElementById(`ms-strip-${c}`);
+    const duration = baseDuration + c * colDelay;  // each column later
+    strip.style.transition = `transform ${duration}ms cubic-bezier(0.15, 0.45, 0.25, 1)`;
+    // Trigger: two animation frames so transition engages
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    strip.style.transform = `translateY(-${targetY}px)`;
+    stops.push({ c, endTime: Date.now() + duration });
+  }
+
+  // Wait for columns to land, firing haptic and stop-bounce on each
+  for (const s of stops) {
+    const wait = s.endTime - Date.now();
+    if (wait > 0) await _sleep(wait);
+    const colEl = gridEl.querySelector(`.ms-col[data-col="${s.c}"]`);
+    if (colEl) {
+      colEl.classList.add('just-stopped');
+      setTimeout(() => colEl.classList.remove('just-stopped'), 300);
+    }
+    tg?.HapticFeedback?.impactOccurred?.('light');
+  }
+
+  await _sleep(200);
+
+  // Switch back to regular grid mode for tumble animations
+  gridEl.classList.remove('reel-mode');
   _renderMegaslotGrid(finalGrid);
 }
 
-async function _animateSpin(spinData, spinMs = 900) {
-  // Always play spin animation, even if no wins happened
+async function _animateSpin(spinData, spinMs = 900, colDelay = 160) {
   const tumbles = spinData.tumbles || [];
   const finalGrid = tumbles.length > 0 ? tumbles[0].grid : spinData.final_grid;
   if (!finalGrid) return;
 
-  await _spinAnimation(finalGrid, spinMs);
+  await _spinAnimation(finalGrid, spinMs, colDelay);
 
   // If no tumbles at all (pure loss), we're done — just display the stopped grid
   if (tumbles.length === 0) {
@@ -2288,7 +2314,8 @@ async function playMegaslot(bonusBuy) {
         const s = r.fs.spins[i];
         spinsLeft--;
         document.getElementById('ms-fs-left').textContent = spinsLeft;
-        await _animateSpin(s, 400);
+        // Faster spin for FS: shorter base + tight column spacing
+        await _animateSpin(s, 350, 70);
         document.getElementById('ms-fs-mult').textContent = '×' + (s.persistent_mult || 0);
       }
 
