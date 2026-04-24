@@ -100,6 +100,10 @@ async def telegram_webhook(secret: str, request: Request) -> dict:
     data = await request.json()
     bot = get_bot()
     dp = get_dispatcher()
-    update = Update.model_validate(data, context={"bot": bot})
-    await dp.feed_update(bot, update)
+    try:
+        update = Update.model_validate(data, context={"bot": bot})
+        await dp.feed_update(bot, update)
+    except Exception:
+        # Log but always return 200 to stop Telegram from retrying failed updates
+        log.exception("webhook dispatch failed (update_id=%s)", data.get("update_id"))
     return {"ok": True}
