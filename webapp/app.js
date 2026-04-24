@@ -1030,16 +1030,15 @@ async function _flushForgeBatch() {
     updateForgeStatsBar();
 
     if (r.weapon) {
-      const oldId = forgeState.state.weapon?.skin_id;
-      const swap = r.weapon.skin_id !== oldId;
-      if (swap) {
+      if (r.weapon_swapped && r.weapon.skin_id) {
+        // Full new weapon came back — swap in place after break animation
         setTimeout(() => {
           forgeState.state.weapon = r.weapon;
           forgeState.displayedHp = r.weapon.hp;
           swapWeaponInPlace(r.weapon);
         }, r.breaks > 0 ? 450 : 0);
       } else {
-        // Same weapon — sync HP from server truth
+        // Partial response (same weapon): only {hp, max_hp} — sync HP only
         forgeState.state.weapon.hp = r.weapon.hp;
         forgeState.displayedHp = r.weapon.hp;
         _renderHpDisplay(r.weapon.hp, r.weapon.max_hp);
