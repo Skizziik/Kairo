@@ -141,10 +141,11 @@ def _build_tiers(max_level: int, effect_fn, cost_fn, round_effect: bool = True) 
     return tiers
 
 
-# Damage: 25 levels, 1 → ~200 damage. Total cost ~350k particles.
+# Damage: 25 levels, 2 → ~94 damage. Steeper late-game so high-HP weapons
+# (AWP 1500, Golden 10k, Legendary 80k) don't require thousands of clicks.
 DAMAGE_TIERS = _build_tiers(
     max_level=25,
-    effect_fn=lambda L: 1 + L * 0.8 + (L ** 1.55) * 0.25,  # smooth growth
+    effect_fn=lambda L: 1 + L * 1.0 + (L ** 1.65) * 0.35,
     cost_fn=lambda L: 15 * (1.42 ** (L - 1)),
 )
 # Crit: 20 levels, 0 → 20%. Total ~160k.
