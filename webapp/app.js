@@ -673,17 +673,26 @@ const forgeState = {
   lastAnimAt: 0,
 };
 
+let _lastHpIntRendered = -1;
+let _lastMaxHpRendered = -1;
 function _renderHpDisplay(hp, maxHp) {
+  const hpClamped = Math.max(0, hp);
+  const hpInt = Math.ceil(hpClamped);
+  // Skip DOM write if visible integer HP + max_hp unchanged (saves ~60 writes/sec during rAF).
+  if (hpInt === _lastHpIntRendered && maxHp === _lastMaxHpRendered) return;
+  _lastHpIntRendered = hpInt;
+  _lastMaxHpRendered = maxHp;
+
   const hpFill = document.getElementById('hp-fill');
   const hpText = document.getElementById('hp-text');
-  const hpClamped = Math.max(0, hp);
   const pct = Math.max(0, (hpClamped / maxHp) * 100);
   if (hpFill) {
     hpFill.style.width = pct + '%';
     hpFill.classList.toggle('low', pct < 30);
   }
-  if (hpText) hpText.textContent = `${fmt(Math.ceil(hpClamped))} / ${fmt(maxHp)}`;
+  if (hpText) hpText.textContent = `${fmt(hpInt)} / ${fmt(maxHp)}`;
 }
+function _resetHpRenderCache() { _lastHpIntRendered = -1; _lastMaxHpRendered = -1; }
 
 function _stopForgePolling() {
   if (forgeState.pollTimer) {
@@ -724,13 +733,16 @@ function _startForgePolling() {
   };
   forgeState.animFrame = requestAnimationFrame(animLoop);
 
-  // Server poll — authoritative every 1s
+  // Server poll — authoritative every 1s. Skipped while batch flusher is busy:
+  // the flush response already returns authoritative state, poll would duplicate.
   forgeState.pollTimer = setInterval(async () => {
     const activeView = document.querySelector('.view.active')?.dataset.view;
     if (activeView !== 'games' || !document.getElementById('weapon-img')) {
       _stopForgePolling();
       return;
     }
+    // Skip if there's a pending flush or clicks queued — flush will sync state
+    if (forgeState.flushTimer || forgeState.pendingClicks > 0) return;
     try {
       const fresh = await api('/api/forge/state');
       const oldId = forgeState.state?.weapon?.skin_id;
@@ -1075,6 +1087,7 @@ function swapWeaponInPlace(w) {
   }
   if (hpText) hpText.textContent = `${fmt(w.hp)} / ${fmt(w.max_hp)}`;
   forgeState.displayedHp = w.hp;
+  _resetHpRenderCache();
 }
 
 function updateForgeStatsBar() {
@@ -1099,78 +1112,103 @@ async function onForgeClaimAfk() {
   } catch (e) { toast(e.message); }
 }
 
+function _buildBranchCardHtml(b, s) {
+  const level = s.levels[b.key] || 0;
+  const isLocked = ['silver', 'gold', 'global'].includes(b.key) && level < 0;
+  const isMaxed = level >= b.max_level && !isLocked;
+  let nextCost = null;
+  if (isLocked) {
+    nextCost = b.unlock_cost;
+  } else if (!isMaxed) {
+    const nextTier = b.tiers[level];
+    if (nextTier) nextCost = nextTier.cost;
+  }
+  const canAfford = nextCost !== null && s.particles >= nextCost;
+  const progressPct = isMaxed ? 100 : (level / b.max_level) * 100;
+  return `
+    <div class="branch-head">
+      <div class="branch-name">${escape(b.name)}</div>
+      <div class="branch-level-badge ${isMaxed ? 'maxed' : ''}">
+        ${isLocked ? '🔒' : `${level} / ${b.max_level}`}
+      </div>
+    </div>
+    <div class="branch-desc">${escape(b.description)}</div>
+    ${!isMaxed && !isLocked ? `
+      <div class="branch-effect">
+        Сейчас: <b>${forgeEffectLabel(b.key, level)}</b>
+        → ${forgeEffectLabel(b.key, level + 1)}
+      </div>` : ''}
+    ${isLocked ? `<div class="branch-effect">Разблокировать за ${fmt(b.unlock_cost)} ⚙️</div>` : ''}
+    ${isMaxed ? `<div class="branch-effect" style="color:var(--accent-gold)">МАКС УРОВЕНЬ — эффект <b>${forgeEffectLabel(b.key, level)}</b></div>` : ''}
+    <div class="branch-progress"><div class="branch-progress-fill" style="width:${progressPct}%"></div></div>
+    ${isMaxed ? '' : `
+      <button class="btn branch-upgrade-btn ${canAfford ? 'afford' : 'locked'}" data-branch="${b.key}" data-cost="${nextCost}" ${canAfford ? '' : 'disabled'}>
+        ${isLocked ? '🔓 Разблокировать' : '⬆ Прокачать'} · ${fmt(nextCost)} ⚙️
+      </button>`}
+  `;
+}
+
+// Refresh only the afford/locked/disabled state of all upgrade buttons without rebuilding cards.
+function _refreshUpgradeAffordability(s) {
+  document.querySelectorAll('#forge-tree-list .branch-upgrade-btn[data-cost]').forEach(btn => {
+    const cost = parseInt(btn.dataset.cost, 10);
+    const canAfford = !isNaN(cost) && s.particles >= cost;
+    btn.classList.toggle('afford', canAfford);
+    btn.classList.toggle('locked', !canAfford);
+    btn.disabled = !canAfford;
+  });
+}
+
+function _attachUpgradeButtonHandler(btn, area) {
+  btn.addEventListener('click', async () => {
+    try {
+      const branch = btn.dataset.branch;
+      const r = await api('/api/forge/upgrade', { method: 'POST', body: JSON.stringify({ branch }) });
+      if (!r.ok) { toast(r.error || 'Не удалось'); return; }
+      tg?.HapticFeedback?.notificationOccurred?.('success');
+      toast(r.unlocked ? `🔓 Разблокировано` : `⬆ Прокачка! ${fmt(r.cost)} ⚙️ снято`);
+
+      // Local state delta — skip /api/forge/state roundtrip
+      const s = forgeState.state;
+      if (r.unlocked) {
+        s.levels[branch] = 0;  // just unlocked
+      } else if (typeof r.new_level === 'number') {
+        s.levels[branch] = r.new_level;
+      }
+      if (typeof r.new_balance === 'number') s.particles = r.new_balance;
+
+      // Rebuild ONLY the clicked branch card, then refresh affordability everywhere else.
+      const branchCfg = (forgeState.branches || []).find(bb => bb.key === branch);
+      const card = btn.closest('.branch-card');
+      if (card && branchCfg) {
+        card.innerHTML = _buildBranchCardHtml(branchCfg, s);
+        const newBtn = card.querySelector('[data-branch]');
+        if (newBtn) _attachUpgradeButtonHandler(newBtn, area);
+      }
+      _refreshUpgradeAffordability(s);
+
+      // Balance pill on upgrades screen
+      const pillEl = document.getElementById('upg-particles');
+      if (pillEl) pillEl.textContent = fmt(s.particles);
+    } catch (e) { toast(e.message); }
+  });
+}
+
 function renderForgeUpgrades(area) {
   const s = forgeState.state;
   const branches = forgeState.branches;
 
   area.innerHTML = `
     <button class="back-btn" id="upgrades-back">← к кузнице</button>
+    <div class="forge-balance-pill">⚙️ <b id="upg-particles">${fmt(s.particles)}</b></div>
     <div class="forge-tree" id="forge-tree-list"></div>
   `;
 
   const list = document.getElementById('forge-tree-list');
-  list.innerHTML = branches.map(b => {
-    const level = s.levels[b.key] || 0;
-    const isLocked = ['silver', 'gold', 'global'].includes(b.key) && level < 0;
-    const isMaxed = level >= b.max_level && !isLocked;
-    let nextTier = null;
-    let nextCost = null;
-    let nextEffect = null;
-    if (isLocked) {
-      nextCost = b.unlock_cost;
-      nextEffect = 'unlock';
-    } else if (!isMaxed) {
-      nextTier = b.tiers[level];
-      if (nextTier) {
-        nextCost = nextTier.cost;
-        nextEffect = nextTier.effect;
-      }
-    }
-    const canAfford = nextCost !== null && s.particles >= nextCost;
-    const progressPct = isMaxed ? 100 : (level / b.max_level) * 100;
-    return `
-      <div class="branch-card">
-        <div class="branch-head">
-          <div class="branch-name">${escape(b.name)}</div>
-          <div class="branch-level-badge ${isMaxed ? 'maxed' : ''}">
-            ${isLocked ? '🔒' : `${level} / ${b.max_level}`}
-          </div>
-        </div>
-        <div class="branch-desc">${escape(b.description)}</div>
-        ${!isMaxed && !isLocked ? `
-          <div class="branch-effect">
-            Сейчас: <b>${forgeEffectLabel(b.key, level)}</b>
-            → ${forgeEffectLabel(b.key, level + 1)}
-          </div>` : ''}
-        ${isLocked ? `<div class="branch-effect">Разблокировать за ${fmt(b.unlock_cost)} ⚙️</div>` : ''}
-        ${isMaxed ? `<div class="branch-effect" style="color:var(--accent-gold)">МАКС УРОВЕНЬ — эффект <b>${forgeEffectLabel(b.key, level)}</b></div>` : ''}
-        <div class="branch-progress"><div class="branch-progress-fill" style="width:${progressPct}%"></div></div>
-        ${(isMaxed) ? '' : `
-          <button class="btn branch-upgrade-btn ${canAfford ? 'afford' : 'locked'}" data-branch="${b.key}" ${canAfford ? '' : 'disabled'}>
-            ${isLocked ? '🔓 Разблокировать' : '⬆ Прокачать'} · ${fmt(nextCost)} ⚙️
-          </button>`}
-      </div>
-    `;
-  }).join('');
+  list.innerHTML = branches.map(b => `<div class="branch-card" data-branch-card="${b.key}">${_buildBranchCardHtml(b, s)}</div>`).join('');
 
   document.getElementById('upgrades-back').addEventListener('click', () => forgePaint(area));
-
-  list.querySelectorAll('[data-branch]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      try {
-        const r = await api('/api/forge/upgrade', { method: 'POST', body: JSON.stringify({ branch: btn.dataset.branch }) });
-        if (r.ok) {
-          tg?.HapticFeedback?.notificationOccurred?.('success');
-          toast(r.unlocked ? `🔓 Разблокирован ${btn.dataset.branch}` : `⬆ Прокачка! ${fmt(r.cost)} ⚙️ снято`);
-          const s2 = await api('/api/forge/state');
-          forgeState.state = s2;
-          renderForgeUpgrades(area);
-        } else {
-          toast(r.error || 'Не удалось');
-        }
-      } catch (e) { toast(e.message); }
-    });
-  });
+  list.querySelectorAll('[data-branch]').forEach(btn => _attachUpgradeButtonHandler(btn, area));
 }
 
 function forgeEffectLabel(branchKey, level) {

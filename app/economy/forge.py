@@ -427,20 +427,28 @@ async def get_state(tg_id: int) -> dict:
     }
 
 
-async def _spawn_weapon(tg_id: int) -> None:
+async def _spawn_weapon(tg_id: int, levels: dict | None = None) -> None:
     """Pick a new weapon, honoring damage_level gate, tier_luck (boost to higher tier)
-    and stattrak_hunter (boosted ST spawn chance)."""
-    async with pool().acquire() as conn:
-        row = await conn.fetchrow(
-            "select damage_level, tier_luck_level, stattrak_hunter_level "
-            "from forge_users where tg_id = $1", tg_id,
-        )
-    dmg_lvl = int(row["damage_level"]) if row else 0
-    tier_luck_lvl = int(row["tier_luck_level"] or 0) if row else 0
-    st_lvl = int(row["stattrak_hunter_level"] or 0) if row else 0
+    and stattrak_hunter (boosted ST spawn chance).
+
+    If `levels` is provided (dict with damage_level, tier_luck_level,
+    stattrak_hunter_level) we skip the preliminary SELECT — used by hit_batch
+    which already has these in hand. Saves one query per weapon break."""
+    if levels is None:
+        async with pool().acquire() as conn:
+            row = await conn.fetchrow(
+                "select damage_level, tier_luck_level, stattrak_hunter_level "
+                "from forge_users where tg_id = $1", tg_id,
+            )
+        dmg_lvl = int(row["damage_level"]) if row else 0
+        tier_luck_lvl = int(row["tier_luck_level"] or 0) if row else 0
+        st_lvl = int(row["stattrak_hunter_level"] or 0) if row else 0
+    else:
+        dmg_lvl = int(levels.get("damage_level", 0))
+        tier_luck_lvl = int(levels.get("tier_luck_level", 0) or 0)
+        st_lvl = int(levels.get("stattrak_hunter_level", 0) or 0)
 
     tier = _roll_tier(damage_level=dmg_lvl)
-    # Tier luck — chance to bump tier up one notch (pistol → rifle → awp → golden → legendary)
     tier_luck_pct = tier_luck_at(tier_luck_lvl)
     if tier_luck_pct > 0 and random.random() < tier_luck_pct:
         up_order = ["pistol", "rifle", "awp", "golden", "legendary"]
@@ -448,7 +456,6 @@ async def _spawn_weapon(tg_id: int) -> None:
             idx = up_order.index(tier)
             if idx + 1 < len(up_order):
                 next_tier = up_order[idx + 1]
-                # Only bump if user's damage allows
                 if dmg_lvl >= TIER_CONFIG[next_tier].get("min_damage_level", 0):
                     tier = next_tier
         except ValueError:
@@ -583,7 +590,8 @@ MAX_BATCH_SIZE = 30  # clients shouldn't be able to claim > ~10 clicks/sec for l
 
 async def hit_batch(tg_id: int, count: int) -> dict:
     """Apply up to `count` clicks in a single transaction. Rate-limited by elapsed
-    time since last batch. Returns aggregate result + final weapon state."""
+    time since last batch. Returns aggregate + inline state (no extra get_state
+    call — saves ~50ms by avoiding a second tx + _tick_afk rerun)."""
     if count <= 0:
         return {"ok": False, "error": "Zero count"}
     count = min(int(count), MAX_BATCH_SIZE)
@@ -594,8 +602,10 @@ async def hit_batch(tg_id: int, count: int) -> dict:
         async with conn.transaction():
             row = await conn.fetchrow(
                 "select damage_level, crit_level, crit_power_level, luck_level, "
+                "tier_luck_level, stattrak_hunter_level, "
                 "current_weapon_hp, current_weapon_max_hp, current_weapon_particles, "
-                "current_weapon_stattrak, last_hit_at, total_clicks, total_crits "
+                "current_weapon_stattrak, last_hit_at, "
+                "particles, total_breaks "
                 "from forge_users where tg_id = $1 for update",
                 tg_id,
             )
@@ -604,7 +614,6 @@ async def hit_batch(tg_id: int, count: int) -> dict:
             if row["current_weapon_hp"] is None:
                 return {"ok": False, "error": "No weapon — open the forge first"}
 
-            # Rate limit: cap count by how many MIN_HIT_INTERVAL_MS windows fit into elapsed
             if row["last_hit_at"] is not None:
                 gap_ms = (now - row["last_hit_at"]).total_seconds() * 1000
                 max_allowed = max(1, int(gap_ms / MIN_HIT_INTERVAL_MS))
@@ -641,13 +650,9 @@ async def hit_batch(tg_id: int, count: int) -> dict:
                     breaks_count += 1
                     particles_gained += int(cur_reward * (1 + luck_b / 100))
                     needs_new_spawn = True
-                    # Any remaining clicks in this batch hit an "empty anvil" — we spawn
-                    # the next weapon AFTER the txn, so remaining clicks are wasted.
-                    # This mirrors the single-click behavior where one break ends turn.
                     cur_hp = 0
                     break
 
-            # Update aggregates
             await conn.execute(
                 """
                 update forge_users set
@@ -671,11 +676,50 @@ async def hit_batch(tg_id: int, count: int) -> dict:
                     """,
                     tg_id, particles_gained, breaks_count,
                 )
-    if needs_new_spawn:
-        await _spawn_weapon(tg_id)
 
-    # Return fresh state snapshot so client can reconcile without an extra roundtrip
-    fresh = await get_state(tg_id)
+    new_particles = int(row["particles"]) + particles_gained
+    new_total_breaks = int(row["total_breaks"]) + breaks_count
+
+    # If weapon broke — spawn new + fetch its display data in ONE query
+    weapon_obj: dict | None = None
+    if needs_new_spawn:
+        # Reuse levels from the initial SELECT — saves an extra query inside _spawn_weapon.
+        await _spawn_weapon(tg_id, levels={
+            "damage_level": row["damage_level"],
+            "tier_luck_level": row["tier_luck_level"],
+            "stattrak_hunter_level": row["stattrak_hunter_level"],
+        })
+        async with pool().acquire() as conn:
+            wrow = await conn.fetchrow(
+                "select f.current_skin_id, f.current_weapon_tier, f.current_weapon_hp, "
+                "f.current_weapon_max_hp, f.current_weapon_particles, f.current_weapon_stattrak, "
+                "s.full_name, s.weapon, s.skin_name, s.rarity, s.rarity_color, "
+                "s.image_url, s.category "
+                "from forge_users f "
+                "left join economy_skins_catalog s on s.id = f.current_skin_id "
+                "where f.tg_id = $1",
+                tg_id,
+            )
+        if wrow and wrow["current_skin_id"] is not None:
+            weapon_obj = {
+                "skin_id": int(wrow["current_skin_id"]),
+                "full_name": wrow["full_name"],
+                "weapon": wrow["weapon"],
+                "skin_name": wrow["skin_name"],
+                "rarity": wrow["rarity"],
+                "rarity_color": wrow["rarity_color"],
+                "image_url": wrow["image_url"],
+                "category": wrow["category"],
+                "tier": wrow["current_weapon_tier"],
+                "max_hp": int(wrow["current_weapon_max_hp"]),
+                "hp": int(wrow["current_weapon_hp"]),
+                "particles_reward": int(wrow["current_weapon_particles"]),
+                "stattrak": bool(wrow["current_weapon_stattrak"]),
+            }
+    else:
+        # Same weapon — client has its metadata locally, we only need fresh HP.
+        weapon_obj = {"hp": cur_hp, "max_hp": cur_max_hp}
+
     return {
         "ok": True,
         "applied": count,
@@ -683,9 +727,10 @@ async def hit_batch(tg_id: int, count: int) -> dict:
         "crits": total_crits,
         "breaks": breaks_count,
         "particles_earned": particles_gained,
-        "weapon": fresh.get("weapon"),
-        "particles": fresh.get("particles"),
-        "total_breaks": fresh.get("total_breaks"),
+        "particles": new_particles,
+        "total_breaks": new_total_breaks,
+        "weapon": weapon_obj,
+        "weapon_swapped": needs_new_spawn,
     }
 
 
@@ -718,10 +763,9 @@ async def _tick_afk(tg_id: int) -> tuple[int, int]:
                 int(row["silver_level"]), int(row["gold_level"]), int(row["global_level"])
             )
             if rate <= 0:
-                await conn.execute(
-                    "update forge_users set last_afk_tick_at = $2 where tg_id = $1",
-                    tg_id, now,
-                )
+                # No AFK bot — don't even bother updating last_afk_tick_at (saves an UPDATE
+                # per /state poll for all users pre-unlock). On unlock, offline_cap will
+                # clamp any stale gap in elapsed_raw.
                 return (0, 0)
 
             offline_cap = offline_hours_at(int(row["offline_cap_level"])) * 3600

@@ -1429,6 +1429,18 @@ h2 {
 }
 
 /* Upgrade tree screen */
+.forge-balance-pill {
+  display: inline-block;
+  margin: 6px 0 6px 0;
+  padding: 6px 14px;
+  background: linear-gradient(135deg, rgba(125,211,252,0.15), rgba(167,139,250,0.15));
+  border: 1px solid rgba(125,211,252,0.3);
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #7dd3fc;
+}
+
 .forge-tree {
   padding: 12px 0 100px 0;
 }
