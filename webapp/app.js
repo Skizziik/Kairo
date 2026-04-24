@@ -39,12 +39,20 @@ async function api(path, options = {}) {
     },
   };
   const url = `${API_BASE}${path}`;
-  const maxRetries = 2;
+  // NEVER retry non-idempotent methods — server may have already committed the
+  // mutation (e.g. slot spin, case open, gear buy) even if the client aborted.
+  // Retrying causes double-processing: user sees second response but balance
+  // reflects both transactions.
+  const method = (options.method || 'GET').toUpperCase();
+  const isMutation = method !== 'GET' && method !== 'HEAD';
+  const maxRetries = isMutation ? 0 : 2;
   let lastErr = null;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const ctrl = new AbortController();
-      const timeoutId = setTimeout(() => ctrl.abort(), 10000);
+      // Mutations get a longer timeout so we don't abort during cold-start
+      // (Render free tier can take 15-30s to wake up).
+      const timeoutId = setTimeout(() => ctrl.abort(), isMutation ? 45000 : 10000);
       const resp = await fetch(url, { ...opts, signal: ctrl.signal });
       clearTimeout(timeoutId);
       if (!resp.ok) {
@@ -54,7 +62,6 @@ async function api(path, options = {}) {
       return resp.json();
     } catch (e) {
       lastErr = e;
-      // Retry only on network-level errors, not on server 4xx/5xx
       const msg = String(e?.message || e);
       const isNetwork = msg === 'Failed to fetch' || msg.includes('NetworkError') || e?.name === 'AbortError';
       if (!isNetwork || attempt === maxRetries) break;
