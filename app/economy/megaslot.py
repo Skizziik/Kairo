@@ -412,11 +412,58 @@ async def spin(user_id: int, bet: int, bonus_buy: bool = False) -> dict:
 # STATIC CONFIG — surfaced to client for UI
 # ============================================================
 
-def get_config() -> dict:
+# Map slot weapon symbol → weapon name in catalog. Server picks the highest-priced
+# skin for that weapon as the visual representative.
+SYMBOL_TO_WEAPON = {
+    "knife":  "★ Karambit",   # prefix '★' = knife category in CSGO-API naming
+    "awp":    "AWP",
+    "ak":     "AK-47",
+    "gloves": "★ Sport Gloves",
+    "m4":     "M4A4",
+}
+
+
+async def _get_symbol_image_map() -> dict[str, str]:
+    """Return {symbol_key: image_url} for weapon symbols. Gems/scatter get empty strings."""
+    result: dict[str, str] = {}
+    async with pool().acquire() as conn:
+        for sym_key, weapon_name in SYMBOL_TO_WEAPON.items():
+            # Knives/gloves use category filter; regular weapons use weapon-name match
+            if sym_key in ("knife", "gloves"):
+                row = await conn.fetchrow(
+                    "select image_url from economy_skins_catalog "
+                    "where active and category = $1 and image_url is not null "
+                    "order by base_price desc limit 1",
+                    "knife" if sym_key == "knife" else "gloves",
+                )
+            else:
+                row = await conn.fetchrow(
+                    "select image_url from economy_skins_catalog "
+                    "where active and weapon = $1 and image_url is not null "
+                    "order by base_price desc limit 1",
+                    weapon_name,
+                )
+            if row and row["image_url"]:
+                result[sym_key] = row["image_url"]
+            else:
+                result[sym_key] = ""
+    return result
+
+
+async def get_config() -> dict:
+    images = await _get_symbol_image_map()
     return {
         "grid_cols": GRID_COLS,
         "grid_rows": GRID_ROWS,
-        "symbols": [{"key": k, "icon": ic, "name": n} for k, ic, n in SYMBOLS],
+        "symbols": [
+            {
+                "key": k,
+                "icon": ic,  # fallback emoji
+                "name": n,
+                "image_url": images.get(k, ""),
+            }
+            for k, ic, n in SYMBOLS
+        ],
         "payouts": PAYOUTS,
         "scatter_payout": SCATTER_PAYOUT,
         "scatter_fs_trigger": SCATTER_FS_TRIGGER,

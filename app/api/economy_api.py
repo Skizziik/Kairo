@@ -586,4 +586,4 @@ async def api_megaslot_spin(req: MegaslotSpinReq, user: dict = Depends(require_u
 @router.get("/casino/megaslot/config")
 async def api_megaslot_config(user: dict = Depends(require_user)) -> dict:
     _ = user
-    return _megaslot.get_config()
+    return await _megaslot.get_config()

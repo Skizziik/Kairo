@@ -2000,63 +2000,129 @@ const MEGASLOT_ICON = {
   m4: '🔫', gloves: '🧤', ak: '🎯', awp: '🏆', knife: '🔪',
 };
 
-let _megaslotState = { busy: false, bet: 100 };
+// Weapon symbols that should render as actual skin images (filled from server config)
+const MEGASLOT_WEAPON_SYMS = new Set(['knife', 'awp', 'ak', 'gloves', 'm4']);
+// Gem rarity classes (for CSS styling)
+const MEGASLOT_GEM_CLASSES = {
+  milspec:    'gem-milspec',
+  classified: 'gem-classified',
+  covert:     'gem-covert',
+};
+// Populated from /api/casino/megaslot/config
+const MEGASLOT_IMAGE = {};
+
+let _megaslotState = { busy: false, bet: 100, configLoaded: false };
 
 async function renderMegaslot(area) {
   area.innerHTML = `
     <div class="megaslot-wrap">
       <div class="megaslot-header">
-        <h3>⚡ CS Gates — pay anywhere 6×5</h3>
-        <div class="megaslot-fs-bar" id="ms-fs-bar" style="display:none">
-          <div class="ms-fs-label">FREE SPINS <span id="ms-fs-left">0</span></div>
-          <div class="ms-fs-mult">✨ Множитель: <b id="ms-fs-mult">×0</b></div>
-        </div>
+        <h3>⚡ CS Gates</h3>
+        <button class="ms-buy-chip" id="ms-buy" title="Купить бонус = мгновенные 15 free spins">
+          ⚡ Купить<br><span id="ms-buy-cost">7 000 🪙</span>
+        </button>
+      </div>
+      <div class="megaslot-fs-bar" id="ms-fs-bar" style="display:none">
+        <div class="ms-fs-label">FREE SPINS <span id="ms-fs-left">0</span></div>
+        <div class="ms-fs-mult">✨ Множитель: <b id="ms-fs-mult">×0</b></div>
       </div>
       <div class="megaslot-grid" id="ms-grid"></div>
+      <div class="megaslot-out" id="ms-out"></div>
       <div class="megaslot-controls">
         <div class="ms-bet-row">
           <label>Ставка</label>
           <input type="number" id="ms-bet" min="10" step="10" value="100" />
         </div>
         <button class="btn big-btn daily-btn" id="ms-spin">🎰 Крутить</button>
-        <button class="btn ms-buy-btn" id="ms-buy">⚡ Купить бонус (×70)</button>
       </div>
-      <div class="megaslot-out" id="ms-out"></div>
       <details class="megaslot-rules">
-        <summary>📖 Правила</summary>
+        <summary>📖 Правила и таблица выплат</summary>
         <div class="ms-rules-body">
           <b>Pay-anywhere:</b> 8+ одинаковых символов где угодно на поле = выигрыш.<br>
           <b>Tumble:</b> выигравшие символы исчезают, падают новые — каскад продолжается.<br>
-          <b>💣 Scatter:</b> 4+ бомбы = 15 бесплатных круток + мгновенная выплата.<br>
+          <b>💣 Scatter:</b> 4/5/6 бомб = ×3/×10/×100 ставки + 15 бесплатных круток.<br>
           <b>Orb:</b> случайный множитель ×2 до ×500 падает на поле. Во FS множители накапливаются!<br>
-          <b>Макс. выигрыш:</b> ×5000 ставки.
+          <b>Макс. выигрыш:</b> ×5000 ставки.<br><br>
+          <b>Выплаты (множитель ставки):</b>
+          <table class="ms-paytable">
+            <thead><tr><th>Символ</th><th>8+</th><th>10+</th><th>12+</th></tr></thead>
+            <tbody>
+              <tr><td><span class="pt-icon">${MEGASLOT_IMAGE.knife ? `<img src="${MEGASLOT_IMAGE.knife}" />` : '🔪'}</span> Нож</td><td>×2.5</td><td>×6</td><td>×12</td></tr>
+              <tr><td><span class="pt-icon">${MEGASLOT_IMAGE.awp ? `<img src="${MEGASLOT_IMAGE.awp}" />` : '🏆'}</span> AWP</td><td>×1</td><td>×3</td><td>×8</td></tr>
+              <tr><td><span class="pt-icon">${MEGASLOT_IMAGE.ak ? `<img src="${MEGASLOT_IMAGE.ak}" />` : '🎯'}</span> AK-47</td><td>×0.5</td><td>×1.5</td><td>×5</td></tr>
+              <tr><td><span class="pt-icon">${MEGASLOT_IMAGE.gloves ? `<img src="${MEGASLOT_IMAGE.gloves}" />` : '🧤'}</span> Gloves</td><td>×0.35</td><td>×0.8</td><td>×3.5</td></tr>
+              <tr><td><span class="pt-icon">${MEGASLOT_IMAGE.m4 ? `<img src="${MEGASLOT_IMAGE.m4}" />` : '🔫'}</span> M4A4</td><td>×0.25</td><td>×0.5</td><td>×2.5</td></tr>
+              <tr><td><span class="ms-cell-gem gem-covert pt-gem">◆</span> Covert</td><td>×0.15</td><td>×0.4</td><td>×2</td></tr>
+              <tr><td><span class="ms-cell-gem gem-classified pt-gem">◆</span> Classified</td><td>×0.1</td><td>×0.25</td><td>×1</td></tr>
+              <tr><td><span class="ms-cell-gem gem-milspec pt-gem">◆</span> Mil-spec</td><td>×0.05</td><td>×0.12</td><td>×0.5</td></tr>
+            </tbody>
+          </table>
         </div>
       </details>
     </div>
   `;
+  // Load weapon images from server (once per session)
+  if (!_megaslotState.configLoaded) {
+    try {
+      const cfg = await api('/api/casino/megaslot/config');
+      (cfg.symbols || []).forEach(s => {
+        if (s.image_url) MEGASLOT_IMAGE[s.key] = s.image_url;
+      });
+      _megaslotState.configLoaded = true;
+    } catch {}
+  }
+
   _renderMegaslotGrid(_randomGrid());
-  document.getElementById('ms-bet').addEventListener('change', (e) => {
+  const updateBuyCost = () => {
+    const el = document.getElementById('ms-buy-cost');
+    if (el) el.textContent = fmt(_megaslotState.bet * 70) + ' 🪙';
+  };
+  updateBuyCost();
+  document.getElementById('ms-bet').addEventListener('input', (e) => {
     _megaslotState.bet = Math.max(10, parseInt(e.target.value) || 100);
+    updateBuyCost();
   });
   document.getElementById('ms-spin').addEventListener('click', () => playMegaslot(false));
   document.getElementById('ms-buy').addEventListener('click', () => playMegaslot(true));
 }
 
 function _randomGrid() {
-  const syms = ['milspec', 'classified', 'covert', 'm4', 'gloves', 'ak', 'awp', 'knife'];
+  // Weight low-tier gems higher for initial preview look
+  const pool = [
+    'milspec','milspec','milspec','classified','classified',
+    'covert','covert','m4','gloves','ak','awp','knife',
+  ];
   const grid = [];
   for (let c = 0; c < 6; c++) {
     const col = [];
-    for (let r = 0; r < 5; r++) col.push(syms[Math.floor(Math.random() * syms.length)]);
+    for (let r = 0; r < 5; r++) col.push(pool[Math.floor(Math.random() * pool.length)]);
     grid.push(col);
   }
   return grid;
 }
 
+function _renderMegaslotSymbolHtml(sym) {
+  // Scatter → big emoji
+  if (sym === 'scatter') {
+    return `<span class="ms-cell-sym scatter">💣</span>`;
+  }
+  // Weapon symbol → actual skin image
+  if (MEGASLOT_WEAPON_SYMS.has(sym) && MEGASLOT_IMAGE[sym]) {
+    return `<img class="ms-cell-img" src="${MEGASLOT_IMAGE[sym]}" alt="${sym}" loading="lazy" />`;
+  }
+  // Gem tier → styled colored diamond
+  const gemClass = MEGASLOT_GEM_CLASSES[sym];
+  if (gemClass) {
+    return `<span class="ms-cell-gem ${gemClass}">◆</span>`;
+  }
+  // Fallback (shouldn't happen) → emoji
+  return `<span class="ms-cell-sym">${MEGASLOT_ICON[sym] || '?'}</span>`;
+}
+
 function _renderMegaslotGrid(grid, options = {}) {
   const gridEl = document.getElementById('ms-grid');
   if (!gridEl) return;
-  const orbMap = new Map();  // `${c},${r}` -> orb value
+  const orbMap = new Map();
   (options.orbs || []).forEach(o => orbMap.set(`${o.col},${o.row}`, o.value));
   const winPositions = options.winningSymbols
     ? (() => {
@@ -2074,14 +2140,13 @@ function _renderMegaslotGrid(grid, options = {}) {
   for (let r = 0; r < 5; r++) {
     for (let c = 0; c < 6; c++) {
       const sym = grid[c][r];
-      const icon = MEGASLOT_ICON[sym] || '?';
       const key = `${c},${r}`;
       const orbVal = orbMap.get(key);
-      const classes = ['ms-cell'];
+      const classes = ['ms-cell', `sym-${sym}`];
       if (winPositions?.has(key)) classes.push('winning');
       if (orbVal) classes.push('has-orb');
       html += `<div class="${classes.join(' ')}" data-cr="${key}">
-        <span class="ms-cell-sym">${icon}</span>
+        ${_renderMegaslotSymbolHtml(sym)}
         ${orbVal ? `<span class="ms-orb">×${orbVal}</span>` : ''}
       </div>`;
     }
@@ -2089,31 +2154,76 @@ function _renderMegaslotGrid(grid, options = {}) {
   gridEl.innerHTML = html;
 }
 
-async function _animateTumbles(tumbles) {
-  for (const t of tumbles) {
+function _sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// Spin animation — shuffles random symbols on the grid for duration ms,
+// then columns stop sequentially at the final grid (left to right)
+async function _spinAnimation(finalGrid, duration = 1000) {
+  const gridEl = document.getElementById('ms-grid');
+  if (!gridEl) return;
+  gridEl.classList.add('spinning');
+  const syms = ['milspec', 'classified', 'covert', 'm4', 'gloves', 'ak', 'awp', 'knife'];
+  const randGrid = () => Array.from({length: 6}, () =>
+    Array.from({length: 5}, () => syms[Math.floor(Math.random() * syms.length)]));
+
+  // Rapid shuffle phase
+  const shuffleInterval = setInterval(() => {
+    _renderMegaslotGrid(randGrid());
+  }, 70);
+  await _sleep(duration);
+  clearInterval(shuffleInterval);
+
+  // Columns stop one by one (left → right) at final grid
+  // Build a grid that reveals columns progressively
+  const revealedCols = new Set();
+  for (let c = 0; c < 6; c++) {
+    revealedCols.add(c);
+    const g = Array.from({length: 6}, (_, ci) => {
+      if (revealedCols.has(ci)) return finalGrid[ci];
+      return Array.from({length: 5}, () => syms[Math.floor(Math.random() * syms.length)]);
+    });
+    _renderMegaslotGrid(g);
+    const col = gridEl.querySelectorAll(`.ms-cell[data-cr^="${c},"]`);
+    col.forEach(el => el.classList.add('col-stop'));
+    tg?.HapticFeedback?.impactOccurred?.('light');
+    await _sleep(120);
+  }
+  gridEl.classList.remove('spinning');
+  // Final clean render
+  _renderMegaslotGrid(finalGrid);
+}
+
+async function _animateTumbles(tumbles, withInitialSpin = true, spinMs = 900) {
+  if (tumbles.length === 0) return;
+  if (withInitialSpin) {
+    await _spinAnimation(tumbles[0].grid, spinMs);
+  }
+
+  for (let i = 0; i < tumbles.length; i++) {
+    const t = tumbles[i];
     const winSyms = new Set((t.wins || []).map(w => w.symbol));
     _renderMegaslotGrid(t.grid, { orbs: t.orbs, winningSymbols: winSyms });
 
     if (t.wins && t.wins.length > 0) {
       // Flash winning symbols
       await _sleep(500);
-      // Show explosion effect
+      // Explosion
       document.querySelectorAll('.ms-cell.winning').forEach(el => el.classList.add('exploding'));
-      await _sleep(250);
+      await _sleep(280);
+      // Post-tumble grid (new symbols fell in)
+      if (t.post_grid) {
+        _renderMegaslotGrid(t.post_grid);
+        const gridEl = document.getElementById('ms-grid');
+        if (gridEl) {
+          gridEl.querySelectorAll('.ms-cell').forEach(el => el.classList.add('tumble-in'));
+        }
+        await _sleep(300);
+      }
     } else if (t.orbs && t.orbs.length > 0) {
-      // Just show the orb
-      await _sleep(400);
-    }
-
-    // Render post-tumble grid if wins happened
-    if (t.post_grid) {
-      _renderMegaslotGrid(t.post_grid);
-      await _sleep(250);
+      await _sleep(600);
     }
   }
 }
-
-function _sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function playMegaslot(bonusBuy) {
   if (_megaslotState.busy) return;
@@ -2148,7 +2258,7 @@ async function playMegaslot(bonusBuy) {
 
     // Base spin animation (skipped on bonus buy)
     if (r.base_spin) {
-      await _animateTumbles(r.base_spin.tumbles);
+      await _animateTumbles(r.base_spin.tumbles, true);
       if (r.base_spin.final_win > 0) {
         out.textContent = `+${fmt(r.base_spin.final_win)} 🪙`;
         out.className = 'megaslot-out win';
@@ -2169,10 +2279,12 @@ async function playMegaslot(bonusBuy) {
       await _sleep(1200);
 
       let spinsLeft = r.fs.spins.length;
-      for (const s of r.fs.spins) {
+      for (let i = 0; i < r.fs.spins.length; i++) {
+        const s = r.fs.spins[i];
         spinsLeft--;
         document.getElementById('ms-fs-left').textContent = spinsLeft;
-        await _animateTumbles(s.tumbles);
+        // Faster spin animation during FS — 15 spins would take forever otherwise
+        await _animateTumbles(s.tumbles, true, 400);
         document.getElementById('ms-fs-mult').textContent = '×' + (s.persistent_mult || 0);
       }
 
