@@ -1189,6 +1189,33 @@ h2 {
   text-align: center;
 }
 
+.forge-skip-corner {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(20, 24, 36, 0.85);
+  color: #8b94a7;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 3;
+  transition: background 0.15s, color 0.15s, transform 0.1s;
+  padding: 0;
+  line-height: 1;
+}
+.forge-skip-corner:hover,
+.forge-skip-corner:active {
+  background: rgba(120, 80, 80, 0.5);
+  color: #ffb3b3;
+  transform: scale(0.95);
+}
+
 .forge-weapon-name {
   font-weight: 800;
   font-size: 18px;

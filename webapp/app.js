@@ -667,18 +667,58 @@ const forgeState = {
   comboResetTimer: null,
   area: null,
   pollTimer: null,
+  animFrame: null,
+  displayedHp: 0,
+  lastAnimAt: 0,
 };
+
+function _renderHpDisplay(hp, maxHp) {
+  const hpFill = document.getElementById('hp-fill');
+  const hpText = document.getElementById('hp-text');
+  const hpClamped = Math.max(0, hp);
+  const pct = Math.max(0, (hpClamped / maxHp) * 100);
+  if (hpFill) {
+    hpFill.style.width = pct + '%';
+    hpFill.classList.toggle('low', pct < 30);
+  }
+  if (hpText) hpText.textContent = `${fmt(Math.ceil(hpClamped))} / ${fmt(maxHp)}`;
+}
 
 function _stopForgePolling() {
   if (forgeState.pollTimer) {
     clearInterval(forgeState.pollTimer);
     forgeState.pollTimer = null;
   }
+  if (forgeState.animFrame) {
+    cancelAnimationFrame(forgeState.animFrame);
+    forgeState.animFrame = null;
+  }
 }
 
 function _startForgePolling() {
   _stopForgePolling();
-  // Every 1s while Forge is visible, re-fetch state to show AFK damage on HP bar.
+  // Seed displayed HP from current state
+  forgeState.displayedHp = forgeState.state?.weapon?.hp ?? 0;
+  forgeState.lastAnimAt = performance.now();
+
+  // Client-side smooth HP drain between server polls, based on afk_rate_per_sec.
+  // Server poll reconciles to authoritative value every 1s.
+  const animLoop = (ts) => {
+    if (!forgeState.pollTimer) return; // polling stopped
+    const dt = Math.max(0, (ts - forgeState.lastAnimAt) / 1000);
+    forgeState.lastAnimAt = ts;
+    const s = forgeState.state;
+    const w = s?.weapon;
+    const rate = s?.effects?.afk_rate_per_sec || 0;
+    if (w && rate > 0 && forgeState.displayedHp > 0) {
+      forgeState.displayedHp = Math.max(0, forgeState.displayedHp - rate * dt);
+      _renderHpDisplay(forgeState.displayedHp, w.max_hp);
+    }
+    forgeState.animFrame = requestAnimationFrame(animLoop);
+  };
+  forgeState.animFrame = requestAnimationFrame(animLoop);
+
+  // Server poll — authoritative every 1s
   forgeState.pollTimer = setInterval(async () => {
     const activeView = document.querySelector('.view.active')?.dataset.view;
     if (activeView !== 'games' || !document.getElementById('weapon-img')) {
@@ -687,21 +727,19 @@ function _startForgePolling() {
     }
     try {
       const fresh = await api('/api/forge/state');
-      // Detect if weapon changed (broken while idle) → swap in place
       const oldId = forgeState.state?.weapon?.skin_id;
       forgeState.state = fresh;
       if (fresh.weapon.skin_id !== oldId) {
+        forgeState.displayedHp = fresh.weapon.hp;
         swapWeaponInPlace(fresh.weapon);
       } else {
-        // Just HP / counters updates
-        const hpFill = document.getElementById('hp-fill');
-        const hpText = document.getElementById('hp-text');
-        if (hpFill) {
-          const pct = Math.max(0, (fresh.weapon.hp / fresh.weapon.max_hp) * 100);
-          hpFill.style.width = pct + '%';
-          hpFill.classList.toggle('low', pct < 30);
+        // Reconcile client prediction toward server truth. If server says less HP,
+        // jump down immediately; if more (unlikely), accept server.
+        forgeState.displayedHp = Math.min(forgeState.displayedHp, fresh.weapon.hp);
+        if (forgeState.displayedHp > fresh.weapon.hp) {
+          forgeState.displayedHp = fresh.weapon.hp;
         }
-        if (hpText) hpText.textContent = `${fmt(fresh.weapon.hp)} / ${fmt(fresh.weapon.max_hp)}`;
+        _renderHpDisplay(forgeState.displayedHp, fresh.weapon.max_hp);
       }
       updateForgeStatsBar();
     } catch (e) {
@@ -754,6 +792,7 @@ function forgePaint(area) {
       </div>
 
       <div class="forge-weapon-card">
+        <button class="forge-skip-corner" id="forge-skip-btn" title="Пропустить оружие (10% за выбитое HP)" aria-label="Skip">⏭</button>
         <div class="forge-weapon-name">${escape(w.full_name || '—')}${stTag}</div>
         <div class="forge-weapon-rarity" style="color:${rarityColor}">${escape(w.rarity || '')}</div>
         <div class="forge-weapon-image-wrap" id="weapon-wrap">
@@ -777,7 +816,6 @@ function forgePaint(area) {
       </div>
 
       <div class="forge-actions">
-        <button class="btn secondary" id="forge-skip-btn" title="Пропустить (10% particles)">⏭ Скип</button>
         <button class="btn secondary" id="forge-upgrades-btn">🛠 Апгрейды</button>
         <button class="btn" id="forge-exchange-btn" style="background:linear-gradient(135deg,#7dd3fc 0%,#a78bfa 100%);color:#0a0c14;border:0;font-weight:800">💱 Обмен</button>
       </div>
@@ -793,12 +831,12 @@ function forgePaint(area) {
 }
 
 async function onForgeSkip() {
-  if (!confirm('Пропустить оружие? Получишь 10% particles и спавнится новое.')) return;
+  if (!confirm('Пропустить оружие? Получишь 10% от доли выбитого HP (без урона — 0).')) return;
   try {
     const r = await api('/api/forge/skip', { method: 'POST' });
     if (r.ok) {
       tg?.HapticFeedback?.impactOccurred?.('light');
-      toast(`+${fmt(r.refund)} ⚙️`);
+      toast(r.refund > 0 ? `+${fmt(r.refund)} ⚙️` : 'Скип без награды (оружие не битое)');
       const fresh = await api('/api/forge/state');
       forgeState.state = fresh;
       swapWeaponInPlace(fresh.weapon);
@@ -889,14 +927,8 @@ async function onForgeHit(e) {
 
     // HP bar update
     forgeState.state.weapon.hp = r.new_hp;
-    const hpFill = document.getElementById('hp-fill');
-    const hpText = document.getElementById('hp-text');
-    const pct = Math.max(0, (r.new_hp / forgeState.state.weapon.max_hp) * 100);
-    if (hpFill) {
-      hpFill.style.width = pct + '%';
-      hpFill.classList.toggle('low', pct < 30);
-    }
-    if (hpText) hpText.textContent = `${fmt(r.new_hp)} / ${fmt(forgeState.state.weapon.max_hp)}`;
+    forgeState.displayedHp = r.new_hp;
+    _renderHpDisplay(r.new_hp, forgeState.state.weapon.max_hp);
 
     if (r.broken) {
       // Explosion: breaking animation + particles flying out
@@ -981,6 +1013,7 @@ function swapWeaponInPlace(w) {
     hpFill.style.width = '100%';
   }
   if (hpText) hpText.textContent = `${fmt(w.hp)} / ${fmt(w.max_hp)}`;
+  forgeState.displayedHp = w.hp;
 }
 
 function updateForgeStatsBar() {

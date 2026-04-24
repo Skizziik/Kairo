@@ -610,15 +610,28 @@ async def _tick_afk(tg_id: int) -> tuple[int, int]:
 
             offline_cap = offline_hours_at(int(row["offline_cap_level"])) * 3600
             last_tick = row["last_afk_tick_at"]
-            elapsed = 0.0 if last_tick is None else (now - last_tick).total_seconds()
-            elapsed = min(elapsed, offline_cap)
+            elapsed_raw = 0.0 if last_tick is None else (now - last_tick).total_seconds()
+            elapsed = min(elapsed_raw, offline_cap)
             damage_budget = int(rate * elapsed)
             if damage_budget <= 0:
-                await conn.execute(
-                    "update forge_users set last_afk_tick_at = $2 where tg_id = $1",
-                    tg_id, now,
-                )
+                # Fractional damage (<1) — do NOT update last_afk_tick_at so partial
+                # time accumulates across polls. Otherwise rates <1/sec never tick.
+                if last_tick is None:
+                    await conn.execute(
+                        "update forge_users set last_afk_tick_at = $2 where tg_id = $1",
+                        tg_id, now,
+                    )
                 return (0, 0)
+
+            # Advance tick by the exact time it took to produce the integer damage
+            # budget, preserving the fractional remainder for the next poll.
+            time_used = damage_budget / rate
+            if last_tick is None or elapsed_raw > offline_cap:
+                tick_advance_to = now
+            else:
+                tick_advance_to = last_tick + timedelta(seconds=time_used)
+                if tick_advance_to > now:
+                    tick_advance_to = now
 
             daily_earned = 0 if row["daily_afk_day"] != today else int(row["daily_afk_earned"] or 0)
             daily_cap = afk_daily_cap_for(int(row["offline_cap_level"] or 0))
@@ -681,7 +694,7 @@ async def _tick_afk(tg_id: int) -> tuple[int, int]:
                       current_weapon_particles = null, current_weapon_stattrak = false
                     where tg_id = $1
                     """,
-                    tg_id, particles_gained, breaks, today, new_daily, now,
+                    tg_id, particles_gained, breaks, today, new_daily, tick_advance_to,
                 )
             else:
                 await conn.execute(
@@ -692,7 +705,7 @@ async def _tick_afk(tg_id: int) -> tuple[int, int]:
                       last_afk_tick_at = $5
                     where tg_id = $1
                     """,
-                    tg_id, cur_hp, today, new_daily, now,
+                    tg_id, cur_hp, today, new_daily, tick_advance_to,
                 )
     if needs_new_spawn:
         await _spawn_weapon(tg_id)
@@ -700,18 +713,26 @@ async def _tick_afk(tg_id: int) -> tuple[int, int]:
 
 
 async def skip_weapon(tg_id: int) -> dict:
-    """Escape hatch: give up the current weapon, get minimal particles (10% of full reward),
-    spawn a new one. Useful when stuck with too-high-HP weapon relative to damage level."""
+    """Escape hatch: give up the current weapon. Refund = 10% of base particles,
+    PRORATED by HP damage already dealt. Fresh (undamaged) weapon → 0 refund, so
+    spam-skipping can't be milked for free particles."""
     async with pool().acquire() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
-                "select current_weapon_particles, current_skin_id "
+                "select current_weapon_particles, current_weapon_hp, "
+                "current_weapon_max_hp, current_skin_id "
                 "from forge_users where tg_id = $1 for update", tg_id,
             )
             if row is None or row["current_skin_id"] is None:
                 return {"ok": False, "error": "No weapon to skip"}
             base_particles = int(row["current_weapon_particles"] or 0)
-            refund = max(1, base_particles // 10)
+            max_hp = int(row["current_weapon_max_hp"] or 0)
+            cur_hp = int(row["current_weapon_hp"] or 0)
+            if max_hp <= 0:
+                dmg_pct = 0.0
+            else:
+                dmg_pct = max(0.0, min(1.0, (max_hp - cur_hp) / max_hp))
+            refund = int(base_particles * dmg_pct * 0.10)  # 10% of proportional reward
             await conn.execute(
                 "update forge_users set "
                 "particles = particles + $2, "
@@ -723,7 +744,7 @@ async def skip_weapon(tg_id: int) -> dict:
                 tg_id, refund,
             )
     await _spawn_weapon(tg_id)
-    return {"ok": True, "refund": refund}
+    return {"ok": True, "refund": refund, "damage_pct": round(dmg_pct * 100, 1)}
 
 
 async def claim_afk(tg_id: int) -> dict:
