@@ -23,7 +23,9 @@ log = logging.getLogger(__name__)
 #   min_base_price:  exclude any skin with base_price < this (hard floor on shittiness)
 # Cases not listed are left untouched.
 CASE_CONFIG: dict[str, dict] = {
-    "rip": {"max_items": 80, "min_base_price": 2500},
+    # min_base_price 500 filters out true garbage (consumer Glocks at base 100)
+    # but keeps cheap restricted/classified so there's real loss variance.
+    "rip": {"max_items": 80, "min_base_price": 500},
 }
 
 
