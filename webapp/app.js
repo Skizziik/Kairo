@@ -1489,19 +1489,23 @@ async function playSlots() {
   clearInterval(spinTimer);
   display.textContent = `${result.reels[0]} ${result.reels[1]} ${result.reels[2]}`;
 
-  // Visuals
-  if (result.outcome === 'jackpot') {
+  // Determine jackpot PURELY from reels on the client — don't trust outcome field.
+  // If server rolled 3 matching symbols, client MUST display jackpot. This is the
+  // single source of truth: what the user sees on the reels = what happened.
+  const isJackpot = result.reels[0] === result.reels[1] && result.reels[1] === result.reels[2];
+
+  if (isJackpot) {
     display.classList.add('sl-jackpot');
     tg?.HapticFeedback?.notificationOccurred?.('success');
   } else {
     tg?.HapticFeedback?.impactOccurred?.('light');
   }
 
-  // Outcome banner
+  // Outcome banner (driven by isJackpot, not server field)
   await new Promise(r => setTimeout(r, 200));
   out.style.display = 'block';
-  out.className = 'game-out ' + (result.delta > 0 ? 'win' : 'lose');
-  if (result.outcome === 'jackpot') {
+  out.className = 'game-out ' + (isJackpot ? 'win' : 'lose');
+  if (isJackpot) {
     out.textContent = `🎉 JACKPOT ${result.reels.join('')} +${fmt(result.delta)} 🪙`;
   } else {
     out.textContent = `${fmt(result.delta)} 🪙`;
