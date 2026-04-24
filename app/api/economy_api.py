@@ -458,6 +458,11 @@ async def api_forge_claim_afk(user: dict = Depends(require_user)) -> dict:
     return await _forge.claim_afk(int(user["id"]))
 
 
+@router.post("/forge/skip")
+async def api_forge_skip(user: dict = Depends(require_user)) -> dict:
+    return await _forge.skip_weapon(int(user["id"]))
+
+
 class ForgeUpgradeReq(_BM):
     branch: str
 
@@ -480,3 +485,9 @@ async def api_forge_exchange(req: ForgeExchangeReq, user: dict = Depends(require
 async def api_forge_tree(user: dict = Depends(require_user)) -> list[dict]:
     _ = user
     return _forge.get_branches_info()
+
+
+@router.get("/forge/leaderboard")
+async def api_forge_leaderboard(user: dict = Depends(require_user)) -> list[dict]:
+    _ = user
+    return await _forge.leaderboard(limit=20)

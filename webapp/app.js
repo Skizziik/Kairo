@@ -666,7 +666,49 @@ const forgeState = {
   comboCount: 0,
   comboResetTimer: null,
   area: null,
+  pollTimer: null,
 };
+
+function _stopForgePolling() {
+  if (forgeState.pollTimer) {
+    clearInterval(forgeState.pollTimer);
+    forgeState.pollTimer = null;
+  }
+}
+
+function _startForgePolling() {
+  _stopForgePolling();
+  // Every 5s while Forge is visible, re-fetch state to show AFK damage on HP bar.
+  forgeState.pollTimer = setInterval(async () => {
+    const activeView = document.querySelector('.view.active')?.dataset.view;
+    if (activeView !== 'games' || !document.getElementById('weapon-img')) {
+      _stopForgePolling();
+      return;
+    }
+    try {
+      const fresh = await api('/api/forge/state');
+      // Detect if weapon changed (broken while idle) → swap in place
+      const oldId = forgeState.state?.weapon?.skin_id;
+      forgeState.state = fresh;
+      if (fresh.weapon.skin_id !== oldId) {
+        swapWeaponInPlace(fresh.weapon);
+      } else {
+        // Just HP / counters updates
+        const hpFill = document.getElementById('hp-fill');
+        const hpText = document.getElementById('hp-text');
+        if (hpFill) {
+          const pct = Math.max(0, (fresh.weapon.hp / fresh.weapon.max_hp) * 100);
+          hpFill.style.width = pct + '%';
+          hpFill.classList.toggle('low', pct < 30);
+        }
+        if (hpText) hpText.textContent = `${fmt(fresh.weapon.hp)} / ${fmt(fresh.weapon.max_hp)}`;
+      }
+      updateForgeStatsBar();
+    } catch (e) {
+      /* silent, try again next tick */
+    }
+  }, 5000);
+}
 
 async function renderForge(area) {
   area = area || forgeState.area;
@@ -681,6 +723,13 @@ async function renderForge(area) {
     forgeState.state = state;
     forgeState.branches = branches;
     forgePaint(area);
+    // Notify about AFK progress that happened while away
+    const afk = state.afk || {};
+    if ((afk.just_gained || 0) > 0 || (afk.just_broken || 0) > 0) {
+      tg?.HapticFeedback?.notificationOccurred?.('success');
+      const brPart = afk.just_broken ? `, ${afk.just_broken} оружий разобрано` : '';
+      toast(`🤖 AFK-фарм: +${fmt(afk.just_gained)} ⚙️${brPart}`);
+    }
   } catch (e) {
     area.innerHTML = `<div class="loader">Ошибка: ${e.message}</div>`;
   }
@@ -697,9 +746,14 @@ function forgePaint(area) {
   area.innerHTML = `
     <div class="forge-screen">
       <div class="forge-top">
-        <div class="forge-stat particles">⚙️ ${fmt(s.particles)}</div>
-        <div class="forge-stat afk">⏱ ${s.effects.afk_rate_per_sec}/сек</div>
-        ${s.afk.buffer > 0 ? `<div class="forge-stat buffer" id="afk-claim-btn">📦 ${fmt(s.afk.buffer)} →</div>` : ''}
+        <div class="forge-stat particles">⚙️ <span id="hud-particles">${fmt(s.particles)}</span></div>
+        <div class="forge-stat afk" title="AFK-боты копят в буфер, забирай кнопкой 📦">
+          🤖 ${s.effects.afk_rate_per_sec}/с
+        </div>
+        <div class="forge-stat buffer ${s.afk.buffer > 0 ? '' : 'dim'}" id="afk-claim-btn">
+          📦 <span id="hud-buffer">${fmt(s.afk.buffer)}</span> →
+        </div>
+        <div class="forge-stat" style="cursor:pointer" id="forge-lb-btn">🏆 Топ</div>
       </div>
 
       <div class="forge-weapon-card">
@@ -735,7 +789,42 @@ function forgePaint(area) {
   document.getElementById('weapon-img').addEventListener('click', onForgeHit);
   document.getElementById('forge-upgrades-btn').addEventListener('click', () => renderForgeUpgrades(area));
   document.getElementById('forge-exchange-btn').addEventListener('click', () => renderForgeExchange(area));
-  document.getElementById('afk-claim-btn')?.addEventListener('click', onForgeClaimAfk);
+  document.getElementById('forge-lb-btn')?.addEventListener('click', () => renderForgeLeaderboard(area));
+  _startForgePolling();
+}
+
+async function renderForgeLeaderboard(area) {
+  _stopForgePolling();
+  area.innerHTML = `<button class="back-btn" id="lb-back">← к кузнице</button><div class="forge-tree" id="lb-list"><div class="loader">Загрузка...</div></div>`;
+  document.getElementById('lb-back').addEventListener('click', () => forgePaint(area));
+  try {
+    const top = await api('/api/forge/leaderboard');
+    const list = document.getElementById('lb-list');
+    if (!top.length) {
+      list.innerHTML = '<div class="loader">Ещё никто не фармил</div>';
+      return;
+    }
+    const medals = ['🥇', '🥈', '🥉'];
+    list.innerHTML = top.map((r, i) => {
+      const name = r.username ? '@' + r.username : (r.first_name || 'user' + r.tg_id);
+      const rank = medals[i] || `#${i + 1}`;
+      return `
+        <div class="branch-card" style="padding:10px 14px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <div style="font-weight:800;font-size:15px">${rank} ${escape(name)}</div>
+              <div style="font-size:12px;color:var(--text-dim);margin-top:2px">
+                Разобрано: ${fmt(r.total_breaks)} · Всего: ${fmt(r.total_earned)} ⚙️
+              </div>
+            </div>
+            <div style="font-size:17px;font-weight:800;color:#7dd3fc">${fmt(r.particles)} ⚙️</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    document.getElementById('lb-list').innerHTML = `<div class="loader">Ошибка: ${e.message}</div>`;
+  }
 }
 
 async function onForgeHit(e) {

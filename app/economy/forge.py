@@ -27,30 +27,30 @@ log = logging.getLogger(__name__)
 
 TIER_CONFIG = {
     "pistol": {
-        "hp": 50, "particles": 2, "weight": 55,
+        "hp": 50, "particles": 2, "weight": 55, "min_damage_level": 0,
         "weapons": {"Desert Eagle", "USP-S", "Glock-18", "P2000", "Five-SeveN",
                     "Tec-9", "P250", "R8 Revolver", "Dual Berettas", "CZ75-Auto"},
         "rarities": None,  # any
     },
     "rifle": {
-        "hp": 300, "particles": 10, "weight": 30,
+        "hp": 300, "particles": 10, "weight": 30, "min_damage_level": 0,
         "weapons": {"AK-47", "M4A4", "M4A1-S", "Galil AR", "FAMAS", "AUG", "SG 553",
                     "MP9", "MAC-10", "MP7", "MP5-SD", "P90", "UMP-45", "PP-Bizon"},
         "rarities": None,
     },
     "awp": {
-        "hp": 1500, "particles": 60, "weight": 12,
+        "hp": 1500, "particles": 60, "weight": 12, "min_damage_level": 3,
         "weapons": {"AWP", "SSG 08", "SCAR-20", "G3SG1",
                     "Negev", "M249", "Nova", "XM1014", "Sawed-Off", "MAG-7"},
         "rarities": None,
     },
     "golden": {
-        "hp": 10000, "particles": 500, "weight": 2.5,
+        "hp": 10000, "particles": 500, "weight": 2.5, "min_damage_level": 8,
         "weapons": None,  # any weapon, rarity Covert
         "rarities": {"covert"},
     },
     "legendary": {
-        "hp": 80000, "particles": 5000, "weight": 0.5,
+        "hp": 80000, "particles": 5000, "weight": 0.5, "min_damage_level": 15,
         "weapons": None,  # knives/gloves only
         "rarities": {"exceedingly_rare"},
     },
@@ -107,10 +107,16 @@ async def _get_skin_pool(tier: str) -> list[int]:
     return _skin_pool_cache.get(tier, [])
 
 
-def _roll_tier() -> str:
-    r = random.uniform(0, sum(c["weight"] for c in TIER_CONFIG.values()))
+def _roll_tier(damage_level: int = 0) -> str:
+    """Roll a tier, filtered by user's progression. Low damage levels
+    never get expensive weapons so new players don't get stuck."""
+    eligible = {t: c for t, c in TIER_CONFIG.items()
+                if damage_level >= c.get("min_damage_level", 0)}
+    if not eligible:
+        return "pistol"
+    r = random.uniform(0, sum(c["weight"] for c in eligible.values()))
     cum = 0.0
-    for t, cfg in TIER_CONFIG.items():
+    for t, cfg in eligible.items():
         cum += cfg["weight"]
         if r <= cum:
             return t
@@ -161,7 +167,7 @@ OFFLINE_TIERS = _build_tiers(
 )
 
 # AFK bots — 20 levels each
-SILVER_UNLOCK_COST = 200                       # affordable early (~10 weapons)
+SILVER_UNLOCK_COST = 80                        # affordable very early (~4 rifles)
 SILVER_BASE_RATE = 0.3                         # weak but present auto-farm
 SILVER_UPGRADE_TIERS = _build_tiers(
     max_level=20,
@@ -279,7 +285,7 @@ async def ensure_forge_user(tg_id: int) -> None:
 
 async def get_state(tg_id: int) -> dict:
     await ensure_forge_user(tg_id)
-    await _tick_afk(tg_id)
+    afk_gained, afk_breaks = await _tick_afk(tg_id)
     async with pool().acquire() as conn:
         row = await conn.fetchrow(
             "select f.*, s.full_name, s.weapon, s.skin_name, s.rarity, s.rarity_color, "
@@ -328,7 +334,9 @@ async def get_state(tg_id: int) -> dict:
             "offline_cap_hours": offline_hours_at(int(row["offline_cap_level"])),
         },
         "afk": {
-            "buffer": int(row["afk_buffer"]),
+            "buffer": 0,
+            "just_gained": int(afk_gained),
+            "just_broken": int(afk_breaks),
             "daily_earned": int(row["daily_afk_earned"] or 0),
             "daily_cap": AFK_DAILY_CAP,
         },
@@ -352,7 +360,13 @@ async def get_state(tg_id: int) -> dict:
 
 async def _spawn_weapon(tg_id: int) -> None:
     """Pick a new weapon from the catalog matching a rolled tier."""
-    tier = _roll_tier()
+    # Read user's damage level to filter tier eligibility
+    async with pool().acquire() as conn:
+        dmg_lvl_row = await conn.fetchrow(
+            "select damage_level from forge_users where tg_id = $1", tg_id,
+        )
+    dmg_lvl = int(dmg_lvl_row["damage_level"]) if dmg_lvl_row else 0
+    tier = _roll_tier(damage_level=dmg_lvl)
     cfg = TIER_CONFIG[tier]
     skin_pool = await _get_skin_pool(tier)
     if not skin_pool:
@@ -475,19 +489,26 @@ async def hit(tg_id: int) -> dict:
 # AFK tick (called on state fetch)
 # ============================================================
 
-async def _tick_afk(tg_id: int) -> None:
+async def _tick_afk(tg_id: int) -> tuple[int, int]:
+    """AFK bot = auto-clicker. Rate is DAMAGE per second. Deals damage to
+    current weapon; when HP hits 0 → break + credit particles + spawn next.
+    Daily cap applies. Returns (particles_gained, weapons_broken)."""
     now = datetime.now(timezone.utc)
     today = now.date()
+    needs_new_spawn = False
+    particles_gained = 0
+    breaks = 0
     async with pool().acquire() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
                 "select silver_level, gold_level, global_level, offline_cap_level, "
-                "last_afk_tick_at, afk_buffer, daily_afk_day, daily_afk_earned "
+                "last_afk_tick_at, daily_afk_day, daily_afk_earned, damage_level, "
+                "luck_level, current_weapon_hp, current_weapon_particles "
                 "from forge_users where tg_id = $1 for update",
                 tg_id,
             )
             if row is None:
-                return
+                return (0, 0)
             rate = total_afk_rate(
                 int(row["silver_level"]), int(row["gold_level"]), int(row["global_level"])
             )
@@ -496,64 +517,117 @@ async def _tick_afk(tg_id: int) -> None:
                     "update forge_users set last_afk_tick_at = $2 where tg_id = $1",
                     tg_id, now,
                 )
-                return
+                return (0, 0)
 
             offline_cap = offline_hours_at(int(row["offline_cap_level"])) * 3600
             last_tick = row["last_afk_tick_at"]
-            if last_tick is None:
-                elapsed = 0
-            else:
-                elapsed = (now - last_tick).total_seconds()
+            elapsed = 0.0 if last_tick is None else (now - last_tick).total_seconds()
             elapsed = min(elapsed, offline_cap)
-            gained = int(rate * elapsed)
+            damage_budget = int(rate * elapsed)
+            if damage_budget <= 0:
+                await conn.execute(
+                    "update forge_users set last_afk_tick_at = $2 where tg_id = $1",
+                    tg_id, now,
+                )
+                return (0, 0)
 
-            # Apply daily cap
-            if row["daily_afk_day"] != today:
-                daily_earned = 0
-            else:
-                daily_earned = int(row["daily_afk_earned"] or 0)
+            daily_earned = 0 if row["daily_afk_day"] != today else int(row["daily_afk_earned"] or 0)
             cap_left = max(0, AFK_DAILY_CAP - daily_earned)
-            gained_capped = min(gained, cap_left)
 
-            new_buffer = int(row["afk_buffer"]) + gained_capped
-            new_daily = daily_earned + gained_capped
-            await conn.execute(
-                """
-                update forge_users set
-                  afk_buffer = $2,
-                  daily_afk_day = $3,
-                  daily_afk_earned = $4,
-                  last_afk_tick_at = $5
-                where tg_id = $1
-                """,
-                tg_id, new_buffer, today, new_daily, now,
-            )
+            damage_level = int(row["damage_level"])
+            luck_mult = 1.0 + luck_bonus_at(int(row["luck_level"])) / 100.0
+            cur_hp = int(row["current_weapon_hp"]) if row["current_weapon_hp"] is not None else 0
+            cur_particles = int(row["current_weapon_particles"]) if row["current_weapon_particles"] is not None else 0
+
+            if cur_hp <= 0:
+                needs_new_spawn = True
+                cur_hp = 50
+                cur_particles = 2
+
+            # Simulate breaks in a loop using tier averages for future weapons
+            while damage_budget > 0 and cap_left > 0:
+                if damage_budget >= cur_hp:
+                    damage_budget -= cur_hp
+                    # Apply luck bonus just like manual hits do
+                    lucky_reward = int(cur_particles * luck_mult)
+                    award = min(lucky_reward, cap_left)
+                    particles_gained += award
+                    cap_left -= award
+                    breaks += 1
+                    needs_new_spawn = True
+                    tier = _roll_tier(damage_level)
+                    cfg = TIER_CONFIG[tier]
+                    cur_hp = cfg["hp"]
+                    cur_particles = cfg["particles"]
+                else:
+                    cur_hp -= damage_budget
+                    damage_budget = 0
+
+            new_daily = daily_earned + particles_gained
+            if breaks > 0:
+                await conn.execute(
+                    """
+                    update forge_users set
+                      particles = particles + $2,
+                      total_particles_earned = total_particles_earned + $2,
+                      total_breaks = total_breaks + $3,
+                      daily_afk_day = $4, daily_afk_earned = $5,
+                      last_afk_tick_at = $6,
+                      current_skin_id = null, current_weapon_tier = null,
+                      current_weapon_hp = null, current_weapon_max_hp = null,
+                      current_weapon_particles = null, current_weapon_stattrak = false
+                    where tg_id = $1
+                    """,
+                    tg_id, particles_gained, breaks, today, new_daily, now,
+                )
+            else:
+                await conn.execute(
+                    """
+                    update forge_users set
+                      current_weapon_hp = $2,
+                      daily_afk_day = $3, daily_afk_earned = $4,
+                      last_afk_tick_at = $5
+                    where tg_id = $1
+                    """,
+                    tg_id, cur_hp, today, new_daily, now,
+                )
+    if needs_new_spawn:
+        await _spawn_weapon(tg_id)
+    return (particles_gained, breaks)
 
 
-async def claim_afk(tg_id: int) -> dict:
-    await _tick_afk(tg_id)
+async def skip_weapon(tg_id: int) -> dict:
+    """Escape hatch: give up the current weapon, get minimal particles (10% of full reward),
+    spawn a new one. Useful when stuck with too-high-HP weapon relative to damage level."""
     async with pool().acquire() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
-                "select afk_buffer from forge_users where tg_id = $1 for update",
-                tg_id,
+                "select current_weapon_particles, current_skin_id "
+                "from forge_users where tg_id = $1 for update", tg_id,
             )
-            if row is None:
-                return {"ok": False, "error": "No state"}
-            buffer = int(row["afk_buffer"])
-            if buffer <= 0:
-                return {"ok": False, "error": "Nothing to claim", "claimed": 0}
+            if row is None or row["current_skin_id"] is None:
+                return {"ok": False, "error": "No weapon to skip"}
+            base_particles = int(row["current_weapon_particles"] or 0)
+            refund = max(1, base_particles // 10)
             await conn.execute(
-                """
-                update forge_users set
-                  particles = particles + $2,
-                  total_particles_earned = total_particles_earned + $2,
-                  afk_buffer = 0
-                where tg_id = $1
-                """,
-                tg_id, buffer,
+                "update forge_users set "
+                "particles = particles + $2, "
+                "total_particles_earned = total_particles_earned + $2, "
+                "current_skin_id = null, current_weapon_hp = null, "
+                "current_weapon_max_hp = null, current_weapon_tier = null, "
+                "current_weapon_particles = null, current_weapon_stattrak = false "
+                "where tg_id = $1",
+                tg_id, refund,
             )
-    return {"ok": True, "claimed": buffer}
+    await _spawn_weapon(tg_id)
+    return {"ok": True, "refund": refund}
+
+
+async def claim_afk(tg_id: int) -> dict:
+    """Legacy endpoint. AFK is now auto-applied on every state fetch;
+    this just triggers a tick and reports what was gained."""
+    gained, breaks = await _tick_afk(tg_id)
+    return {"ok": True, "claimed": gained, "breaks": breaks}
 
 
 # ============================================================
@@ -646,6 +720,37 @@ async def exchange(tg_id: int, particle_amount: int) -> dict:
 # ============================================================
 # UPGRADE TREE INTROSPECTION (for UI)
 # ============================================================
+
+async def leaderboard(limit: int = 20) -> list[dict]:
+    """Top forgers by total_particles_earned (lifetime grind)."""
+    async with pool().acquire() as conn:
+        rows = await conn.fetch(
+            """
+            select f.tg_id, f.particles, f.total_particles_earned, f.total_breaks,
+                   f.total_crits, f.total_clicks,
+                   u.username, u.first_name
+            from forge_users f
+            left join users u on u.tg_id = f.tg_id
+            where f.total_particles_earned > 0
+            order by f.total_particles_earned desc
+            limit $1
+            """,
+            limit,
+        )
+    return [
+        {
+            "tg_id": int(r["tg_id"]),
+            "username": r["username"],
+            "first_name": r["first_name"],
+            "particles": int(r["particles"]),
+            "total_earned": int(r["total_particles_earned"]),
+            "total_breaks": int(r["total_breaks"]),
+            "total_crits": int(r["total_crits"] or 0),
+            "total_clicks": int(r["total_clicks"] or 0),
+        }
+        for r in rows
+    ]
+
 
 def get_branches_info() -> list[dict]:
     """Return branch metadata for the upgrade UI."""

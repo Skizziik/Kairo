@@ -1176,6 +1176,7 @@ h2 {
 .forge-stat.particles { color: #7dd3fc; border-color: rgba(125,211,252,0.4); }
 .forge-stat.afk { color: #fde047; border-color: rgba(253,224,71,0.4); }
 .forge-stat.buffer { color: #a78bfa; border-color: rgba(167,139,250,0.4); cursor: pointer; }
+.forge-stat.buffer.dim { color: var(--text-dim); border-color: var(--border); }
 
 .forge-weapon-card {
   position: relative;
