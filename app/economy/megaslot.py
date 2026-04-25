@@ -58,16 +58,16 @@ WEIGHTS: dict[str, int] = {
 }
 assert sum(WEIGHTS.values()) == 100, f"weights must sum to 100, got {sum(WEIGHTS.values())}"
 
-# Pay table — bet multiplier for 8+/10+/12+ same regular symbol anywhere. ~96% RTP target.
+# Pay table — tighter (~70-75% RTP target). Less generous; jackpots still big.
 PAYOUTS: dict[str, list[tuple[int, float]]] = {
-    "milspec":    [(8, 0.05), (10, 0.12), (12, 0.5)],
-    "classified": [(8, 0.1),  (10, 0.25), (12, 1)],
-    "covert":     [(8, 0.15), (10, 0.4),  (12, 2)],
-    "m4":         [(8, 0.25), (10, 0.5),  (12, 2.5)],
-    "gloves":     [(8, 0.35), (10, 0.8),  (12, 3.5)],
-    "ak":         [(8, 0.5),  (10, 1.5),  (12, 5)],
-    "awp":        [(8, 1),    (10, 3),    (12, 8)],
-    "knife":      [(8, 2.5),  (10, 6),    (12, 12)],
+    "milspec":    [(8, 0.04), (10, 0.10), (12, 0.4)],
+    "classified": [(8, 0.08), (10, 0.20), (12, 0.8)],
+    "covert":     [(8, 0.12), (10, 0.30), (12, 1.5)],
+    "m4":         [(8, 0.20), (10, 0.40), (12, 2)],
+    "gloves":     [(8, 0.28), (10, 0.65), (12, 2.8)],
+    "ak":         [(8, 0.40), (10, 1.2),  (12, 4)],
+    "awp":        [(8, 0.8),  (10, 2.4),  (12, 6.5)],
+    "knife":      [(8, 2),    (10, 5),    (12, 10)],
 }
 
 # Scatter payouts (also triggers FS at 4+)
