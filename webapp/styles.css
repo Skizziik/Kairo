@@ -2060,6 +2060,52 @@ h2 {
   0%   { transform: translateX(-100%); }
   100% { transform: translateX(100%); }
 }
+
+/* 🌌 UNIVERSE — cosmic rarity, the ultimate */
+.gear-card.universe-card {
+  border-width: 3px;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(0,255,255,0.15) 0%, transparent 50%),
+    radial-gradient(circle at 70% 70%, rgba(255,0,255,0.12) 0%, transparent 50%),
+    linear-gradient(135deg, rgba(0,40,80,0.4), rgba(60,0,80,0.4));
+  animation: universePulse 2s ease-in-out infinite alternate, universeHue 8s linear infinite;
+  overflow: hidden;
+}
+.gear-card.universe-card::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 12px;
+  background: conic-gradient(
+    from 0deg,
+    #00ffff 0%, #ff00ff 25%, #ffff00 50%, #00ff80 75%, #00ffff 100%
+  );
+  z-index: -1;
+  animation: universeRotate 6s linear infinite;
+  filter: blur(2px);
+  pointer-events: none;
+}
+.gear-card.universe-card > * { position: relative; z-index: 1; }
+@keyframes universePulse {
+  from { box-shadow: 0 0 30px rgba(0,255,255,0.6), 0 0 60px rgba(255,0,255,0.4); }
+  to   { box-shadow: 0 0 60px rgba(0,255,255,1.0), 0 0 100px rgba(255,0,255,0.8); }
+}
+@keyframes universeHue {
+  0%   { filter: hue-rotate(0deg); }
+  100% { filter: hue-rotate(360deg); }
+}
+@keyframes universeRotate {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+.gear-card.universe-card .gear-card-icon {
+  text-shadow: 0 0 20px #00ffff, 0 0 40px #ff00ff;
+  animation: universeIconFloat 3s ease-in-out infinite alternate;
+}
+@keyframes universeIconFloat {
+  from { transform: translateY(0) scale(1); }
+  to   { transform: translateY(-3px) scale(1.05); }
+}
 .gear-card-icon {
   font-size: 42px;
   line-height: 1;

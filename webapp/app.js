@@ -2143,11 +2143,14 @@ async function _paintGearPanel(area) {
 }
 
 function _gearItemCardHtml(it, ctx) {
-  // ctx: { mode: 'shop'|'inv', owned?, inv_id?, equipped? }
   const isUltra = it.rarity === 'ultralegendary';
-  const rarityStyle = `border-color:${it.rarity_color}; box-shadow:0 0 ${isUltra ? '24px' : '12px'} ${it.rarity_color}${isUltra ? 'aa' : '44'}`;
+  const isUniverse = it.rarity === 'universe';
+  const glowSize = isUniverse ? '40px' : (isUltra ? '24px' : '12px');
+  const glowAlpha = isUniverse ? 'cc' : (isUltra ? 'aa' : '44');
+  const rarityStyle = `border-color:${it.rarity_color}; box-shadow:0 0 ${glowSize} ${it.rarity_color}${glowAlpha}`;
   const cardClasses = ['gear-card'];
   if (isUltra) cardClasses.push('ultra-card');
+  if (isUniverse) cardClasses.push('universe-card');
   const affixHtml = it.affixes.map(a => `<div class="gear-affix">${escape(a.label)}</div>`).join('');
   let actionHtml = '';
   if (ctx.mode === 'shop') {

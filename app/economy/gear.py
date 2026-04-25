@@ -37,7 +37,7 @@ log = logging.getLogger(__name__)
 # RARITY
 # ============================================================
 
-RARITY_ORDER = ["common", "uncommon", "rare", "epic", "legendary", "mythic", "ultralegendary"]
+RARITY_ORDER = ["common", "uncommon", "rare", "epic", "legendary", "mythic", "ultralegendary", "universe"]
 RARITY_LABEL_RU = {
     "common": "Обычный",
     "uncommon": "Необычный",
@@ -46,6 +46,7 @@ RARITY_LABEL_RU = {
     "legendary": "Легендарный",
     "mythic": "Мифический",
     "ultralegendary": "УЛЬТРАЛЕГЕНДАРНЫЙ",
+    "universe": "🌌 ВСЕЛЕННАЯ",
 }
 RARITY_COLOR = {
     "common":         "#b0c3d9",
@@ -55,8 +56,9 @@ RARITY_COLOR = {
     "legendary":      "#d32ce6",
     "mythic":         "#eb4b4b",
     "ultralegendary": "#ffd700",  # gold
+    "universe":       "#00ffff",  # cosmic cyan (CSS adds rainbow animation)
 }
-RARITY_MULT = {"common": 1, "uncommon": 2, "rare": 4, "epic": 10, "legendary": 25, "mythic": 75, "ultralegendary": 200}
+RARITY_MULT = {"common": 1, "uncommon": 2, "rare": 4, "epic": 10, "legendary": 25, "mythic": 75, "ultralegendary": 200, "universe": 5000}
 
 SLOT_ORDER = ["helmet", "armor", "boots", "gloves", "ring", "amulet", "drone"]
 SLOT_LABEL_RU = {
@@ -199,6 +201,12 @@ _add(_mk("drone_killer",          "🛸 Дрон-Убийца",       "drone",  
          price_override=250_000, boss_dmg=50, afk=12, afk_cap=10))
 _add(_mk("drone_artillery",       "💣 Дрон-Артиллерия",   "drone",  "ultralegendary", "🎯",
          price_override=2_700_000, boss_dmg=140, afk=30, afk_cap=18, offline_hours=2))
+
+# ============================================================
+# 🌌 UNIVERSE — single cosmic-tier endgame artifact
+# ============================================================
+_add(_mk("amulet_universe",       "🌌 ВСЕЛЕННАЯ",         "amulet", "universe", "🌌",
+         price_override=100_000_000, boss_dmg=10000))
 
 # --- 💍 RINGS (magic → tier_luck + coin_gain + sell_bonus) ---
 _add(_mk("ring_luck",             "Кольцо удачи",         "ring",   "common",    "💍", tier_luck=2))
