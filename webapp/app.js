@@ -671,16 +671,6 @@ function renderGamePlay(game, target) {
       </div>
     `;
     document.getElementById('cr-play').addEventListener('click', playCrash);
-  } else if (game === 'upgrade') {
-    area.innerHTML = `
-      <div class="game-play">
-        <h3>⚡ Upgrade (скоро)</h3>
-        <p style="color:var(--text-dim); font-size:13px">
-          Выбираешь свой скин, скидываешь доп коины, выбираешь цель —
-          крутишь шанс прокачать. UI докрутим в следующем обновлении.
-        </p>
-      </div>
-    `;
   } else if (game === 'megaslot') {
     renderMegaslot(area);
   } else if (game === 'forge') {
