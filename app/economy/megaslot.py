@@ -58,16 +58,16 @@ WEIGHTS: dict[str, int] = {
 }
 assert sum(WEIGHTS.values()) == 100, f"weights must sum to 100, got {sum(WEIGHTS.values())}"
 
-# Pay table — tighter (~70-75% RTP target). Less generous; jackpots still big.
+# Pay table — strict (~55-60% RTP target). Knife jackpots still chunky but base wins minimal.
 PAYOUTS: dict[str, list[tuple[int, float]]] = {
-    "milspec":    [(8, 0.04), (10, 0.10), (12, 0.4)],
-    "classified": [(8, 0.08), (10, 0.20), (12, 0.8)],
-    "covert":     [(8, 0.12), (10, 0.30), (12, 1.5)],
-    "m4":         [(8, 0.20), (10, 0.40), (12, 2)],
-    "gloves":     [(8, 0.28), (10, 0.65), (12, 2.8)],
-    "ak":         [(8, 0.40), (10, 1.2),  (12, 4)],
-    "awp":        [(8, 0.8),  (10, 2.4),  (12, 6.5)],
-    "knife":      [(8, 2),    (10, 5),    (12, 10)],
+    "milspec":    [(8, 0.03), (10, 0.07), (12, 0.25)],
+    "classified": [(8, 0.05), (10, 0.12), (12, 0.5)],
+    "covert":     [(8, 0.08), (10, 0.20), (12, 1)],
+    "m4":         [(8, 0.13), (10, 0.25), (12, 1.3)],
+    "gloves":     [(8, 0.18), (10, 0.40), (12, 1.8)],
+    "ak":         [(8, 0.25), (10, 0.75), (12, 2.5)],
+    "awp":        [(8, 0.5),  (10, 1.5),  (12, 4)],
+    "knife":      [(8, 1.5),  (10, 3),    (12, 7)],
 }
 
 # Scatter payouts (also triggers FS at 4+)
@@ -295,15 +295,16 @@ def _resolve_spin(
 # MAIN ENTRY: play a full session (base spin + optional FS)
 # ============================================================
 
+MAX_BET = 100_000  # hard cap on per-spin bet
+
+
 async def spin(user_id: int, bet: int, bonus_buy: bool = False, bonus_type: str = "regular") -> dict:
     """Full play: deduct cost, run base spin (unless bonus_buy), trigger FS if 4+ scatters,
-    accumulate multipliers during FS, credit winnings, return full visualization data.
-
-    bonus_type: "regular" (15 spins, start x0, cost 70×) or "premium" (25 spins, start x10, cost 220×).
-    Only used when bonus_buy=True.
-    """
+    accumulate multipliers during FS, credit winnings, return full visualization data."""
     if bet <= 0:
         return {"ok": False, "error": "Bet must be positive"}
+    if bet > MAX_BET:
+        return {"ok": False, "error": f"Max bet {MAX_BET:,}"}
 
     # Resolve bonus buy parameters
     bb = BONUS_BUY_PREMIUM if bonus_type == "premium" else BONUS_BUY_REGULAR

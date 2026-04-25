@@ -2302,7 +2302,8 @@ async function renderMegaslot(area) {
       <div class="megaslot-controls">
         <div class="ms-bet-row">
           <label>Ставка</label>
-          <input type="number" id="ms-bet" min="10" step="10" value="100" />
+          <input type="number" id="ms-bet" min="10" max="100000" step="10" value="100" />
+          <div class="ms-bet-hint">макс. ставка 100 000</div>
         </div>
         <button class="btn big-btn daily-btn" id="ms-spin">🎰 Крутить</button>
       </div>
@@ -2345,7 +2346,13 @@ async function renderMegaslot(area) {
 
   _renderMegaslotGrid(_randomGrid());
   document.getElementById('ms-bet').addEventListener('input', (e) => {
-    _megaslotState.bet = Math.max(10, parseInt(e.target.value) || 100);
+    let v = Math.max(10, parseInt(e.target.value) || 100);
+    if (v > 100000) {
+      v = 100000;
+      e.target.value = v;
+      toast('Макс. ставка 100 000');
+    }
+    _megaslotState.bet = v;
   });
   document.getElementById('ms-spin').addEventListener('click', () => playMegaslot(false, null));
   document.getElementById('ms-buy').addEventListener('click', _openBonusBuyModal);
