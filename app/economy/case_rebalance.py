@@ -23,17 +23,15 @@ log = logging.getLogger(__name__)
 #   min_base_price:  exclude any skin with base_price < this (hard floor on shittiness)
 # Cases not listed are left untouched.
 CASE_CONFIG: dict[str, dict] = {
-    # Source-of-truth weights for RIP. If earlier aggressive rebalances dropped
-    # some rarity from the DB weights, we must restore from here — otherwise
-    # the "missing" rarity (e.g. restricted) can't be rolled even if catalog has items.
+    # Source-of-truth weights for RIP. Tightened — knives/gloves now lottery-rare.
     "rip": {
         "max_items": 80,
         "min_base_price": 0,
         "rarity_weights": {
-            "restricted":       0.25,
-            "classified":       0.35,
-            "covert":           0.30,
-            "exceedingly_rare": 0.10,
+            "restricted":       0.32,  # ↑ from 0.25 — more loss outcomes
+            "classified":       0.40,  # ↑ from 0.35 — middle-tier dominates
+            "covert":           0.25,  # ↓ from 0.30
+            "exceedingly_rare": 0.03,  # ↓ from 0.10 — knives now ~3% (was 10%)
         },
     },
 }
