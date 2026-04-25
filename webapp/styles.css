@@ -1971,7 +1971,7 @@ h2 {
    GEAR SCREEN (shop + inventory + equipped panel)
    ============================================================ */
 .gear-wrap {
-  padding: 8px 0 100px 0;
+  padding: 8px 0 140px 0;
 }
 .gear-tabs {
   display: flex;
@@ -2144,7 +2144,9 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  margin-top: auto;  /* pin to bottom so cards in same row align action buttons */
 }
+.gear-card { display: flex; flex-direction: column; }
 .gear-card-action .btn {
   font-size: 12px;
   padding: 7px;
