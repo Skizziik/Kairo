@@ -188,7 +188,7 @@ SILVER_UNLOCK_COST = 80                        # affordable very early (~4 rifle
 SILVER_BASE_RATE = 0.3                         # weak but present auto-farm
 SILVER_UPGRADE_TIERS = _build_tiers(
     max_level=20,
-    effect_fn=lambda L: 2.3 + L * 0.12,        # +2 base buff → L1=2.42/s ... L20=4.7/s
+    effect_fn=lambda L: 12.3 + L * 0.12,       # +10 base → L1=12.42/s ... L20=14.7/s
     cost_fn=lambda L: 100 * (1.35 ** (L - 1)),
     round_effect=False,
 )
@@ -196,7 +196,7 @@ GOLD_UNLOCK_COST = 8000
 GOLD_BASE_RATE = 1.0
 GOLD_UPGRADE_TIERS = _build_tiers(
     max_level=20,
-    effect_fn=lambda L: 3.0 + L * 0.5,         # +2 base buff → L1=3.5/s ... L20=13/s
+    effect_fn=lambda L: 13.0 + L * 0.5,        # +10 base → L1=13.5/s ... L20=23/s
     cost_fn=lambda L: 250 * (1.3 ** (L - 1)),
     round_effect=False,
 )
@@ -204,7 +204,7 @@ GLOBAL_UNLOCK_COST = 60000
 GLOBAL_BASE_RATE = 4.0
 GLOBAL_UPGRADE_TIERS = _build_tiers(
     max_level=20,
-    effect_fn=lambda L: 6.0 + L * 1.5,         # +2 base buff → L1=7.5/s ... L20=36/s
+    effect_fn=lambda L: 16.0 + L * 1.5,        # +10 base → L1=17.5/s ... L20=46/s
     cost_fn=lambda L: 1500 * (1.3 ** (L - 1)),
     round_effect=False,
 )
