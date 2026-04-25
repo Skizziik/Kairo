@@ -574,7 +574,7 @@ from app.economy import megaslot as _megaslot
 
 
 class MegaslotSpinReq(BaseModel):
-    bet: int = Field(..., ge=1, le=100_000)
+    bet: int = Field(..., ge=1, le=10_000)
     bonus_buy: bool = False
     bonus_type: str = "regular"  # regular | premium
 

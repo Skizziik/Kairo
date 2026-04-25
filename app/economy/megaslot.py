@@ -295,7 +295,7 @@ def _resolve_spin(
 # MAIN ENTRY: play a full session (base spin + optional FS)
 # ============================================================
 
-MAX_BET = 100_000  # hard cap on per-spin bet
+MAX_BET = 10_000  # hard cap on per-spin bet
 
 
 async def spin(user_id: int, bet: int, bonus_buy: bool = False, bonus_type: str = "regular") -> dict:
