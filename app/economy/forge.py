@@ -593,6 +593,10 @@ async def hit(tg_id: int) -> dict:
             is_crit = random.randint(1, 100) <= crit_chance
             damage = int(base_dmg * crit_mult) if is_crit else base_dmg
 
+            # МОЛОТ ИГОРЯ — instant break: any hit kills the current weapon
+            if int(_gear.get("instant_break", 0)) > 0:
+                damage = int(row["current_weapon_hp"])
+
             new_hp = int(row["current_weapon_hp"]) - damage
             broken = new_hp <= 0
             particles_earned = 0
@@ -713,16 +717,19 @@ async def hit_batch(tg_id: int, count: int) -> dict:
             breaks_count = 0
             particles_gained = 0
 
+            instant_break = int(_gear.get("instant_break", 0)) > 0
             for _ in range(count):
                 is_crit = random.randint(1, 100) <= crit_chance
                 damage = int(base_dmg * crit_mult) if is_crit else base_dmg
+                # МОЛОТ ИГОРЯ — kill the current weapon in one hit
+                if instant_break:
+                    damage = max(damage, cur_hp)
                 total_damage += damage
                 if is_crit:
                     total_crits += 1
                 cur_hp -= damage
                 if cur_hp <= 0:
                     breaks_count += 1
-                    # Luck (upgrade) + Dust Magic (prestige) + gear.particles all apply
                     particles_gained += int(cur_reward * (1 + luck_b / 100) * dust_mult * gear_part)
                     needs_new_spawn = True
                     cur_hp = 0

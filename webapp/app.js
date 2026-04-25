@@ -1872,7 +1872,10 @@ async function _paintGearPanel(area) {
 
 function _gearItemCardHtml(it, ctx) {
   // ctx: { mode: 'shop'|'inv', owned?, inv_id?, equipped? }
-  const rarityStyle = `border-color:${it.rarity_color}; box-shadow:0 0 12px ${it.rarity_color}44`;
+  const isUltra = it.rarity === 'ultralegendary';
+  const rarityStyle = `border-color:${it.rarity_color}; box-shadow:0 0 ${isUltra ? '24px' : '12px'} ${it.rarity_color}${isUltra ? 'aa' : '44'}`;
+  const cardClasses = ['gear-card'];
+  if (isUltra) cardClasses.push('ultra-card');
   const affixHtml = it.affixes.map(a => `<div class="gear-affix">${escape(a.label)}</div>`).join('');
   let actionHtml = '';
   if (ctx.mode === 'shop') {
@@ -1888,7 +1891,7 @@ function _gearItemCardHtml(it, ctx) {
     actionHtml = `${equipBtn}<button class="btn danger gear-inv-btn" data-sell="${ctx.inv_id}">Продать · ${fmt(it.sell_price)} 💰</button>`;
   }
   return `
-    <div class="gear-card" style="${rarityStyle}">
+    <div class="${cardClasses.join(' ')}" style="${rarityStyle}">
       <div class="gear-card-icon" style="color:${it.rarity_color}">${it.icon}</div>
       <div class="gear-card-name">${escape(it.name)}</div>
       <div class="gear-card-rarity" style="color:${it.rarity_color}">${escape(it.rarity_label)}</div>

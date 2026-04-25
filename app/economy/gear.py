@@ -37,7 +37,7 @@ log = logging.getLogger(__name__)
 # RARITY
 # ============================================================
 
-RARITY_ORDER = ["common", "uncommon", "rare", "epic", "legendary", "mythic"]
+RARITY_ORDER = ["common", "uncommon", "rare", "epic", "legendary", "mythic", "ultralegendary"]
 RARITY_LABEL_RU = {
     "common": "Обычный",
     "uncommon": "Необычный",
@@ -45,16 +45,18 @@ RARITY_LABEL_RU = {
     "epic": "Эпический",
     "legendary": "Легендарный",
     "mythic": "Мифический",
+    "ultralegendary": "УЛЬТРАЛЕГЕНДАРНЫЙ",
 }
 RARITY_COLOR = {
-    "common":    "#b0c3d9",
-    "uncommon":  "#5e98d9",
-    "rare":      "#4b69ff",
-    "epic":      "#8847ff",
-    "legendary": "#d32ce6",
-    "mythic":    "#eb4b4b",
+    "common":         "#b0c3d9",
+    "uncommon":       "#5e98d9",
+    "rare":           "#4b69ff",
+    "epic":           "#8847ff",
+    "legendary":      "#d32ce6",
+    "mythic":         "#eb4b4b",
+    "ultralegendary": "#ffd700",  # gold
 }
-RARITY_MULT = {"common": 1, "uncommon": 2, "rare": 4, "epic": 10, "legendary": 25, "mythic": 75}
+RARITY_MULT = {"common": 1, "uncommon": 2, "rare": 4, "epic": 10, "legendary": 25, "mythic": 75, "ultralegendary": 200}
 
 SLOT_ORDER = ["helmet", "armor", "boots", "gloves", "ring", "amulet", "drone"]
 SLOT_LABEL_RU = {
@@ -93,7 +95,8 @@ def _sell_price(slot: str, rarity: str) -> int:
 # ============================================================
 # Each item: key, name, slot, rarity, icon (emoji), affixes dict.
 
-def _mk(key: str, name: str, slot: str, rarity: str, icon: str, **affixes) -> dict:
+def _mk(key: str, name: str, slot: str, rarity: str, icon: str, price_override: int | None = None, **affixes) -> dict:
+    price = price_override if price_override is not None else _price(slot, rarity)
     return {
         "key": key,
         "name": name,
@@ -102,8 +105,8 @@ def _mk(key: str, name: str, slot: str, rarity: str, icon: str, **affixes) -> di
         "rarity_label": RARITY_LABEL_RU[rarity],
         "rarity_color": RARITY_COLOR[rarity],
         "icon": icon,
-        "price": _price(slot, rarity),
-        "sell_price": _sell_price(slot, rarity),
+        "price": price,
+        "sell_price": int(price * SELL_FRACTION),
         "affixes": affixes,
     }
 
@@ -145,6 +148,9 @@ _add(_mk("gloves_sniper",         "Снайперские тактич.",  "glov
 _add(_mk("gloves_exo",             "Экзо-перчатки",        "gloves", "epic",      "🦾", dmg=12, crit_dmg=4))
 _add(_mk("gloves_bloody",         "Кровавые перчатки",    "gloves", "legendary", "🩸", dmg=16, crit_dmg=7))
 _add(_mk("gloves_mjolnir",        "Руки Молота",          "gloves", "mythic",    "⚒️", dmg=22, crit_dmg=10))
+
+# 🔨 ULTRALEGENDARY ARTIFACT — МОЛОТ ИГОРЯ (instant-break any weapon in Forge, costs 5M coins)
+_add(_mk("gloves_igor_hammer",    "🔨 МОЛОТ ИГОРЯ",       "gloves", "ultralegendary", "🔨", price_override=5_000_000, instant_break=1))
 
 # --- 💍 RINGS (magic → tier_luck + coin_gain + sell_bonus) ---
 _add(_mk("ring_luck",             "Кольцо удачи",         "ring",   "common",    "💍", tier_luck=2))
@@ -260,6 +266,7 @@ AFFIX_LABEL = {
     "case_discount": ("-{v}% 🎁 цена кейсов", "case_discount"),
     "afk_cap":       ("+{v}% 📦 AFK-cap", "afk_cap"),
     "offline_hours": ("+{v}ч ⏰ offline", "offline_hours"),
+    "instant_break": ("💥 МОМЕНТАЛЬНЫЙ РАЗЛОМ оружия", "instant_break"),
 }
 
 
