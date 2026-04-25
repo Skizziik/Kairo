@@ -621,3 +621,12 @@ async def api_boss_upgrade(req: BossUpgradeReq, user: dict = Depends(require_use
 async def api_boss_branches(user: dict = Depends(require_user)) -> list[dict]:
     _ = user
     return _boss.get_branches_info()
+
+
+class BossSelectReq(BaseModel):
+    tier: int = Field(..., ge=1)
+
+
+@router.post("/forge/boss/select")
+async def api_boss_select(req: BossSelectReq, user: dict = Depends(require_user)) -> dict:
+    return await _boss.select_tier(int(user["id"]), req.tier)

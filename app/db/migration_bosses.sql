@@ -7,9 +7,22 @@ alter table forge_users
   add column if not exists boss_total_kills      int    not null default 0,
   add column if not exists boss_max_tier         int    not null default 1,
   add column if not exists boss_endless_kills    int    not null default 0,
+  add column if not exists boss_selected_tier    int    not null default 1,
   add column if not exists boss_dmg_lvl          int    not null default 0,
   add column if not exists boss_crit_lvl         int    not null default 0,
   add column if not exists boss_coin_lvl         int    not null default 0,
   add column if not exists boss_double_lvl       int    not null default 0,
   add column if not exists boss_pierce_lvl       int    not null default 0,
   add column if not exists boss_megahit_lvl      int    not null default 0;
+
+-- Per-tier HP table (so player can switch between bosses without losing damage progress)
+create table if not exists boss_progress (
+  tg_id        bigint not null references users(tg_id) on delete cascade,
+  tier         int    not null,
+  current_hp   bigint not null,
+  kills        int    not null default 0,
+  last_attack_at timestamptz,
+  primary key (tg_id, tier)
+);
+alter table boss_progress add column if not exists last_attack_at timestamptz;
+create index if not exists idx_boss_progress_tg on boss_progress (tg_id);

@@ -1830,8 +1830,11 @@ function escape(s) {
 // BOSS RAIDS SCREEN
 // ============================================================
 
+const _bossState = { busy: false, pendingTaps: 0, flushTimer: null, area: null, st: null };
+
 async function renderForgeBoss(area) {
   _stopForgePolling();
+  _bossState.area = area;
   area.innerHTML = `<button class="back-btn" id="boss-back">← к кузнице</button><div class="boss-wrap" id="boss-root"><div class="loader">Загрузка боссов…</div></div>`;
   document.getElementById('boss-back').addEventListener('click', () => forgePaint(area));
   try {
@@ -1839,6 +1842,7 @@ async function renderForgeBoss(area) {
       api('/api/forge/boss/state'),
       api('/api/forge/boss/branches'),
     ]);
+    _bossState.st = st;
     _paintBoss(area, st, branches);
   } catch (e) {
     document.getElementById('boss-root').innerHTML = `<div class="loader">Ошибка: ${escape(e.message)}</div>`;
@@ -1849,40 +1853,84 @@ function _paintBoss(area, st, branches) {
   const root = document.getElementById('boss-root');
   if (!root) return;
   const hpPct = Math.max(0, (st.hp / st.max_hp) * 100);
-  const isEndless = st.tier > 10;
+  const isEndless = st.selected_tier > 10;
+
+  // Boss tier picker (carousel of unlocked bosses)
+  const tiersHtml = (st.tiers || []).map(t => {
+    const tierHpPct = Math.max(0, (t.hp / t.max_hp) * 100);
+    return `
+      <button class="boss-tier-card ${t.selected ? 'active' : ''}" data-tier="${t.tier}">
+        <div class="btc-icon">${t.icon}</div>
+        <div class="btc-tier">T${t.tier}</div>
+        <div class="btc-hp-bar"><div class="btc-hp-fill" style="width:${tierHpPct}%"></div></div>
+        <div class="btc-kills">${t.kills}× kills</div>
+      </button>
+    `;
+  }).join('');
 
   root.innerHTML = `
-    <div class="boss-header">
-      <div class="boss-icon">${st.icon}</div>
-      <div class="boss-info">
-        <div class="boss-tier">Тир ${st.tier}${isEndless ? ' (Endless)' : ''}</div>
-        <div class="boss-name">${escape(st.name)}</div>
-        <div class="boss-lore">${escape(st.lore)}</div>
-      </div>
-    </div>
+    <div class="boss-tier-picker" id="boss-tier-picker">${tiersHtml}</div>
 
-    <div class="boss-hp-wrap">
+    <div class="boss-fight-card">
+      <div class="boss-tier-label">Тир ${st.selected_tier}${isEndless ? ' · ENDLESS' : ''}</div>
+      <div class="boss-name">${escape(st.name)}</div>
+      <div class="boss-lore">${escape(st.lore)}</div>
+
+      <div class="boss-tap-target" id="boss-tap-target">
+        <div class="boss-icon-big" id="boss-icon-big">${st.icon}</div>
+        <div class="boss-tap-hint">тапай</div>
+      </div>
+
       <div class="boss-hp-bar">
         <div class="boss-hp-fill" id="boss-hp-fill" style="width:${hpPct}%"></div>
         <div class="boss-hp-text" id="boss-hp-text">${fmt(st.hp)} / ${fmt(st.max_hp)} HP</div>
       </div>
-    </div>
 
-    <div class="boss-stats">
-      <span>Удар: <b>≈ ${fmt(st.preview_dmg)}</b></span>
-      <span>Награда: <b>${fmt(st.coin_reward)} 🪙</b></span>
-      <span>Убито: <b>${st.total_kills}</b></span>
-      <span>Макс тир: <b>${st.max_tier}</b></span>
-    </div>
+      <div class="boss-timer-row" id="boss-timer-row" ${st.regen_seconds_left == null ? 'style="visibility:hidden"' : ''}>
+        ⏱ Регенерация через <b id="boss-timer">${st.regen_seconds_left ?? '—'}</b> сек
+      </div>
 
-    <button class="btn boss-attack-btn" id="boss-attack">⚔️ АТАКОВАТЬ</button>
+      <div class="boss-stats">
+        <span>⚔️ ≈ <b id="boss-preview-dmg">${fmt(st.preview_dmg)}</b></span>
+        <span>💰 <b>${fmt(st.coin_reward)} 🪙</b></span>
+        <span>☠ <b id="boss-total-kills">${st.total_kills}</b></span>
+        <span>🛡 max <b>${st.max_tier}</b></span>
+      </div>
+    </div>
 
     <div class="boss-prestige-section">
-      <div class="boss-section-title">🛡 Охотник на боссов <span style="color:var(--text-dim);font-size:12px">— тратятся жетоны</span></div>
+      <div class="boss-section-title">🛡 Охотник на боссов <span class="boss-jetons">🎖 ${fmt(st.jetons || 0)}</span></div>
       <div class="boss-branches" id="boss-branches"></div>
     </div>
   `;
 
+  // Wire tier picker
+  document.querySelectorAll('.boss-tier-card').forEach(card => {
+    card.addEventListener('click', () => _selectBossTier(area, parseInt(card.dataset.tier)));
+  });
+
+  // Wire tap-to-attack on the boss icon area
+  const tapTarget = document.getElementById('boss-tap-target');
+  tapTarget.addEventListener('click', (e) => _bossTap(area, tapTarget, e));
+
+  // Start regen countdown ticker (1Hz)
+  if (_bossState.timerInterval) clearInterval(_bossState.timerInterval);
+  if (st.regen_seconds_left != null) {
+    let secsLeft = st.regen_seconds_left;
+    const timerEl = document.getElementById('boss-timer');
+    _bossState.timerInterval = setInterval(() => {
+      secsLeft -= 1;
+      if (secsLeft <= 0) {
+        clearInterval(_bossState.timerInterval);
+        // Boss regened — reload state to show full HP
+        renderForgeBoss(_bossState.area);
+        return;
+      }
+      if (timerEl) timerEl.textContent = secsLeft;
+    }, 1000);
+  }
+
+  // Branches
   const branchesEl = document.getElementById('boss-branches');
   branchesEl.innerHTML = branches.map(b => {
     const lvl = st.boss_levels[b.key] || 0;
@@ -1890,6 +1938,7 @@ function _paintBoss(area, st, branches) {
     const cur = (lvl * b.effect_per_level).toFixed(b.effect_per_level < 1 ? 2 : 0);
     const next = isMaxed ? '—' : ((lvl + 1) * b.effect_per_level).toFixed(b.effect_per_level < 1 ? 2 : 0);
     const progressPct = (lvl / b.max_level) * 100;
+    const cost = isMaxed ? null : (1 + Math.floor(lvl / 3));  // approx — server is authoritative
     return `
       <div class="boss-branch-card">
         <div class="bb-row">
@@ -1901,63 +1950,139 @@ function _paintBoss(area, st, branches) {
         ${isMaxed
           ? `<div class="bb-effect maxed">МАКС: ${cur}${b.unit.startsWith('%') ? b.unit : ' '+b.unit}</div>`
           : `<div class="bb-effect">Сейчас: ${cur} → ${next}${b.unit.startsWith('%') ? b.unit : ' '+b.unit}</div>
-             <button class="btn bb-buy" data-bb="${b.key}">⬆ Прокачать</button>`}
+             <button class="btn bb-buy" data-bb="${b.key}">⬆ Прокачать (${cost} 🎖)</button>`}
       </div>
     `;
   }).join('');
-
-  document.getElementById('boss-attack').addEventListener('click', () => _bossAttack(area, 5));
   branchesEl.querySelectorAll('[data-bb]').forEach(btn => {
     btn.addEventListener('click', () => _buyBossUpgrade(area, btn.dataset.bb));
   });
 }
 
-async function _bossAttack(area, taps) {
-  const btn = document.getElementById('boss-attack');
-  if (btn) btn.disabled = true;
+async function _selectBossTier(area, tier) {
+  if (_bossState.busy) return;
+  try {
+    const r = await api('/api/forge/boss/select', { method: 'POST', body: JSON.stringify({ tier }) });
+    if (!r.ok) { toast(r.error || 'Не удалось выбрать'); return; }
+    tg?.HapticFeedback?.impactOccurred?.('light');
+    renderForgeBoss(area);
+  } catch (e) { toast(e.message); }
+}
+
+function _bossTap(area, tapTarget, evt) {
+  if (!_bossState.st) return;
+
+  // Visual: spawn floating damage number from tap point
+  const rect = tapTarget.getBoundingClientRect();
+  const x = (evt.clientX || rect.left + rect.width/2) - rect.left;
+  const y = (evt.clientY || rect.top + rect.height/2) - rect.top;
+  const dmg = _bossState.st.preview_dmg || 100;
+
+  const pop = document.createElement('div');
+  pop.className = 'boss-tap-pop';
+  pop.textContent = `-${fmt(dmg)}`;
+  pop.style.left = x + 'px';
+  pop.style.top = y + 'px';
+  tapTarget.appendChild(pop);
+  setTimeout(() => pop.remove(), 800);
+
+  // Visual: shake the icon
+  const icon = document.getElementById('boss-icon-big');
+  if (icon) {
+    icon.classList.remove('hit');
+    void icon.offsetWidth;
+    icon.classList.add('hit');
+  }
+
+  tg?.HapticFeedback?.impactOccurred?.('light');
+
+  // Optimistically update HP locally
+  _bossState.st.hp = Math.max(0, _bossState.st.hp - dmg);
+  const pct = (_bossState.st.hp / _bossState.st.max_hp) * 100;
+  const hpFill = document.getElementById('boss-hp-fill');
+  const hpText = document.getElementById('boss-hp-text');
+  if (hpFill) hpFill.style.width = pct + '%';
+  if (hpText) hpText.textContent = `${fmt(_bossState.st.hp)} / ${fmt(_bossState.st.max_hp)} HP`;
+
+  // Queue tap for batch flush
+  _bossState.pendingTaps += 1;
+  if (!_bossState.flushTimer) {
+    _bossState.flushTimer = setTimeout(_flushBossBatch, 200);
+  }
+}
+
+async function _flushBossBatch() {
+  _bossState.flushTimer = null;
+  const taps = Math.min(50, _bossState.pendingTaps);
+  if (taps <= 0) return;
+  _bossState.pendingTaps = Math.max(0, _bossState.pendingTaps - taps);
+
   try {
     const r = await api('/api/forge/boss/attack', { method: 'POST', body: JSON.stringify({ taps }) });
-    if (!r.ok) { toast(r.error || 'Не удалось'); return; }
-    tg?.HapticFeedback?.impactOccurred?.(r.crits > 0 ? 'heavy' : 'light');
+    if (!r.ok) return;
 
-    // Update HP bar smoothly
+    // Reconcile state from server truth
+    if (_bossState.st) {
+      _bossState.st.hp = r.boss_after.hp;
+      _bossState.st.max_hp = r.boss_after.max_hp;
+      _bossState.st.total_kills = (_bossState.st.total_kills || 0) + (r.kills?.length || 0);
+    }
+
     const hpFill = document.getElementById('boss-hp-fill');
     const hpText = document.getElementById('boss-hp-text');
-    const after = r.boss_after;
-    const pct = Math.max(0, (after.hp / after.max_hp) * 100);
-    if (hpFill) hpFill.style.width = pct + '%';
-    if (hpText) hpText.textContent = `${fmt(after.hp)} / ${fmt(after.max_hp)} HP`;
+    const totalKillsEl = document.getElementById('boss-total-kills');
+    if (hpFill) hpFill.style.width = (r.boss_after.hp / r.boss_after.max_hp * 100) + '%';
+    if (hpText) hpText.textContent = `${fmt(r.boss_after.hp)} / ${fmt(r.boss_after.max_hp)} HP`;
+    if (totalKillsEl && _bossState.st) totalKillsEl.textContent = _bossState.st.total_kills;
 
-    // Update balance immediately
     if (typeof r.new_balance === 'number') {
       state.me.balance = r.new_balance;
       document.getElementById('balance-display').textContent = fmt(state.me.balance);
     }
 
-    // Show damage popup with stats
-    const flash = document.createElement('div');
-    flash.className = 'boss-dmg-flash';
-    let txt = `-${fmt(r.total_dmg)} HP`;
-    if (r.crits > 0) txt += ` · ${r.crits}× CRIT`;
-    if (r.doubles > 0) txt += ` · ${r.doubles}× DBL`;
-    if (r.megahits > 0) txt += ` · ${r.megahits}× MEGA💥`;
-    flash.textContent = txt;
-    area.appendChild(flash);
-    setTimeout(() => flash.remove(), 1500);
+    // Reset regen timer (tap = re-engage)
+    if (r.regen_total_sec) {
+      const timerEl = document.getElementById('boss-timer');
+      const timerRow = document.getElementById('boss-timer-row');
+      if (timerEl && timerRow) {
+        timerRow.style.visibility = '';
+        let secsLeft = r.regen_total_sec;
+        timerEl.textContent = secsLeft;
+        if (_bossState.timerInterval) clearInterval(_bossState.timerInterval);
+        _bossState.timerInterval = setInterval(() => {
+          secsLeft -= 1;
+          if (secsLeft <= 0) {
+            clearInterval(_bossState.timerInterval);
+            renderForgeBoss(_bossState.area);
+            return;
+          }
+          timerEl.textContent = secsLeft;
+        }, 1000);
+      }
+    }
 
-    // Kill banner
     if (r.kills && r.kills.length > 0) {
       tg?.HapticFeedback?.notificationOccurred?.('success');
       for (const k of r.kills) {
-        toast(`☠ Убит ${k.icon} ${k.name}! +${fmt(k.coin_reward)} 🪙`, 4000);
+        toast(`☠ ${k.icon} ${k.name} убит! +${fmt(k.coin_reward)} 🪙`, 3500);
       }
-      // Re-render full to show new boss
-      setTimeout(() => renderForgeBoss(area), 1000);
+      // Special crits/doubles toast
+      if (r.megahits > 0) toast(`💥 ×${r.megahits} МЕГА-УДАР!`, 2500);
+      if (r.tier_unlocked) {
+        toast(`🔓 Открыт новый тир: ${r.tier_unlocked}`, 4000);
+      }
+      // If new tier unlocked or just want refresh, re-render
+      if (r.tier_unlocked) {
+        setTimeout(() => renderForgeBoss(_bossState.area), 1500);
+      }
     }
   } catch (e) {
-    toast(e.message);
-  } finally {
-    if (btn) btn.disabled = false;
+    // Silent — server is authoritative; user already saw optimistic update
+  }
+
+  // If more taps queued during the flush, schedule next
+  if (_bossState.pendingTaps > 0 && !_bossState.flushTimer) {
+    _bossState.flushTimer = setTimeout(_flushBossBatch, 200);
   }
 }
 
