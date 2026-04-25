@@ -662,10 +662,10 @@ function renderGamePlay(game, target) {
     area.innerHTML = `
       <div class="game-play">
         <h3>💥 Crash</h3>
-        <label>Ставка</label>
-        <input type="number" id="cr-bet" min="1" value="100" />
-        <label>Таргет множитель (1.01 – 50.00)</label>
-        <input type="number" id="cr-target" min="1.01" max="50" step="0.1" value="2" />
+        <label>Ставка (макс 10 000)</label>
+        <input type="number" id="cr-bet" min="1" max="10000" value="100" />
+        <label>Таргет множитель (1.20 – 50.00)</label>
+        <input type="number" id="cr-target" min="1.20" max="50" step="0.05" value="2" />
         <button class="btn big-btn daily-btn" id="cr-play">Играть</button>
         <div class="game-out" id="cr-out" style="display:none"></div>
       </div>
@@ -1691,7 +1691,9 @@ async function loadWheel() {
 async function playCrash() {
   const bet = parseInt(document.getElementById('cr-bet').value || '0');
   const target = parseFloat(document.getElementById('cr-target').value || '0');
-  if (bet <= 0 || target < 1.01) return toast('Ставка > 0, таргет >= 1.01');
+  if (bet <= 0) return toast('Ставка > 0');
+  if (bet > 10000) return toast('Макс ставка 10 000');
+  if (target < 1.20) return toast('Минимальный таргет 1.20x');
   const btn = document.getElementById('cr-play');
   if (btn?.disabled) return;
   const origText = btn ? btn.textContent : '';

@@ -720,12 +720,16 @@ async def play_slots(user_id: int, bet: int) -> dict:
 
 async def play_crash(user_id: int, bet: int, target_mult: float) -> dict:
     """Player sets target multiplier. Server rolls crash point.
-    Win if target <= crash_point."""
+    Win if target <= crash_point. Min target 1.20 (cuts the safe-bet farming)."""
     import random, math
-    if bet <= 0 or target_mult < 1.01:
-        return {"ok": False, "error": "Bet > 0, target >= 1.01"}
+    if bet <= 0:
+        return {"ok": False, "error": "Bet > 0"}
+    if target_mult < 1.20:
+        return {"ok": False, "error": "Минимальный таргет 1.20x"}
     if target_mult > 50:
         return {"ok": False, "error": "Max target 50x"}
+    if bet > 10_000:
+        return {"ok": False, "error": "Макс ставка 10 000"}
     async with pool().acquire() as conn:
         async with conn.transaction():
             bal_row = await conn.fetchrow(
