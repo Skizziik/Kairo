@@ -1451,6 +1451,222 @@ h2 {
   color: #7dd3fc;
   font-weight: 700;
 }
+.forge-boss-chip {
+  background: linear-gradient(135deg, rgba(235,75,75,0.15), rgba(255,140,0,0.1));
+  border: 1px solid rgba(235,75,75,0.4);
+  color: #ff6b6b;
+  font-weight: 700;
+}
+
+/* ============================================================
+   BOSS RAID SCREEN
+   ============================================================ */
+.boss-wrap {
+  padding: 8px 0 100px 0;
+}
+.boss-header {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
+  background: linear-gradient(135deg, rgba(235,75,75,0.15), rgba(255,140,0,0.1));
+  border: 1px solid rgba(235,75,75,0.4);
+  border-radius: 14px;
+  margin-bottom: 14px;
+}
+.boss-icon {
+  font-size: 56px;
+  line-height: 1;
+  filter: drop-shadow(0 0 12px rgba(235,75,75,0.6));
+  animation: bossIconPulse 1.8s ease-in-out infinite alternate;
+}
+@keyframes bossIconPulse {
+  from { transform: scale(1); filter: drop-shadow(0 0 8px rgba(235,75,75,0.5)); }
+  to   { transform: scale(1.05); filter: drop-shadow(0 0 20px rgba(235,75,75,0.9)); }
+}
+.boss-info {
+  flex: 1;
+  min-width: 0;
+}
+.boss-tier {
+  font-size: 12px;
+  color: #ffc76b;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.boss-name {
+  font-size: 19px;
+  font-weight: 900;
+  color: #fff;
+  margin: 2px 0 4px 0;
+}
+.boss-lore {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.boss-hp-wrap {
+  margin-bottom: 14px;
+  padding: 0 4px;
+}
+.boss-hp-bar {
+  position: relative;
+  height: 32px;
+  background: rgba(0,0,0,0.5);
+  border: 1px solid rgba(235,75,75,0.4);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.boss-hp-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #eb4b4b 0%, #ff6b6b 50%, #ffa64b 100%);
+  transition: width 0.35s cubic-bezier(0.45, 0.05, 0.55, 0.95);
+  box-shadow: inset 0 0 12px rgba(255,0,0,0.5);
+}
+.boss-hp-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 13px;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+}
+
+.boss-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 4px;
+  margin-bottom: 14px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.boss-stats span {
+  background: rgba(255,255,255,0.04);
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+.boss-stats b { color: #fff; }
+
+.boss-attack-btn {
+  width: 100%;
+  background: linear-gradient(135deg, #eb4b4b, #ff6b6b);
+  color: #fff;
+  border: 0;
+  font-weight: 900;
+  font-size: 17px;
+  padding: 16px;
+  border-radius: 14px;
+  margin-bottom: 18px;
+  letter-spacing: 1px;
+  box-shadow: 0 4px 16px rgba(235,75,75,0.5);
+  transition: transform 0.1s, box-shadow 0.15s;
+}
+.boss-attack-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 22px rgba(235,75,75,0.8); }
+.boss-attack-btn:active { transform: translateY(0); }
+.boss-attack-btn:disabled { opacity: 0.5; }
+
+.boss-dmg-flash {
+  position: fixed;
+  top: 30%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.9);
+  color: #ff6b6b;
+  font-size: 22px;
+  font-weight: 900;
+  padding: 14px 22px;
+  border-radius: 14px;
+  border: 2px solid #ff6b6b;
+  pointer-events: none;
+  animation: bossDmgPop 1.5s ease-out forwards;
+  z-index: 9999;
+  text-shadow: 0 0 8px rgba(255,107,107,0.8);
+}
+@keyframes bossDmgPop {
+  0%   { opacity: 0; transform: translate(-50%, 10px) scale(0.7); }
+  20%  { opacity: 1; transform: translate(-50%, -20px) scale(1.1); }
+  80%  { opacity: 1; transform: translate(-50%, -40px) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -80px) scale(0.9); }
+}
+
+.boss-prestige-section {
+  background: var(--bg-card);
+  border-radius: 12px;
+  padding: 12px;
+}
+.boss-section-title {
+  font-weight: 800;
+  font-size: 14px;
+  margin-bottom: 10px;
+  color: #ffc76b;
+}
+.boss-branches {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+.boss-branch-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+}
+.bb-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.bb-name {
+  font-weight: 800;
+  font-size: 14px;
+}
+.bb-level {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.06);
+  color: var(--text-dim);
+}
+.bb-level.maxed {
+  background: rgba(255,199,107,0.2);
+  color: #ffc76b;
+}
+.bb-desc {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin: 4px 0 6px 0;
+}
+.bb-progress {
+  height: 3px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.bb-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ffc76b, #ff6b6b);
+}
+.bb-effect {
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+.bb-effect.maxed { color: #ffc76b; font-weight: 700; }
+.bb-buy {
+  width: 100%;
+  background: rgba(235,75,75,0.15);
+  color: #ff6b6b;
+  border: 1px solid rgba(235,75,75,0.35);
+  padding: 6px;
+  font-size: 12px;
+}
 
 .prestige-wrap {
   padding: 8px 0 100px 0;

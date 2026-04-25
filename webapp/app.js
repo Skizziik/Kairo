@@ -831,6 +831,7 @@ function forgePaint(area) {
         <div class="forge-stat forge-prestige-chip" style="cursor:pointer" id="forge-prestige-btn" title="Престиж — сброс прогресса за жетоны и вечные бонусы">
           ✨ ${(s.prestige?.level || 0) > 0 ? `P${s.prestige.level}` : 'Престиж'}
         </div>
+        <div class="forge-stat forge-boss-chip" style="cursor:pointer" id="forge-boss-btn" title="Боссы — рейды с уникальными наградами">🛡 Боссы</div>
         <div class="forge-stat forge-gear-chip" style="cursor:pointer" id="forge-gear-btn" title="Шмот — магазин и инвентарь экипировки">🛒 Шмот</div>
         <div class="forge-stat" style="cursor:pointer" id="forge-lb-btn">🏆 Топ</div>
       </div>
@@ -873,6 +874,7 @@ function forgePaint(area) {
   document.getElementById('forge-skip-btn').addEventListener('click', onForgeSkip);
   document.getElementById('forge-lb-btn')?.addEventListener('click', () => renderForgeLeaderboard(area));
   document.getElementById('forge-prestige-btn')?.addEventListener('click', () => renderForgePrestige(area));
+  document.getElementById('forge-boss-btn')?.addEventListener('click', () => renderForgeBoss(area));
   _startForgePolling();
 }
 
@@ -1822,6 +1824,151 @@ function escape(s) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+// ============================================================
+// BOSS RAIDS SCREEN
+// ============================================================
+
+async function renderForgeBoss(area) {
+  _stopForgePolling();
+  area.innerHTML = `<button class="back-btn" id="boss-back">← к кузнице</button><div class="boss-wrap" id="boss-root"><div class="loader">Загрузка боссов…</div></div>`;
+  document.getElementById('boss-back').addEventListener('click', () => forgePaint(area));
+  try {
+    const [st, branches] = await Promise.all([
+      api('/api/forge/boss/state'),
+      api('/api/forge/boss/branches'),
+    ]);
+    _paintBoss(area, st, branches);
+  } catch (e) {
+    document.getElementById('boss-root').innerHTML = `<div class="loader">Ошибка: ${escape(e.message)}</div>`;
+  }
+}
+
+function _paintBoss(area, st, branches) {
+  const root = document.getElementById('boss-root');
+  if (!root) return;
+  const hpPct = Math.max(0, (st.hp / st.max_hp) * 100);
+  const isEndless = st.tier > 10;
+
+  root.innerHTML = `
+    <div class="boss-header">
+      <div class="boss-icon">${st.icon}</div>
+      <div class="boss-info">
+        <div class="boss-tier">Тир ${st.tier}${isEndless ? ' (Endless)' : ''}</div>
+        <div class="boss-name">${escape(st.name)}</div>
+        <div class="boss-lore">${escape(st.lore)}</div>
+      </div>
+    </div>
+
+    <div class="boss-hp-wrap">
+      <div class="boss-hp-bar">
+        <div class="boss-hp-fill" id="boss-hp-fill" style="width:${hpPct}%"></div>
+        <div class="boss-hp-text" id="boss-hp-text">${fmt(st.hp)} / ${fmt(st.max_hp)} HP</div>
+      </div>
+    </div>
+
+    <div class="boss-stats">
+      <span>Удар: <b>≈ ${fmt(st.preview_dmg)}</b></span>
+      <span>Награда: <b>${fmt(st.coin_reward)} 🪙</b></span>
+      <span>Убито: <b>${st.total_kills}</b></span>
+      <span>Макс тир: <b>${st.max_tier}</b></span>
+    </div>
+
+    <button class="btn boss-attack-btn" id="boss-attack">⚔️ АТАКОВАТЬ</button>
+
+    <div class="boss-prestige-section">
+      <div class="boss-section-title">🛡 Охотник на боссов <span style="color:var(--text-dim);font-size:12px">— тратятся жетоны</span></div>
+      <div class="boss-branches" id="boss-branches"></div>
+    </div>
+  `;
+
+  const branchesEl = document.getElementById('boss-branches');
+  branchesEl.innerHTML = branches.map(b => {
+    const lvl = st.boss_levels[b.key] || 0;
+    const isMaxed = lvl >= b.max_level;
+    const cur = (lvl * b.effect_per_level).toFixed(b.effect_per_level < 1 ? 2 : 0);
+    const next = isMaxed ? '—' : ((lvl + 1) * b.effect_per_level).toFixed(b.effect_per_level < 1 ? 2 : 0);
+    const progressPct = (lvl / b.max_level) * 100;
+    return `
+      <div class="boss-branch-card">
+        <div class="bb-row">
+          <div class="bb-name">${escape(b.name)}</div>
+          <div class="bb-level ${isMaxed ? 'maxed' : ''}">${lvl}/${b.max_level}</div>
+        </div>
+        <div class="bb-desc">${escape(b.desc)}</div>
+        <div class="bb-progress"><div class="bb-progress-fill" style="width:${progressPct}%"></div></div>
+        ${isMaxed
+          ? `<div class="bb-effect maxed">МАКС: ${cur}${b.unit.startsWith('%') ? b.unit : ' '+b.unit}</div>`
+          : `<div class="bb-effect">Сейчас: ${cur} → ${next}${b.unit.startsWith('%') ? b.unit : ' '+b.unit}</div>
+             <button class="btn bb-buy" data-bb="${b.key}">⬆ Прокачать</button>`}
+      </div>
+    `;
+  }).join('');
+
+  document.getElementById('boss-attack').addEventListener('click', () => _bossAttack(area, 5));
+  branchesEl.querySelectorAll('[data-bb]').forEach(btn => {
+    btn.addEventListener('click', () => _buyBossUpgrade(area, btn.dataset.bb));
+  });
+}
+
+async function _bossAttack(area, taps) {
+  const btn = document.getElementById('boss-attack');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api('/api/forge/boss/attack', { method: 'POST', body: JSON.stringify({ taps }) });
+    if (!r.ok) { toast(r.error || 'Не удалось'); return; }
+    tg?.HapticFeedback?.impactOccurred?.(r.crits > 0 ? 'heavy' : 'light');
+
+    // Update HP bar smoothly
+    const hpFill = document.getElementById('boss-hp-fill');
+    const hpText = document.getElementById('boss-hp-text');
+    const after = r.boss_after;
+    const pct = Math.max(0, (after.hp / after.max_hp) * 100);
+    if (hpFill) hpFill.style.width = pct + '%';
+    if (hpText) hpText.textContent = `${fmt(after.hp)} / ${fmt(after.max_hp)} HP`;
+
+    // Update balance immediately
+    if (typeof r.new_balance === 'number') {
+      state.me.balance = r.new_balance;
+      document.getElementById('balance-display').textContent = fmt(state.me.balance);
+    }
+
+    // Show damage popup with stats
+    const flash = document.createElement('div');
+    flash.className = 'boss-dmg-flash';
+    let txt = `-${fmt(r.total_dmg)} HP`;
+    if (r.crits > 0) txt += ` · ${r.crits}× CRIT`;
+    if (r.doubles > 0) txt += ` · ${r.doubles}× DBL`;
+    if (r.megahits > 0) txt += ` · ${r.megahits}× MEGA💥`;
+    flash.textContent = txt;
+    area.appendChild(flash);
+    setTimeout(() => flash.remove(), 1500);
+
+    // Kill banner
+    if (r.kills && r.kills.length > 0) {
+      tg?.HapticFeedback?.notificationOccurred?.('success');
+      for (const k of r.kills) {
+        toast(`☠ Убит ${k.icon} ${k.name}! +${fmt(k.coin_reward)} 🪙`, 4000);
+      }
+      // Re-render full to show new boss
+      setTimeout(() => renderForgeBoss(area), 1000);
+    }
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function _buyBossUpgrade(area, branch) {
+  try {
+    const r = await api('/api/forge/boss/upgrade', { method: 'POST', body: JSON.stringify({ branch }) });
+    if (!r.ok) { toast(r.error || 'Не удалось'); return; }
+    tg?.HapticFeedback?.impactOccurred?.('medium');
+    toast(`⬆ +1 уровень`);
+    renderForgeBoss(area);
+  } catch (e) { toast(e.message); }
 }
 
 // ============================================================

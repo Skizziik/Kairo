@@ -149,8 +149,56 @@ _add(_mk("gloves_exo",             "Экзо-перчатки",        "gloves",
 _add(_mk("gloves_bloody",         "Кровавые перчатки",    "gloves", "legendary", "🩸", dmg=16, crit_dmg=7))
 _add(_mk("gloves_mjolnir",        "Руки Молота",          "gloves", "mythic",    "⚒️", dmg=22, crit_dmg=10))
 
-# 🔨 ULTRALEGENDARY ARTIFACT — МОЛОТ ИГОРЯ (instant-break any weapon in Forge, costs 5M coins)
-_add(_mk("gloves_igor_hammer",    "🔨 МОЛОТ ИГОРЯ",       "gloves", "ultralegendary", "🔨", price_override=5_000_000, instant_break=1))
+# 🔨 ULTRALEGENDARY ARTIFACT — МОЛОТ ИГОРЯ (instant-break Forge weapons + +1000% boss damage)
+_add(_mk("gloves_igor_hammer",    "🔨 МОЛОТ ИГОРЯ",       "gloves", "ultralegendary", "🔨",
+         price_override=5_000_000, instant_break=1, boss_dmg=1000))
+
+# ============================================================
+# 🛡 BOSS-HUNTER GEAR — special items for boss raids
+# Each slot has 1-2 boss-themed mythic items, plus 1 ultralegendary
+# ============================================================
+
+# --- 🪖 HELMETS ---
+_add(_mk("helmet_avenger",        "🪖 Шлем Мстителя",     "helmet", "mythic", "🦾",
+         price_override=180_000, boss_dmg=50, crit=8, tier_luck=5))
+_add(_mk("helmet_dragon_crown",   "👑 Корона Дракона",    "helmet", "ultralegendary", "🐉",
+         price_override=2_500_000, boss_dmg=120, boss_crit=25, crit=15, tier_luck=10))
+
+# --- 🛡 ARMORS ---
+_add(_mk("armor_paladin",         "🛡 Латы Паладина",     "armor",  "mythic", "⚔️",
+         price_override=220_000, boss_dmg=45, particles=15, afk_cap=10))
+_add(_mk("armor_voidplate",       "🌌 Доспех Бездны",     "armor",  "ultralegendary", "🌑",
+         price_override=3_200_000, boss_dmg=150, particles=25, afk_cap=20, offline_hours=3))
+
+# --- 🥾 BOOTS ---
+_add(_mk("boots_hunter",          "🥾 Сапоги Охотника",   "boots",  "mythic", "🦶",
+         price_override=120_000, boss_dmg=35, afk=15, afk_cap=8))
+_add(_mk("boots_zeus",            "⚡ Сандалии Зевса",     "boots",  "ultralegendary", "⚡",
+         price_override=2_000_000, boss_dmg=100, afk=30, afk_cap=15, offline_hours=2))
+
+# --- 🧤 GLOVES ---
+_add(_mk("gloves_witch",          "🧤 Перчатки Колдуна",  "gloves", "mythic", "🧙",
+         price_override=200_000, boss_dmg=60, boss_crit=15, dmg=15))
+_add(_mk("gloves_beast_claws",    "🐺 Когти Зверя",       "gloves", "mythic", "🦴",
+         price_override=350_000, boss_dmg=80, dmg=20, crit_dmg=8))
+
+# --- 💍 RINGS ---
+_add(_mk("ring_hunter_seal",      "💍 Печать Охотника",   "ring",   "mythic", "🦅",
+         price_override=150_000, boss_dmg=40, coin_gain=10, sell_bonus=5))
+_add(_mk("ring_kairo_eye",        "👁 Око Кайро",         "ring",   "ultralegendary", "👁",
+         price_override=2_800_000, boss_dmg=130, boss_crit=20, tier_luck=15, coin_gain=20))
+
+# --- 🧿 AMULETS ---
+_add(_mk("amulet_rage",           "🔥 Амулет Ярости",     "amulet", "mythic", "🔥",
+         price_override=280_000, boss_dmg=55, boss_crit=18, particles=10))
+_add(_mk("amulet_lifesteal",      "🩸 Кулон Жажды",        "amulet", "ultralegendary", "🩸",
+         price_override=2_400_000, boss_dmg=110, boss_crit=20, particles=20, st_hunter=5))
+
+# --- 🛸 DRONES ---
+_add(_mk("drone_killer",          "🛸 Дрон-Убийца",       "drone",  "mythic", "💀",
+         price_override=250_000, boss_dmg=50, afk=12, afk_cap=10))
+_add(_mk("drone_artillery",       "💣 Дрон-Артиллерия",   "drone",  "ultralegendary", "🎯",
+         price_override=2_700_000, boss_dmg=140, afk=30, afk_cap=18, offline_hours=2))
 
 # --- 💍 RINGS (magic → tier_luck + coin_gain + sell_bonus) ---
 _add(_mk("ring_luck",             "Кольцо удачи",         "ring",   "common",    "💍", tier_luck=2))
@@ -267,6 +315,8 @@ AFFIX_LABEL = {
     "afk_cap":       ("+{v}% 📦 AFK-cap", "afk_cap"),
     "offline_hours": ("+{v}ч ⏰ offline", "offline_hours"),
     "instant_break": ("💥 МОМЕНТАЛЬНЫЙ РАЗЛОМ оружия", "instant_break"),
+    "boss_dmg":      ("+{v}% 🛡 урон по боссам", "boss_dmg"),
+    "boss_crit":     ("+{v}% 🎯 крит по боссам", "boss_crit"),
 }
 
 

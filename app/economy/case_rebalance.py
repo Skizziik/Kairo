@@ -23,15 +23,16 @@ log = logging.getLogger(__name__)
 #   min_base_price:  exclude any skin with base_price < this (hard floor on shittiness)
 # Cases not listed are left untouched.
 CASE_CONFIG: dict[str, dict] = {
-    # Source-of-truth weights for RIP. Tightened — knives/gloves now lottery-rare.
+    # Source-of-truth weights for RIP. Knives now 1% (was 3%), covert pulled
+    # down 3pp into restricted. House edge ≈ 45%.
     "rip": {
         "max_items": 80,
         "min_base_price": 0,
         "rarity_weights": {
-            "restricted":       0.32,  # ↑ from 0.25 — more loss outcomes
-            "classified":       0.40,  # ↑ from 0.35 — middle-tier dominates
-            "covert":           0.25,  # ↓ from 0.30
-            "exceedingly_rare": 0.03,  # ↓ from 0.10 — knives now ~3% (was 10%)
+            "restricted":       0.37,  # ↑ from 0.32 — more loss outcomes
+            "classified":       0.40,  # unchanged
+            "covert":           0.22,  # ↓ from 0.25
+            "exceedingly_rare": 0.01,  # ↓ from 0.03 — knives now 1 in 100
         },
     },
 }

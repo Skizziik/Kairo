@@ -13,6 +13,7 @@ from app.api.economy_api import router as economy_router
 from app.bot import get_bot, get_dispatcher
 from app.config import get_settings
 from app.db.client import close_pool, init_pool
+from app.economy import boss as _boss
 from app.economy import case_rebalance as _case_rebalance
 from app.economy import gear as _gear
 from app.economy import prestige as _prestige
@@ -41,6 +42,10 @@ async def lifespan(_: FastAPI):
         await _gear.ensure_schema()
     except Exception as e:
         log.warning("gear schema migration failed: %s", e)
+    try:
+        await _boss.ensure_schema()
+    except Exception as e:
+        log.warning("boss schema migration failed: %s", e)
     # Trim oversized case pools (idempotent — only changes if current count > cap)
     try:
         await _case_rebalance.rebalance_all()

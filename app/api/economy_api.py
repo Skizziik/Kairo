@@ -588,3 +588,36 @@ async def api_megaslot_spin(req: MegaslotSpinReq, user: dict = Depends(require_u
 async def api_megaslot_config(user: dict = Depends(require_user)) -> dict:
     _ = user
     return await _megaslot.get_config()
+
+
+# ================ BOSS RAIDS ================
+from app.economy import boss as _boss
+
+
+@router.get("/forge/boss/state")
+async def api_boss_state(user: dict = Depends(require_user)) -> dict:
+    return await _boss.get_state(int(user["id"]))
+
+
+class BossAttackReq(BaseModel):
+    taps: int = Field(default=1, ge=1, le=50)
+
+
+@router.post("/forge/boss/attack")
+async def api_boss_attack(req: BossAttackReq, user: dict = Depends(require_user)) -> dict:
+    return await _boss.attack(int(user["id"]), req.taps)
+
+
+class BossUpgradeReq(BaseModel):
+    branch: str
+
+
+@router.post("/forge/boss/upgrade")
+async def api_boss_upgrade(req: BossUpgradeReq, user: dict = Depends(require_user)) -> dict:
+    return await _boss.buy_boss_upgrade(int(user["id"]), req.branch)
+
+
+@router.get("/forge/boss/branches")
+async def api_boss_branches(user: dict = Depends(require_user)) -> list[dict]:
+    _ = user
+    return _boss.get_branches_info()
