@@ -2053,6 +2053,12 @@ async function _cfRenderLobby(area, lobbyId) {
       _cfRenderCreatorWaiting(area, lobby);
     } else {
       cfState.selectedIds.clear();          // fresh selection per lobby entry
+      // Always re-fetch inventory before showing the join picker. If the user
+      // came straight from the lobby browser without ever opening the inventory
+      // tab in this session, state.inventory would be empty → 'Нет доступных
+      // скинов' even though they have plenty. Also picks up any items that
+      // freed up from a just-resolved lobby.
+      try { await loadInventory(); } catch (_) {}
       _cfRenderJoinFlow(area, lobby);
     }
   } catch (e) {
