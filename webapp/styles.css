@@ -3445,3 +3445,494 @@ h2 {
 /* rarity glow effect in open reel */
 .reel-item.rarity-covert { box-shadow: 0 0 12px rgba(235, 75, 75, 0.4); }
 .reel-item.rarity-exceedingly_rare { box-shadow: 0 0 18px rgba(228, 174, 57, 0.5); }
+
+/* =====================================================================
+   MINES — CS-themed Сапёр (Defuse)
+   Visual language: tactical HUD. CT-blue + amber, hex pattern on plates.
+   ===================================================================== */
+.mines-card-icon {
+  color: #eb4b4b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+}
+.mines-play {
+  --mc-blue:    #5aa9ff;
+  --mc-amber:   #f5b042;
+  --mc-green:   #58e070;
+  --mc-red:     #eb4b4b;
+  --mc-plate:   #14171f;
+  --mc-plate-2: #1c212d;
+  --mc-line:    #2a3142;
+  --mc-line-hot:#3a4459;
+
+  position: relative;
+  padding: 12px;
+  background:
+    linear-gradient(180deg, #0a0c14 0%, #11141d 100%);
+  border: 1px solid var(--mc-line);
+  border-radius: 14px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.04),
+    0 6px 18px rgba(0,0,0,0.4);
+}
+/* Subtle scanlines + corner brackets — tactical HUD feel */
+.mines-play::before {
+  content: "";
+  position: absolute; inset: 0;
+  border-radius: 14px;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.012) 0 1px, transparent 1px 3px);
+  pointer-events: none;
+  z-index: 0;
+}
+.mines-play > * { position: relative; z-index: 1; }
+
+.mines-title {
+  font-family: "Courier New", ui-monospace, monospace;
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: 4px;
+  text-align: center;
+  color: var(--mc-amber);
+  text-shadow: 0 0 14px rgba(245,176,66,0.45);
+  padding: 6px 0 12px;
+  position: relative;
+}
+.mc-title-bracket {
+  color: var(--mc-blue);
+  margin: 0 6px;
+  text-shadow: 0 0 10px rgba(90,169,255,0.5);
+}
+.mc-title-sub {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 6px;
+  color: var(--text-dim);
+  margin-top: 2px;
+  text-shadow: none;
+}
+
+/* Header stats — like CS scoreboard cells */
+.mines-header {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 10px;
+  background: linear-gradient(180deg, var(--mc-plate) 0%, var(--mc-plate-2) 100%);
+  border: 1px solid var(--mc-line);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.4);
+}
+.mines-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  position: relative;
+}
+.mines-stat + .mines-stat::before {
+  content: "";
+  position: absolute;
+  left: -3px;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background: linear-gradient(180deg, transparent, var(--mc-line-hot), transparent);
+}
+.mines-stat .lbl {
+  font-family: "Courier New", monospace;
+  font-size: 9px;
+  letter-spacing: 2.5px;
+  color: var(--text-dim);
+  font-weight: 700;
+}
+.mines-stat .val {
+  font-family: "Courier New", monospace;
+  font-size: 16px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 1px;
+}
+.mines-stat .val.gold   { color: var(--mc-amber); text-shadow: 0 0 10px rgba(245,176,66,0.4); }
+.mines-stat .val.danger { color: var(--mc-red);   text-shadow: 0 0 10px rgba(235,75,75,0.4); }
+
+/* 5×5 Grid */
+.mines-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  padding: 6px;
+  background:
+    linear-gradient(180deg, #0c0f17 0%, #141823 100%);
+  border: 1px solid var(--mc-line);
+  border-radius: 10px;
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,0.02),
+    inset 0 0 24px rgba(0,0,0,0.55);
+  margin-bottom: 12px;
+  aspect-ratio: 1 / 1;
+}
+
+/* Cells — closed: subtle 3D plate with hex hatching */
+.mc-cell {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border: 1px solid #20283a;
+  border-top-color: #2a3450;
+  border-bottom-color: #0d1018;
+  border-radius: 6px;
+  background:
+    linear-gradient(180deg, #1f2533 0%, #131724 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.06),
+    inset 0 -8px 14px rgba(0,0,0,0.4),
+    0 2px 0 #0a0c14;
+  cursor: pointer;
+  transition: transform 0.08s ease, box-shadow 0.12s ease, background 0.12s ease;
+  padding: 0;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+.mc-cell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(circle at 50% 0%, rgba(90,169,255,0.10) 0%, transparent 60%),
+    repeating-linear-gradient(45deg, rgba(255,255,255,0.018) 0 4px, transparent 4px 8px);
+  pointer-events: none;
+}
+.mc-cell::after {
+  /* center dot — laser-target accent */
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  background: rgba(90,169,255,0.25);
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgba(90,169,255,0.35);
+  transition: opacity 0.15s ease;
+}
+.mc-cell:hover {
+  transform: translateY(-1px);
+  background: linear-gradient(180deg, #283041 0%, #161b29 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.10),
+    inset 0 -8px 18px rgba(0,0,0,0.5),
+    0 4px 0 #0a0c14,
+    0 0 0 1px rgba(90,169,255,0.25);
+}
+.mc-cell:active {
+  transform: translateY(1px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 0 0 #0a0c14;
+}
+.mc-cell.inactive {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.mc-cell.inactive:hover { transform: none; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -8px 14px rgba(0,0,0,0.4), 0 2px 0 #0a0c14; }
+.mc-cell.revealing {
+  animation: mcCellPulse 0.45s ease-out;
+}
+.mc-cell.revealed {
+  cursor: default;
+  pointer-events: none;
+}
+.mc-cell.revealed::before { display: none; }
+.mc-cell.revealed::after  { display: none; }
+
+/* Safe (diamond) reveal */
+.mc-cell.safe {
+  background:
+    radial-gradient(circle at 50% 30%, rgba(90,169,255,0.35) 0%, rgba(58,134,255,0.08) 60%, transparent 100%),
+    linear-gradient(180deg, #11203b 0%, #08111f 100%);
+  border-color: rgba(90,169,255,0.45);
+  box-shadow:
+    inset 0 0 16px rgba(90,169,255,0.28),
+    0 0 14px rgba(90,169,255,0.25);
+}
+
+/* Bomb reveal */
+.mc-cell.bomb {
+  background:
+    radial-gradient(circle at 50% 35%, rgba(235,75,75,0.55) 0%, rgba(235,75,75,0.10) 60%, transparent 100%),
+    linear-gradient(180deg, #2a0e0e 0%, #150505 100%);
+  border-color: rgba(235,75,75,0.6);
+  box-shadow:
+    inset 0 0 18px rgba(235,75,75,0.45),
+    0 0 16px rgba(235,75,75,0.45);
+  animation: mcBombShake 0.45s ease-out;
+}
+
+/* Dimmed — revealed-after-game-over cells */
+.mc-cell.dim {
+  opacity: 0.55;
+  filter: saturate(0.6);
+  animation: none;
+  box-shadow: none;
+}
+
+.mc-icon {
+  position: absolute;
+  inset: 14%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  animation: mcIconPop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.mc-icon.mc-diamond { filter: drop-shadow(0 0 6px rgba(90,169,255,0.7)); }
+.mc-icon.mc-bomb    { filter: drop-shadow(0 0 6px rgba(235,75,75,0.65)); }
+
+@keyframes mcCellPulse {
+  0%   { box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 2px 0 #0a0c14, 0 0 0 0 rgba(245,176,66,0.6); }
+  50%  { box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 2px 0 #0a0c14, 0 0 0 6px rgba(245,176,66,0.0); }
+  100% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 2px 0 #0a0c14, 0 0 0 0 rgba(245,176,66,0.0); }
+}
+@keyframes mcIconPop {
+  0%   { opacity: 0; transform: scale(0.4) rotate(-12deg); }
+  60%  { opacity: 1; transform: scale(1.15) rotate(0); }
+  100% { opacity: 1; transform: scale(1) rotate(0); }
+}
+@keyframes mcBombShake {
+  0%, 100% { transform: translate(0, 0); }
+  20%      { transform: translate(-2px, 1px); }
+  40%      { transform: translate(2px, -1px); }
+  60%      { transform: translate(-1px, 2px); }
+  80%      { transform: translate(1px, -2px); }
+}
+.mc-cell.flip {
+  animation: mcFlip 0.42s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes mcFlip {
+  0%   { transform: rotateY(180deg); }
+  100% { transform: rotateY(0); }
+}
+
+/* Cashout button — CT-defuse green */
+.mines-cashout-row {
+  margin-top: 4px;
+}
+.mines-cashout-btn {
+  width: 100%;
+  background: linear-gradient(180deg, #2ec96e 0%, #18a356 60%, #0e7a3f 100%);
+  color: #052213;
+  border: 1px solid #58e070;
+  border-radius: 10px;
+  padding: 14px 16px;
+  font-family: "Courier New", monospace;
+  font-weight: 900;
+  letter-spacing: 1.5px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  text-shadow: 0 1px 0 rgba(255,255,255,0.25);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.35),
+    inset 0 -10px 18px rgba(0,0,0,0.18),
+    0 6px 0 #073d20,
+    0 0 18px rgba(46,201,110,0.45);
+  cursor: pointer;
+  transition: transform 0.08s ease, box-shadow 0.12s ease;
+}
+.mines-cashout-btn:hover { transform: translateY(-1px); }
+.mines-cashout-btn:active { transform: translateY(2px); box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 2px 0 #073d20; }
+.mines-cashout-btn.disabled,
+.mines-cashout-btn[disabled] {
+  background: linear-gradient(180deg, #2a2f3d, #1a1d28);
+  color: #6d7689;
+  border-color: var(--mc-line);
+  text-shadow: none;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 4px 0 #0a0c14;
+  cursor: not-allowed;
+}
+.mc-cashout-label {
+  font-size: 13px;
+  letter-spacing: 3px;
+  opacity: 0.85;
+}
+.mc-cashout-amt {
+  font-size: 22px;
+  letter-spacing: 1px;
+}
+.mines-next-hint {
+  text-align: center;
+  margin-top: 8px;
+  font-family: "Courier New", monospace;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+}
+.mines-next-hint .gold { color: var(--mc-amber); font-weight: 800; }
+
+/* Setup (pre-game) controls */
+.mines-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mc-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 2px;
+}
+.mc-row-label {
+  font-family: "Courier New", monospace;
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: var(--text-dim);
+  font-weight: 700;
+}
+.mines-setup #mc-bet-input {
+  flex: 0 0 auto;
+  width: 130px;
+  padding: 8px 10px;
+  background: var(--mc-plate);
+  border: 1px solid var(--mc-line);
+  border-radius: 6px;
+  color: var(--mc-amber);
+  font-family: "Courier New", monospace;
+  font-weight: 800;
+  font-size: 16px;
+  letter-spacing: 1px;
+  text-align: right;
+  outline: none;
+}
+.mines-setup #mc-bet-input:focus { border-color: var(--mc-amber); box-shadow: 0 0 0 2px rgba(245,176,66,0.18); }
+.mc-bombs-current {
+  font-family: "Courier New", monospace;
+  font-weight: 900;
+  font-size: 22px;
+  color: var(--mc-red);
+  text-shadow: 0 0 12px rgba(235,75,75,0.5);
+  padding: 2px 14px;
+  background: var(--mc-plate);
+  border: 1px solid rgba(235,75,75,0.4);
+  border-radius: 6px;
+  min-width: 56px;
+  text-align: center;
+}
+.mc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.mc-chip {
+  flex: 1 1 auto;
+  min-width: 52px;
+  padding: 8px 10px;
+  background: var(--mc-plate);
+  border: 1px solid var(--mc-line);
+  color: var(--text-dim);
+  border-radius: 6px;
+  font-family: "Courier New", monospace;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.mc-chip:hover { color: #fff; border-color: var(--mc-line-hot); }
+.mc-chip.selected {
+  background: linear-gradient(180deg, rgba(245,176,66,0.25), rgba(245,176,66,0.1));
+  border-color: var(--mc-amber);
+  color: var(--mc-amber);
+  box-shadow: 0 0 12px rgba(245,176,66,0.25), inset 0 0 0 1px rgba(245,176,66,0.4);
+}
+.mc-chip.mc-chip-bet.selected {
+  background: linear-gradient(180deg, rgba(245,176,66,0.18), rgba(245,176,66,0.08));
+  color: var(--mc-amber);
+}
+
+.mines-start-btn {
+  margin-top: 6px;
+  background: linear-gradient(180deg, #f5b042 0%, #d68417 60%, #a85e08 100%);
+  color: #1a1004;
+  border: 1px solid #ffd884;
+  font-family: "Courier New", monospace;
+  font-weight: 900;
+  letter-spacing: 2px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-shadow: 0 1px 0 rgba(255,255,255,0.2);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.4),
+    inset 0 -10px 18px rgba(0,0,0,0.18),
+    0 6px 0 #5a3a08,
+    0 0 18px rgba(245,176,66,0.45);
+}
+.mines-start-btn:hover { transform: translateY(-1px); }
+.mines-start-btn:active { transform: translateY(2px); box-shadow: inset 0 1px 0 rgba(255,255,255,0.3), 0 2px 0 #5a3a08; }
+.mc-start-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mines-rtp-note {
+  text-align: center;
+  font-family: "Courier New", monospace;
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+.mines-rtp-note b { color: var(--mc-amber); }
+
+/* End-of-round overlay */
+.mines-out {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 10px;
+  text-align: center;
+  font-family: "Courier New", monospace;
+}
+.mines-out .mc-out-title {
+  font-size: 18px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  margin-bottom: 4px;
+}
+.mines-out .mc-out-sub {
+  font-size: 14px;
+  letter-spacing: 1px;
+  margin-bottom: 12px;
+}
+.mines-out-win {
+  background: linear-gradient(180deg, rgba(46,201,110,0.18), rgba(46,201,110,0.04));
+  border: 1px solid rgba(46,201,110,0.45);
+  color: #58e070;
+  box-shadow: 0 0 22px rgba(46,201,110,0.25);
+}
+.mines-out-perfect {
+  background: linear-gradient(180deg, rgba(245,176,66,0.22), rgba(245,176,66,0.06));
+  border: 1px solid rgba(245,176,66,0.55);
+  color: var(--mc-amber);
+  box-shadow: 0 0 24px rgba(245,176,66,0.35);
+}
+.mines-out-lose {
+  background: linear-gradient(180deg, rgba(235,75,75,0.18), rgba(235,75,75,0.04));
+  border: 1px solid rgba(235,75,75,0.45);
+  color: var(--mc-red);
+  box-shadow: 0 0 22px rgba(235,75,75,0.25);
+}
+
+/* Compact layout for narrow screens */
+@media (max-width: 380px) {
+  .mines-title { font-size: 16px; letter-spacing: 3px; }
+  .mines-grid  { gap: 4px; padding: 4px; }
+  .mines-stat .val { font-size: 14px; }
+  .mc-cashout-amt  { font-size: 19px; }
+}

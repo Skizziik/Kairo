@@ -812,9 +812,430 @@ function renderGamePlay(game, target) {
     document.getElementById('cr-play').addEventListener('click', playCrash);
   } else if (game === 'megaslot') {
     renderMegaslot(area);
+  } else if (game === 'mines') {
+    renderMines(area);
   } else if (game === 'forge') {
     renderForge(area);
   }
+}
+
+// ======================= MINES (CS-themed Сапёр) =======================
+
+const minesState = {
+  area: null,
+  config: null,
+  active: null,         // current game: { bet, bombs, revealed, multiplier, ... }
+  bet: 100,
+  bombs: 3,
+  busy: false,
+};
+
+const MINES_DEFAULT_BOMBS = [1, 3, 5, 7, 10, 15, 24];
+const MINES_BET_PRESETS   = [100, 500, 1000, 2500, 5000, 10000];
+
+function _minesFmtMult(m) {
+  if (m === undefined || m === null) return '—';
+  if (m >= 1000) return (m / 1000).toFixed(1).replace(/\.0$/, '') + 'k×';
+  if (m >= 100)  return m.toFixed(0) + '×';
+  if (m >= 10)   return m.toFixed(2) + '×';
+  return m.toFixed(2) + '×';
+}
+
+async function renderMines(area) {
+  minesState.area = area;
+  area.innerHTML = `<div class="mines-play"><div class="loader">Загрузка…</div></div>`;
+  try {
+    if (!minesState.config) {
+      minesState.config = await api('/api/casino/mines/config');
+    }
+    const cur = await api('/api/casino/mines/state');
+    if (cur && cur.active) {
+      minesState.active = cur;
+      minesState.bet = cur.bet;
+      minesState.bombs = cur.bombs;
+    } else {
+      minesState.active = null;
+    }
+    _minesPaint();
+  } catch (e) {
+    area.innerHTML = `<div class="mines-play"><div class="loader">Ошибка: ${escape(e.message)}</div></div>`;
+  }
+}
+
+function _minesPaint() {
+  const area = minesState.area;
+  if (!area) return;
+  const active = minesState.active;
+  const cfg = minesState.config || {};
+  const firstMult = cfg.first_pick_mult || {};
+
+  // Header (current state)
+  const headerLeft = active
+    ? `<div class="mines-stat"><span class="lbl">СТАВКА</span><span class="val">${fmt(active.bet)} 🪙</span></div>
+       <div class="mines-stat"><span class="lbl">БОМБ</span><span class="val danger">${active.bombs}</span></div>
+       <div class="mines-stat"><span class="lbl">МНОЖИТЕЛЬ</span><span class="val gold">${_minesFmtMult(active.multiplier)}</span></div>`
+    : `<div class="mines-stat"><span class="lbl">СТАВКА</span><span class="val">${fmt(minesState.bet)} 🪙</span></div>
+       <div class="mines-stat"><span class="lbl">БОМБ</span><span class="val danger">${minesState.bombs}</span></div>
+       <div class="mines-stat"><span class="lbl">×1 ПИК</span><span class="val gold">${_minesFmtMult(firstMult[minesState.bombs] || 1)}</span></div>`;
+
+  // Grid (always 5×5, blank cells if no active game)
+  let cells = '';
+  for (let i = 0; i < 25; i++) {
+    let cls = 'mc-cell';
+    let inner = '';
+    if (active) {
+      const isRevealed = active.revealed && active.revealed.includes(i);
+      if (isRevealed) {
+        cls += ' revealed safe';
+        inner = `<div class="mc-icon mc-diamond">${_minesDiamondSvg()}</div>`;
+      }
+    } else {
+      cls += ' inactive';
+    }
+    cells += `<button class="${cls}" data-cell="${i}" ${active ? '' : 'disabled'}>${inner}</button>`;
+  }
+
+  // Controls
+  let controls = '';
+  if (active) {
+    const cashoutDisabled = (active.revealed_count || (active.revealed || []).length) === 0;
+    controls = `
+      <div class="mines-cashout-row">
+        <button class="btn mines-cashout-btn ${cashoutDisabled ? 'disabled' : ''}" id="mines-cashout" ${cashoutDisabled ? 'disabled' : ''}>
+          <div class="mc-cashout-label">CASH OUT</div>
+          <div class="mc-cashout-amt">${fmt(active.potential_payout || 0)} 🪙</div>
+        </button>
+      </div>
+      <div class="mines-next-hint">
+        Следующий пик: <b class="gold">${_minesFmtMult(active.next_multiplier || 0)}</b>
+        <span style="opacity:0.5">·</span>
+        <b>${fmt(active.next_payout || 0)} 🪙</b>
+      </div>
+    `;
+  } else {
+    // Bomb selector chips
+    const bombChips = MINES_DEFAULT_BOMBS.map(b => {
+      const sel = (b === minesState.bombs) ? 'selected' : '';
+      return `<button class="mc-chip ${sel}" data-bombs="${b}">${b}</button>`;
+    }).join('');
+    const betChips = MINES_BET_PRESETS.map(v => {
+      const sel = (v === minesState.bet) ? 'selected' : '';
+      return `<button class="mc-chip mc-chip-bet ${sel}" data-bet="${v}">${fmt(v)}</button>`;
+    }).join('');
+    controls = `
+      <div class="mines-setup">
+        <div class="mc-row">
+          <div class="mc-row-label">СТАВКА</div>
+          <input type="text" inputmode="numeric" pattern="[0-9]*" id="mc-bet-input" value="${minesState.bet}" autocomplete="off" />
+        </div>
+        <div class="mc-chips" id="mc-bet-chips">${betChips}</div>
+        <div class="mc-row">
+          <div class="mc-row-label">КОЛИЧЕСТВО БОМБ</div>
+          <div class="mc-bombs-current">${minesState.bombs}</div>
+        </div>
+        <div class="mc-chips" id="mc-bomb-chips">${bombChips}</div>
+        <button class="btn big-btn mines-start-btn" id="mines-start">
+          <span class="mc-start-icon">${_minesDefuseSvg()}</span>
+          <span>ИГРАТЬ · ${fmt(minesState.bet)} 🪙</span>
+        </button>
+        <div class="mines-rtp-note">RTP ${(((minesState.config && minesState.config.rtp) || 0.96) * 100).toFixed(0)}% · 5×5 · максимум <b>${_minesFmtMult((minesState.config && minesState.config.max_mult && minesState.config.max_mult[minesState.bombs]) || 1)}</b></div>
+      </div>
+    `;
+  }
+
+  area.innerHTML = `
+    <div class="mines-play">
+      <div class="mines-title">
+        <span class="mc-title-bracket">[</span> DEFUSE <span class="mc-title-bracket">]</span>
+        <span class="mc-title-sub">RIP × Mines</span>
+      </div>
+      <div class="mines-header">${headerLeft}</div>
+      <div class="mines-grid" id="mines-grid">${cells}</div>
+      ${controls}
+      <div id="mines-out" class="mines-out" style="display:none"></div>
+    </div>
+  `;
+
+  // wire grid clicks
+  if (active) {
+    area.querySelectorAll('.mc-cell').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const i = parseInt(btn.dataset.cell);
+        if (!isNaN(i)) _minesReveal(i);
+      });
+    });
+    document.getElementById('mines-cashout')?.addEventListener('click', _minesCashout);
+  } else {
+    document.getElementById('mines-start')?.addEventListener('click', _minesStart);
+    document.getElementById('mc-bet-input')?.addEventListener('input', (e) => {
+      const v = parseInt(e.target.value.replace(/\D/g, ''));
+      if (!isNaN(v) && v >= 0) {
+        minesState.bet = v;
+        _minesUpdateStartBtn();
+        _minesUpdateBetChips();
+      }
+    });
+    area.querySelectorAll('#mc-bet-chips [data-bet]').forEach(b => {
+      b.addEventListener('click', () => {
+        minesState.bet = parseInt(b.dataset.bet);
+        document.getElementById('mc-bet-input').value = minesState.bet;
+        _minesUpdateStartBtn();
+        _minesUpdateBetChips();
+      });
+    });
+    area.querySelectorAll('#mc-bomb-chips [data-bombs]').forEach(b => {
+      b.addEventListener('click', () => {
+        minesState.bombs = parseInt(b.dataset.bombs);
+        _minesPaint();
+      });
+    });
+  }
+}
+
+function _minesUpdateBetChips() {
+  document.querySelectorAll('#mc-bet-chips [data-bet]').forEach(b => {
+    b.classList.toggle('selected', parseInt(b.dataset.bet) === minesState.bet);
+  });
+}
+
+function _minesUpdateStartBtn() {
+  const btn = document.getElementById('mines-start');
+  if (btn) btn.querySelector('span:last-child').textContent = `ИГРАТЬ · ${fmt(minesState.bet)} 🪙`;
+}
+
+async function _minesStart() {
+  if (minesState.busy) return;
+  if (!state.me || state.me.balance < minesState.bet) return toast('Не хватает монет');
+  if (minesState.bet < 10) return toast('Минимальная ставка 10 🪙');
+  minesState.busy = true;
+  try {
+    const r = await api('/api/casino/mines/start', {
+      method: 'POST',
+      body: JSON.stringify({ bet: minesState.bet, bombs: minesState.bombs }),
+    });
+    if (!r.ok) {
+      toast(r.error || 'Не удалось запустить');
+      return;
+    }
+    state.me.balance = r.new_balance;
+    document.getElementById('balance-display').textContent = fmt(state.me.balance);
+    minesState.active = r.state;
+    tg?.HapticFeedback?.impactOccurred?.('light');
+    _minesPaint();
+  } catch (e) {
+    toast(`Ошибка: ${e.message}`);
+  } finally {
+    minesState.busy = false;
+  }
+}
+
+async function _minesReveal(cell) {
+  if (minesState.busy || !minesState.active) return;
+  if ((minesState.active.revealed || []).includes(cell)) return;
+  minesState.busy = true;
+  // Optimistic visual flip — server is authoritative, so we just lock the cell briefly.
+  const cellEl = document.querySelector(`.mc-cell[data-cell="${cell}"]`);
+  if (cellEl) cellEl.classList.add('revealing');
+  try {
+    const r = await api('/api/casino/mines/reveal', {
+      method: 'POST',
+      body: JSON.stringify({ cell }),
+    });
+    if (!r.ok) {
+      toast(r.error || 'Ошибка');
+      cellEl?.classList.remove('revealing');
+      return;
+    }
+    if (r.safe) {
+      tg?.HapticFeedback?.impactOccurred?.('medium');
+      // Update active state in place — render new diamond, multiplier, cashout
+      if (r.game_over) {
+        // perfect run → instant payout
+        await _minesShowResult({
+          win: true,
+          perfect: true,
+          payout: r.payout,
+          delta: r.delta,
+          multiplier: r.multiplier,
+          bombs: r.bombs_revealed,
+          safe: r.safe_revealed,
+          bombsCount: r.bombs_count,
+          new_balance: r.new_balance,
+        });
+        return;
+      }
+      // mid-game safe — animate this cell as diamond, update header
+      _minesAnimateReveal(cellEl, true);
+      minesState.active.revealed = [...(minesState.active.revealed || []), cell];
+      minesState.active.revealed_count = (minesState.active.revealed_count || 0) + 1;
+      minesState.active.multiplier = r.multiplier;
+      minesState.active.next_multiplier = r.next_multiplier;
+      minesState.active.potential_payout = r.potential_payout;
+      minesState.active.next_payout = r.next_payout;
+      _minesUpdateHeaderAndCashout();
+    } else {
+      // BOMB → game over
+      tg?.HapticFeedback?.notificationOccurred?.('error');
+      _minesAnimateReveal(cellEl, false);
+      await new Promise(res => setTimeout(res, 250));
+      // Reveal all cells: bombs as bomb, others as diamonds (greyed)
+      _minesRevealAllAfterLoss(r.bombs_revealed || [], r.safe_revealed || []);
+      await new Promise(res => setTimeout(res, 700));
+      await _minesShowResult({
+        win: false,
+        payout: 0,
+        delta: -minesState.active.bet,
+        multiplier: 0,
+        bombs: r.bombs_revealed,
+        safe: r.safe_revealed,
+        bombsCount: r.bombs_count,
+        new_balance: r.new_balance,
+      });
+    }
+  } catch (e) {
+    toast(`Ошибка: ${e.message}`);
+    cellEl?.classList.remove('revealing');
+  } finally {
+    minesState.busy = false;
+  }
+}
+
+function _minesAnimateReveal(cellEl, isSafe) {
+  if (!cellEl) return;
+  cellEl.classList.remove('revealing');
+  cellEl.classList.add('revealed', isSafe ? 'safe' : 'bomb', 'flip');
+  cellEl.innerHTML = `<div class="mc-icon ${isSafe ? 'mc-diamond' : 'mc-bomb'}">${isSafe ? _minesDiamondSvg() : _minesBombSvg()}</div>`;
+}
+
+function _minesRevealAllAfterLoss(bombs, safeOpened) {
+  document.querySelectorAll('.mc-cell').forEach(btn => {
+    const i = parseInt(btn.dataset.cell);
+    if (btn.classList.contains('revealed')) return;
+    btn.disabled = true;
+    if (bombs.includes(i)) {
+      btn.classList.add('revealed', 'bomb', 'dim');
+      btn.innerHTML = `<div class="mc-icon mc-bomb">${_minesBombSvg()}</div>`;
+    } else {
+      btn.classList.add('revealed', 'safe', 'dim');
+      btn.innerHTML = `<div class="mc-icon mc-diamond">${_minesDiamondSvg()}</div>`;
+    }
+  });
+}
+
+function _minesUpdateHeaderAndCashout() {
+  const a = minesState.active;
+  if (!a) return;
+  const header = document.querySelector('.mines-header');
+  if (header) {
+    header.innerHTML = `
+      <div class="mines-stat"><span class="lbl">СТАВКА</span><span class="val">${fmt(a.bet)} 🪙</span></div>
+      <div class="mines-stat"><span class="lbl">БОМБ</span><span class="val danger">${a.bombs}</span></div>
+      <div class="mines-stat"><span class="lbl">МНОЖИТЕЛЬ</span><span class="val gold">${_minesFmtMult(a.multiplier)}</span></div>`;
+  }
+  const co = document.getElementById('mines-cashout');
+  if (co) {
+    const amtEl = co.querySelector('.mc-cashout-amt');
+    if (amtEl) amtEl.textContent = `${fmt(a.potential_payout || 0)} 🪙`;
+    co.classList.remove('disabled');
+    co.disabled = false;
+  }
+  const hint = document.querySelector('.mines-next-hint');
+  if (hint) {
+    hint.innerHTML = `Следующий пик: <b class="gold">${_minesFmtMult(a.next_multiplier || 0)}</b>
+      <span style="opacity:0.5">·</span>
+      <b>${fmt(a.next_payout || 0)} 🪙</b>`;
+  }
+}
+
+async function _minesCashout() {
+  if (minesState.busy || !minesState.active) return;
+  minesState.busy = true;
+  try {
+    const r = await api('/api/casino/mines/cashout', { method: 'POST' });
+    if (!r.ok) { toast(r.error || 'Ошибка'); return; }
+    tg?.HapticFeedback?.notificationOccurred?.('success');
+    // Reveal remaining cells visually (so player sees the would-have-been bombs)
+    _minesRevealAllAfterLoss(r.bombs_revealed || [], r.safe_revealed || []);
+    await new Promise(res => setTimeout(res, 600));
+    await _minesShowResult({
+      win: true,
+      perfect: false,
+      payout: r.payout,
+      delta: r.delta,
+      multiplier: r.multiplier,
+      bombs: r.bombs_revealed,
+      safe: r.safe_revealed,
+      bombsCount: r.bombs_count,
+      new_balance: r.new_balance,
+    });
+  } catch (e) {
+    toast(`Ошибка: ${e.message}`);
+  } finally {
+    minesState.busy = false;
+  }
+}
+
+async function _minesShowResult(res) {
+  if (typeof res.new_balance === 'number') {
+    state.me.balance = res.new_balance;
+    document.getElementById('balance-display').textContent = fmt(state.me.balance);
+  }
+  const out = document.getElementById('mines-out');
+  if (out) {
+    const cls = res.win ? (res.perfect ? 'mines-out-perfect' : 'mines-out-win') : 'mines-out-lose';
+    const title = res.win ? (res.perfect ? '🏆 ИДЕАЛЬНАЯ ПАРТИЯ' : '✅ CASHED OUT') : '💥 BOMB DEFUSED FAIL';
+    const sub = res.win
+      ? `${_minesFmtMult(res.multiplier)} · +${fmt(res.delta)} 🪙`
+      : `−${fmt(Math.abs(res.delta))} 🪙`;
+    out.className = `mines-out ${cls}`;
+    out.style.display = 'block';
+    out.innerHTML = `
+      <div class="mc-out-title">${title}</div>
+      <div class="mc-out-sub">${sub}</div>
+      <button class="btn big-btn daily-btn" id="mines-replay">Сыграть ещё</button>
+    `;
+    document.getElementById('mines-replay')?.addEventListener('click', () => {
+      minesState.active = null;
+      _minesPaint();
+    });
+  }
+}
+
+// ---- Inline SVGs (CS-themed, no emojis on the grid) ----
+function _minesDiamondSvg() {
+  return `<svg viewBox="0 0 32 32" width="100%" height="100%" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6">
+    <linearGradient id="mcDiaGr" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#9be7ff" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#3a86ff" stop-opacity="1"/>
+    </linearGradient>
+    <polygon points="16,4 28,12 16,28 4,12" fill="url(#mcDiaGr)" stroke="#cfe9ff"/>
+    <line x1="4"  y1="12" x2="28" y2="12" stroke="#0a0c14" stroke-opacity="0.45"/>
+    <line x1="10" y1="12" x2="16" y2="28" stroke="#0a0c14" stroke-opacity="0.45"/>
+    <line x1="22" y1="12" x2="16" y2="28" stroke="#0a0c14" stroke-opacity="0.45"/>
+    <line x1="4"  y1="12" x2="10" y2="4"  stroke="#0a0c14" stroke-opacity="0.25"/>
+    <line x1="28" y1="12" x2="22" y2="4"  stroke="#0a0c14" stroke-opacity="0.25"/>
+  </svg>`;
+}
+
+function _minesBombSvg() {
+  // C4-inspired: dark block with red wires + LED
+  return `<svg viewBox="0 0 32 32" width="100%" height="100%" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="6" y="10" width="20" height="16" rx="2" fill="#1a1a1d" stroke="#3a2422"/>
+    <rect x="9" y="13" width="14" height="6" rx="1" fill="#2a1a1a" stroke="#5b2a2a"/>
+    <circle cx="22" cy="22" r="1.6" fill="#ff4040" stroke="#ff8888"/>
+    <line x1="11" y1="10" x2="11" y2="6" stroke="#ff4040" stroke-width="1.8"/>
+    <line x1="16" y1="10" x2="16" y2="4" stroke="#ffd84a" stroke-width="1.8"/>
+    <line x1="21" y1="10" x2="21" y2="6" stroke="#3a86ff" stroke-width="1.8"/>
+    <circle cx="11" cy="6" r="1.2" fill="#ff4040"/>
+    <circle cx="16" cy="4" r="1.2" fill="#ffd84a"/>
+    <circle cx="21" cy="6" r="1.2" fill="#3a86ff"/>
+  </svg>`;
+}
+
+function _minesDefuseSvg() {
+  return `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 4l-2 6h4l-6 10 2-7H8z"/>
+  </svg>`;
 }
 
 // ======================= FORGE =======================

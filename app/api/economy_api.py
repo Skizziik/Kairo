@@ -683,3 +683,42 @@ class BossSelectReq(BaseModel):
 @router.post("/forge/boss/select")
 async def api_boss_select(req: BossSelectReq, user: dict = Depends(require_user)) -> dict:
     return await _boss.select_tier(int(user["id"]), req.tier)
+
+
+# ================ MINES (CS-themed Сапёр) ================
+from app.economy import mines as _mines
+
+
+class MinesStartReq(BaseModel):
+    bet: int = Field(..., ge=1)
+    bombs: int = Field(..., ge=1, le=24)
+
+
+class MinesRevealReq(BaseModel):
+    cell: int = Field(..., ge=0, le=24)
+
+
+@router.get("/casino/mines/config")
+async def api_mines_config(user: dict = Depends(require_user)) -> dict:
+    _ = user
+    return await _mines.get_config()
+
+
+@router.get("/casino/mines/state")
+async def api_mines_state(user: dict = Depends(require_user)) -> dict:
+    return await _mines.get_state(int(user["id"]))
+
+
+@router.post("/casino/mines/start")
+async def api_mines_start(req: MinesStartReq, user: dict = Depends(require_user)) -> dict:
+    return await _mines.start_game(int(user["id"]), req.bet, req.bombs)
+
+
+@router.post("/casino/mines/reveal")
+async def api_mines_reveal(req: MinesRevealReq, user: dict = Depends(require_user)) -> dict:
+    return await _mines.reveal(int(user["id"]), req.cell)
+
+
+@router.post("/casino/mines/cashout")
+async def api_mines_cashout(user: dict = Depends(require_user)) -> dict:
+    return await _mines.cashout(int(user["id"]))

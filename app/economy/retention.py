@@ -30,6 +30,9 @@ XP_REWARDS = {
     "mission_complete": 150,
     "achievement": 200,
     "wheel_spin": 30,
+    "mines_win": 8,
+    "mines_cashout": 12,
+    "mines_loss": 1,
 }
 
 
