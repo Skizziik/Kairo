@@ -33,6 +33,7 @@ XP_REWARDS = {
     "mines_win": 8,
     "mines_cashout": 12,
     "mines_loss": 1,
+    "plinko_drop": 4,
 }
 
 

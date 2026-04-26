@@ -722,3 +722,23 @@ async def api_mines_reveal(req: MinesRevealReq, user: dict = Depends(require_use
 @router.post("/casino/mines/cashout")
 async def api_mines_cashout(user: dict = Depends(require_user)) -> dict:
     return await _mines.cashout(int(user["id"]))
+
+
+# ================ PLINKO (drop-the-grenade) ================
+from app.economy import plinko as _plinko
+
+
+class PlinkoPlayReq(BaseModel):
+    bet: int = Field(..., ge=1)
+    mode: str = "classic"  # casual | classic | savage
+
+
+@router.get("/casino/plinko/config")
+async def api_plinko_config(user: dict = Depends(require_user)) -> dict:
+    _ = user
+    return await _plinko.get_config()
+
+
+@router.post("/casino/plinko/play")
+async def api_plinko_play(req: PlinkoPlayReq, user: dict = Depends(require_user)) -> dict:
+    return await _plinko.play_drop(int(user["id"]), req.bet, req.mode)

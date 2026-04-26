@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>RIP Casino</title>
-  <link rel="stylesheet" href="./styles.css?v=20260426f" />
+  <link rel="stylesheet" href="./styles.css?v=20260426g" />
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
@@ -180,6 +180,24 @@
             <div class="game-name">Сапёр / Defuse</div>
             <div class="game-desc">5×5 грид, обходи C4 — каждый клик растит множитель. Кэшаут когда захочешь.</div>
           </div>
+          <div class="game-card" data-game="plinko">
+            <div class="game-icon plinko-card-icon">
+              <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="3.5" r="1.4" fill="#eb4b4b" stroke="#ff8a8a"/>
+                <circle cx="9"  cy="9"  r="0.9" fill="#f5b042"/>
+                <circle cx="15" cy="9"  r="0.9" fill="#f5b042"/>
+                <circle cx="6"  cy="13" r="0.9" fill="#f5b042"/>
+                <circle cx="12" cy="13" r="0.9" fill="#f5b042"/>
+                <circle cx="18" cy="13" r="0.9" fill="#f5b042"/>
+                <line x1="3" y1="20" x2="21" y2="20" stroke="#5aa9ff"/>
+                <line x1="6"  y1="17" x2="6"  y2="20" stroke="#5aa9ff"/>
+                <line x1="12" y1="17" x2="12" y2="20" stroke="#eb4b4b" stroke-width="2"/>
+                <line x1="18" y1="17" x2="18" y2="20" stroke="#5aa9ff"/>
+              </svg>
+            </div>
+            <div class="game-name">Plinko / Дроп</div>
+            <div class="game-desc">Кидай гранату — она прыгает по пегам и падает в множитель (до 1000×).</div>
+          </div>
           <div class="game-card" data-game="forge">
             <div class="game-icon">🔨</div>
             <div class="game-name">Кузница</div>
@@ -267,6 +285,6 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <script src="./app.js?v=20260426f"></script>
+  <script src="./app.js?v=20260426g"></script>
 </body>
 </html>

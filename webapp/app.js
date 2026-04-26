@@ -814,6 +814,8 @@ function renderGamePlay(game, target) {
     renderMegaslot(area);
   } else if (game === 'mines') {
     renderMines(area);
+  } else if (game === 'plinko') {
+    renderPlinko(area);
   } else if (game === 'forge') {
     renderForge(area);
   }
@@ -1235,6 +1237,444 @@ function _minesBombSvg() {
 function _minesDefuseSvg() {
   return `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
     <path d="M14 4l-2 6h4l-6 10 2-7H8z"/>
+  </svg>`;
+}
+
+// ======================= PLINKO (drop-the-grenade) =======================
+
+const plinkoState = {
+  area: null,
+  config: null,        // /config response
+  mode: 'classic',
+  bet: 100,
+  busy: false,
+  history: [],         // last ~12 multipliers, recent on right
+  rafId: null,
+};
+
+const PLINKO_BET_PRESETS = [50, 100, 200, 500, 1000];
+
+// Bucket color tier by multiplier value
+function _plinkoBucketTier(m) {
+  if (m >= 100)      return 'jackpot';   // gold/red
+  if (m >= 10)       return 'high';      // purple
+  if (m >= 4)        return 'mid';       // cyan
+  if (m >= 1.5)      return 'low';       // green
+  if (m >= 1.0)      return 'flat';      // amber (push)
+  return 'loss';                          // dark red
+}
+
+function _plinkoFmtMult(m) {
+  if (m >= 100)  return m.toFixed(0) + '×';
+  if (m >= 10)   return m.toFixed(1).replace(/\.0$/, '') + '×';
+  return m.toFixed(2).replace(/\.?0+$/, '') + '×';
+}
+
+async function renderPlinko(area) {
+  plinkoState.area = area;
+  if (plinkoState.rafId) { cancelAnimationFrame(plinkoState.rafId); plinkoState.rafId = null; }
+  area.innerHTML = `<div class="plinko-play"><div class="loader">Загрузка…</div></div>`;
+  try {
+    if (!plinkoState.config) {
+      plinkoState.config = await api('/api/casino/plinko/config');
+    }
+    _plinkoPaint();
+  } catch (e) {
+    area.innerHTML = `<div class="plinko-play"><div class="loader">Ошибка: ${escape(e.message)}</div></div>`;
+  }
+}
+
+function _plinkoPaint() {
+  const area = plinkoState.area;
+  const cfg  = plinkoState.config;
+  if (!area || !cfg) return;
+
+  const mode = cfg.modes[plinkoState.mode] || cfg.modes.classic;
+  const rows = mode.rows;
+  const pays = mode.pays;
+  const maxBet = mode.max_bet;
+
+  // Mode chips
+  const modeChips = ['casual','classic','savage'].map(k => {
+    const m = cfg.modes[k];
+    if (!m) return '';
+    const sel = k === plinkoState.mode ? 'selected' : '';
+    return `<button class="pl-mode-chip ${sel}" data-mode="${k}" style="--mc:${m.color}">
+      <div class="pl-mode-name">${m.label}</div>
+      <div class="pl-mode-meta">${m.rows} · до ${pays_max(m.pays)}×</div>
+    </button>`;
+  }).join('');
+
+  // Bet chips (clamped to mode's max)
+  const betChips = PLINKO_BET_PRESETS.filter(v => v <= maxBet).map(v => {
+    const sel = v === plinkoState.bet ? 'selected' : '';
+    return `<button class="pl-bet-chip ${sel}" data-bet="${v}">${fmt(v)}</button>`;
+  }).join('') + `<button class="pl-bet-chip" data-bet="${maxBet}">МАКС ${fmt(maxBet)}</button>`;
+
+  // SVG board (precomputed, ball injected dynamically)
+  const svgBoard = _plinkoBuildBoardSvg(rows, pays);
+
+  // History strip
+  const histHtml = plinkoState.history.length > 0
+    ? plinkoState.history.map(m => `<span class="pl-hist-chip pl-tier-${_plinkoBucketTier(m)}">${_plinkoFmtMult(m)}</span>`).join('')
+    : `<span class="pl-hist-empty">пусто</span>`;
+
+  area.innerHTML = `
+    <div class="plinko-play">
+      <div class="pl-title">
+        <span class="pl-title-bracket">[</span> PLINKO <span class="pl-title-bracket">]</span>
+        <span class="pl-title-sub">DROP × MULTIPLY</span>
+      </div>
+
+      <div class="pl-history">
+        <div class="pl-history-label">ПОСЛЕДНИЕ</div>
+        <div class="pl-history-strip">${histHtml}</div>
+      </div>
+
+      <div class="pl-modes">${modeChips}</div>
+
+      <div class="pl-board" id="pl-board">${svgBoard}</div>
+
+      <div class="pl-controls">
+        <div class="pl-bet-row">
+          <div class="pl-row-label">СТАВКА</div>
+          <input type="text" inputmode="numeric" pattern="[0-9]*" id="pl-bet-input" value="${plinkoState.bet}" autocomplete="off" />
+        </div>
+        <div class="pl-bet-chips" id="pl-bet-chips">${betChips}</div>
+        <button class="btn big-btn pl-drop-btn" id="pl-drop-btn">
+          <span class="pl-drop-icon">${_plinkoGrenadeSvg()}</span>
+          <span>DROP · ${fmt(plinkoState.bet)} 🪙</span>
+        </button>
+        <div class="pl-rtp-note">RTP <b>${(mode.rtp * 100).toFixed(0)}%</b> · ${mode.rows} рядов · макс ставка <b>${fmt(maxBet)}</b></div>
+      </div>
+
+      <div id="pl-out" class="pl-out" style="display:none"></div>
+    </div>
+  `;
+
+  // Wire events
+  area.querySelectorAll('.pl-mode-chip[data-mode]').forEach(b => {
+    b.addEventListener('click', () => {
+      if (plinkoState.busy) return;
+      plinkoState.mode = b.dataset.mode;
+      const newMax = cfg.modes[plinkoState.mode].max_bet;
+      if (plinkoState.bet > newMax) plinkoState.bet = newMax;
+      _plinkoPaint();
+    });
+  });
+  area.querySelectorAll('.pl-bet-chip[data-bet]').forEach(b => {
+    b.addEventListener('click', () => {
+      plinkoState.bet = parseInt(b.dataset.bet);
+      document.getElementById('pl-bet-input').value = plinkoState.bet;
+      _plinkoUpdateBetChips();
+      _plinkoUpdateDropBtn();
+    });
+  });
+  document.getElementById('pl-bet-input')?.addEventListener('input', e => {
+    let v = parseInt(e.target.value.replace(/\D/g, '')) || 0;
+    const max = cfg.modes[plinkoState.mode].max_bet;
+    if (v > max) v = max;
+    plinkoState.bet = v;
+    _plinkoUpdateBetChips();
+    _plinkoUpdateDropBtn();
+  });
+  document.getElementById('pl-drop-btn')?.addEventListener('click', _plinkoDrop);
+}
+
+function pays_max(arr) {
+  return Math.max.apply(null, arr).toFixed(0);
+}
+
+function _plinkoUpdateBetChips() {
+  document.querySelectorAll('.pl-bet-chip[data-bet]').forEach(b => {
+    b.classList.toggle('selected', parseInt(b.dataset.bet) === plinkoState.bet);
+  });
+}
+function _plinkoUpdateDropBtn() {
+  const btn = document.getElementById('pl-drop-btn');
+  if (btn) {
+    const span = btn.querySelector('span:last-child');
+    if (span) span.textContent = `DROP · ${fmt(plinkoState.bet)} 🪙`;
+  }
+}
+
+// ----- Geometry helpers -----
+const PL_VB_W      = 360;          // SVG viewBox width
+const PL_PEG_R     = 2.6;          // peg radius
+const PL_BALL_R    = 4.0;
+const PL_TOP_PAD   = 14;
+const PL_BUCKET_H  = 22;
+
+function _plinkoLayout(rows) {
+  // Bucket count = rows + 1; we use full viewBox width for buckets.
+  const buckets = rows + 1;
+  const bW = PL_VB_W / buckets;
+  // Row height: scale so the board has a nice aspect
+  const rowH = Math.max(14, 22 - 0.5 * (rows - 8)); // 8 rows: ~22, 16 rows: ~18
+  const totalH = PL_TOP_PAD + rows * rowH + PL_BUCKET_H + 8;
+  return { rows, buckets, bW, rowH, totalH };
+}
+
+// peg in row r, column c (c=0..r): canonical Galton-board lane formula.
+function _plinkoPegPos(r, c, lay) {
+  // peg lane = (rows - r)/2 + c (lanes count from 0); peg x = (lane + 0.5) * bW... but
+  // using the bucket-centered convention: bucket k center at (k + 0.5) * bW.
+  // Pegs interleave with buckets: row r col c is at lane = (rows - r)/2 + c, x = (lane + 0.5) * bW.
+  const lane = (lay.rows - r) / 2 + c;
+  return {
+    x: (lane + 0.5) * lay.bW,
+    y: PL_TOP_PAD + r * lay.rowH,
+  };
+}
+
+function _plinkoBucketCenter(k, lay) {
+  return {
+    x: (k + 0.5) * lay.bW,
+    y: PL_TOP_PAD + lay.rows * lay.rowH + PL_BUCKET_H / 2,
+  };
+}
+
+function _plinkoBuildBoardSvg(rows, pays) {
+  const lay = _plinkoLayout(rows);
+  let pegsHtml = '';
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c <= r; c++) {
+      const p = _plinkoPegPos(r, c, lay);
+      pegsHtml += `<circle class="pl-peg" cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="${PL_PEG_R}"/>`;
+    }
+  }
+
+  let bucketsHtml = '';
+  for (let k = 0; k <= rows; k++) {
+    const bx = k * lay.bW;
+    const by = PL_TOP_PAD + rows * lay.rowH;
+    const tier = _plinkoBucketTier(pays[k]);
+    bucketsHtml += `
+      <g class="pl-bucket pl-tier-${tier}" data-bucket="${k}" transform="translate(${bx.toFixed(2)},${by.toFixed(2)})">
+        <rect class="pl-bucket-rect" x="0.5" y="0" width="${(lay.bW - 1).toFixed(2)}" height="${PL_BUCKET_H}" rx="2.5"/>
+        <text class="pl-bucket-text" x="${(lay.bW / 2).toFixed(2)}" y="${(PL_BUCKET_H / 2 + 3).toFixed(2)}" text-anchor="middle">${_plinkoFmtMult(pays[k])}</text>
+      </g>
+    `;
+  }
+
+  // Drop slot indicator at the very top
+  const dropX = lay.bW * (lay.rows / 2 + 0.5);
+
+  return `
+    <svg class="pl-svg" viewBox="0 0 ${PL_VB_W} ${lay.totalH}" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <linearGradient id="pl-bg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#0a0c14"/>
+          <stop offset="100%" stop-color="#11141d"/>
+        </linearGradient>
+        <radialGradient id="pl-ball" cx="0.35" cy="0.35" r="0.65">
+          <stop offset="0%" stop-color="#fff5d8"/>
+          <stop offset="40%" stop-color="#f5b042"/>
+          <stop offset="100%" stop-color="#a85e08"/>
+        </radialGradient>
+        <filter id="pl-glow" x="-30%" y="-30%" width="160%" height="160%">
+          <feGaussianBlur stdDeviation="1.6"/>
+        </filter>
+      </defs>
+      <rect class="pl-bg-rect" x="0" y="0" width="${PL_VB_W}" height="${lay.totalH}" fill="url(#pl-bg)"/>
+      <line class="pl-drop-line" x1="${dropX}" y1="2" x2="${dropX}" y2="${PL_TOP_PAD - 2}"/>
+      ${pegsHtml}
+      ${bucketsHtml}
+    </svg>
+  `;
+}
+
+async function _plinkoDrop() {
+  if (plinkoState.busy) return;
+  if (plinkoState.bet < 10) return toast('Минимум 10 🪙');
+  if (!state.me || state.me.balance < plinkoState.bet) return toast('Не хватает монет');
+
+  plinkoState.busy = true;
+  const dropBtn = document.getElementById('pl-drop-btn');
+  if (dropBtn) { dropBtn.disabled = true; dropBtn.classList.add('locked'); }
+  const out = document.getElementById('pl-out');
+  if (out) out.style.display = 'none';
+
+  let resp;
+  try {
+    resp = await api('/api/casino/plinko/play', {
+      method: 'POST',
+      body: JSON.stringify({ bet: plinkoState.bet, mode: plinkoState.mode }),
+    });
+  } catch (e) {
+    toast(`Ошибка: ${e.message}`);
+    plinkoState.busy = false;
+    if (dropBtn) { dropBtn.disabled = false; dropBtn.classList.remove('locked'); }
+    return;
+  }
+  if (!resp.ok) {
+    toast(resp.error || 'Ошибка');
+    plinkoState.busy = false;
+    if (dropBtn) { dropBtn.disabled = false; dropBtn.classList.remove('locked'); }
+    return;
+  }
+
+  // Apply balance immediately (server-side already did)
+  state.me.balance = resp.new_balance;
+  document.getElementById('balance-display').textContent = fmt(state.me.balance);
+
+  tg?.HapticFeedback?.impactOccurred?.('light');
+  await _plinkoAnimateBall(resp.path, resp.bucket);
+
+  // Flash bucket + show result
+  const bucketEl = document.querySelector(`.pl-bucket[data-bucket="${resp.bucket}"]`);
+  if (bucketEl) bucketEl.classList.add('flash');
+
+  if (resp.win) {
+    tg?.HapticFeedback?.notificationOccurred?.(resp.multiplier >= 50 ? 'success' : 'warning');
+  } else {
+    tg?.HapticFeedback?.notificationOccurred?.('error');
+  }
+
+  // Push to history (recent on right)
+  plinkoState.history = [...plinkoState.history, resp.multiplier].slice(-12);
+
+  if (out) {
+    const tier = _plinkoBucketTier(resp.multiplier);
+    const cls = resp.win ? `pl-out-win pl-tier-${tier}` : `pl-out-lose`;
+    const dlt = resp.delta;
+    out.className = `pl-out ${cls}`;
+    out.style.display = 'block';
+    out.innerHTML = `
+      <div class="pl-out-mult">${_plinkoFmtMult(resp.multiplier)}</div>
+      <div class="pl-out-amt">${dlt >= 0 ? '+' : ''}${fmt(dlt)} 🪙</div>
+    `;
+  }
+
+  // Re-render the history strip without rebuilding the board (preserve flash)
+  const histEl = document.querySelector('.pl-history-strip');
+  if (histEl) {
+    histEl.innerHTML = plinkoState.history
+      .map(m => `<span class="pl-hist-chip pl-tier-${_plinkoBucketTier(m)}">${_plinkoFmtMult(m)}</span>`)
+      .join('');
+  }
+
+  // Re-enable drop after short cooldown
+  setTimeout(() => {
+    plinkoState.busy = false;
+    if (dropBtn) { dropBtn.disabled = false; dropBtn.classList.remove('locked'); }
+    bucketEl?.classList.remove('flash');
+    // Remove the ball
+    const svg = document.querySelector('.pl-svg');
+    svg?.querySelectorAll('.pl-ball, .pl-peg.hit').forEach(n => {
+      if (n.classList.contains('pl-ball')) n.remove();
+      else n.classList.remove('hit');
+    });
+  }, 1500);
+}
+
+function _plinkoAnimateBall(path, bucket) {
+  return new Promise(resolve => {
+    const cfg = plinkoState.config;
+    const mode = cfg.modes[plinkoState.mode];
+    const rows = mode.rows;
+    const lay  = _plinkoLayout(rows);
+    const svg  = document.querySelector('.pl-svg');
+    if (!svg) return resolve();
+
+    // Compute waypoints: pre-row 0 (drop), row 0..rows-1 (peg hits), then bucket
+    const waypoints = [];
+    waypoints.push({ x: lay.bW * (lay.rows / 2 + 0.5), y: 0 }); // start (above board)
+
+    let prevR = 0; // R-count so far (== peg col on next row)
+    for (let r = 0; r < rows; r++) {
+      const peg = _plinkoPegPos(r, prevR, lay);
+      waypoints.push({ x: peg.x, y: peg.y - PL_BALL_R - 1 }); // sit on top of peg
+      if (path[r] === 'R') prevR += 1;
+    }
+    const finalCenter = _plinkoBucketCenter(bucket, lay);
+    waypoints.push({ x: finalCenter.x, y: finalCenter.y });   // settle in bucket
+
+    // Create the ball element
+    let ball = svg.querySelector('.pl-ball');
+    if (!ball) {
+      ball = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      ball.setAttribute('class', 'pl-ball');
+      ball.setAttribute('r', PL_BALL_R);
+      ball.setAttribute('fill', 'url(#pl-ball)');
+      svg.appendChild(ball);
+    }
+    ball.setAttribute('cx', waypoints[0].x.toFixed(2));
+    ball.setAttribute('cy', waypoints[0].y.toFixed(2));
+
+    const segDur = Math.max(110, 180 - 6 * rows); // 8r → 132ms, 16r → 84ms (keeps total < 2s)
+    const totalDur = waypoints.length * segDur;
+
+    const start = performance.now();
+    let lastSegment = -1;
+
+    function frame(now) {
+      const elapsed = now - start;
+      if (elapsed >= totalDur) {
+        ball.setAttribute('cx', waypoints[waypoints.length - 1].x.toFixed(2));
+        ball.setAttribute('cy', waypoints[waypoints.length - 1].y.toFixed(2));
+        plinkoState.rafId = null;
+        resolve();
+        return;
+      }
+      // Segment index
+      const segIdx = Math.min(waypoints.length - 2, Math.floor(elapsed / segDur));
+      const t = (elapsed - segIdx * segDur) / segDur; // 0..1
+      const a = waypoints[segIdx];
+      const b = waypoints[segIdx + 1];
+      // Ease-in y for gravity feel; linear x with slight overshoot bounce
+      const yEase = t * t * (3 - 2 * t); // smoothstep, but with gravity bias use t^1.4
+      const yT = Math.pow(t, 1.35);
+      const xT = t;
+      let x = a.x + (b.x - a.x) * xT;
+      let y = a.y + (b.y - a.y) * yT;
+      // Add a tiny "hop" arc (peak above the line) — feels like a bounce
+      const arcAmt = Math.min(4.5, lay.rowH * 0.35);
+      y -= Math.sin(Math.PI * t) * arcAmt;
+      ball.setAttribute('cx', x.toFixed(2));
+      ball.setAttribute('cy', y.toFixed(2));
+
+      // When transitioning to a new segment — ping the corresponding peg
+      if (segIdx !== lastSegment) {
+        lastSegment = segIdx;
+        // segIdx maps: 0=start→row0peg, 1=row0peg→row1peg, ..., rows=row(rows-1)peg→bucket
+        // Light up the peg the ball just LANDED on (= waypoint[segIdx+1] if it's a peg-row)
+        if (segIdx >= 0 && segIdx < rows) {
+          // The arrival peg is for row r = segIdx (because waypoints[1] is row 0 peg, etc.)
+          const r = segIdx;
+          const colC = (function() {
+            // R-count up to (and not including) this row's bounce
+            let cnt = 0;
+            for (let i = 0; i < r; i++) if (path[i] === 'R') cnt += 1;
+            return cnt;
+          })();
+          const pegPos = _plinkoPegPos(r, colC, lay);
+          // find peg by position match (cheap, fewer than 200 pegs)
+          svg.querySelectorAll('.pl-peg').forEach(el => {
+            const cx = parseFloat(el.getAttribute('cx'));
+            const cy = parseFloat(el.getAttribute('cy'));
+            if (Math.abs(cx - pegPos.x) < 0.3 && Math.abs(cy - pegPos.y) < 0.3) {
+              el.classList.add('hit');
+              setTimeout(() => el.classList.remove('hit'), 220);
+            }
+          });
+          // Subtle haptic only on rows that aren't too rapid
+          if (rows <= 12) tg?.HapticFeedback?.impactOccurred?.('light');
+        }
+      }
+
+      plinkoState.rafId = requestAnimationFrame(frame);
+    }
+    plinkoState.rafId = requestAnimationFrame(frame);
+  });
+}
+
+function _plinkoGrenadeSvg() {
+  return `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <ellipse cx="12" cy="14" rx="6" ry="7" fill="rgba(245,176,66,0.25)"/>
+    <rect x="10" y="4" width="4" height="3" rx="0.5" fill="#3a4459" stroke="#5a6a85"/>
+    <line x1="12" y1="2" x2="14" y2="4" stroke="#aaa"/>
+    <circle cx="14" cy="2.5" r="1.2" fill="#888"/>
   </svg>`;
 }
 
