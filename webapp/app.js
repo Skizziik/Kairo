@@ -1498,7 +1498,8 @@ async function _plinkoDrop() {
   if (bet < 10) return toast('Минимум 10 🪙');
   if (!state.me || state.me.balance < bet) return toast('Не хватает монет');
 
-  // Optimistic local balance deduction so rapid drops can clear server lag without overdrawing
+  // Bet is deducted from the visible balance NOW. Payout (if any) is credited
+  // only when the ball physically lands in its bucket (see _plinkoBallLanded).
   state.me.balance -= bet;
   const balEl = document.getElementById('balance-display');
   if (balEl) balEl.textContent = fmt(state.me.balance);
@@ -1510,7 +1511,6 @@ async function _plinkoDrop() {
       body: JSON.stringify({ bet, mode }),
     });
   } catch (e) {
-    // Revert optimistic deduction
     state.me.balance += bet;
     if (balEl) balEl.textContent = fmt(state.me.balance);
     toast(`Ошибка: ${e.message}`);
@@ -1523,11 +1523,8 @@ async function _plinkoDrop() {
     return;
   }
 
-  // Sync to server-authoritative balance (handles edge case where local was wrong)
-  if (typeof resp.new_balance === 'number') {
-    state.me.balance = resp.new_balance;
-    if (balEl) balEl.textContent = fmt(state.me.balance);
-  }
+  // DO NOT sync new_balance here — that would credit the win before the ball lands.
+  // The payout is added to the visible balance in _plinkoBallLanded.
 
   tg?.HapticFeedback?.impactOccurred?.('light');
   _plinkoSpawnBall(resp);
@@ -1639,6 +1636,14 @@ function _plinkoSpawnBall(resp) {
 
 function _plinkoBallLanded(ball, resp) {
   plinkoState.activeBalls = Math.max(0, plinkoState.activeBalls - 1);
+
+  // Credit the payout NOW (bet was deducted on click; payout arrives on landing).
+  // resp.payout = bet * multiplier (0 on full loss). Visible balance += payout.
+  if (typeof resp.payout === 'number' && resp.payout > 0) {
+    state.me.balance += resp.payout;
+    const balEl = document.getElementById('balance-display');
+    if (balEl) balEl.textContent = fmt(state.me.balance);
+  }
 
   // Flash bucket
   const bucketEl = document.querySelector(`.pl-bucket[data-bucket="${resp.bucket}"]`);
