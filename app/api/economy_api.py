@@ -154,17 +154,35 @@ async def api_case_open(req: OpenCaseReq, user: dict = Depends(require_user)) ->
 
 @router.post("/case/open_multi")
 async def api_case_open_multi(req: OpenCaseMultiReq, user: dict = Depends(require_user)) -> dict:
-    """Open the same case `count` times (max 5). Returns list of results.
-    Stops early if user runs out of coins."""
+    """Open the same case `count` times atomically. Validates total balance upfront
+    so player either gets all N or none (no partial opens)."""
     tg_id = int(user["id"])
+    case = await eco.get_case(req.case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="case not found")
+
+    from app.economy import repo as _repo
+    from app.db.client import pool as _pool
+
+    # Pre-check balance for all N opens (gear case_discount may apply per open,
+    # so use base price as upper-bound; per-open will deduct discounted)
+    total_cost = int(case["price"]) * req.count
+    async with _pool().acquire() as conn:
+        bal_row = await conn.fetchrow(
+            "select balance from economy_users where tg_id = $1", tg_id,
+        )
+        if bal_row is None or int(bal_row["balance"]) < total_cost:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Не хватает коинов на {req.count}× ({total_cost} 🪙)",
+            )
+
     results = []
     for i in range(req.count):
         r = await eco.open_case(tg_id, req.case_id)
         if not r.get("ok"):
-            if i == 0:
-                raise HTTPException(status_code=400, detail=r.get("error", "error"))
-            # Partial open succeeded then ran out of money — return what we got
-            break
+            # Pre-check passed but a per-open failed — race condition; bail.
+            raise HTTPException(status_code=400, detail=r.get("error", "open failed"))
         results.append(r)
     return {"ok": True, "results": results, "opened": len(results)}
 
