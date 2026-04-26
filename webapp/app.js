@@ -525,6 +525,19 @@ async function openCaseMulti(caseId, count) {
   actionsEl.style.display = 'flex';
   if (netDelta > totalCost) tg?.HapticFeedback?.notificationOccurred?.('success');
   loadInventory();
+
+  // Wire "Открыть ещё" — runs the same multi-open flow again with the current case.
+  // .onclick re-assignment is intentional: previous handler (from earlier open) is replaced.
+  const againBtn = document.getElementById('case-open-again');
+  if (againBtn) {
+    againBtn.onclick = () => {
+      if (!state.me || state.me.balance < totalCost) {
+        toast(`Не хватает: нужно ${fmt(totalCost)} 🪙`);
+        return;
+      }
+      openCaseMulti(caseId, count);
+    };
+  }
 }
 
 const invFilter = { rarity: '', sort: 'price_desc' };
