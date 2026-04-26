@@ -1915,16 +1915,20 @@ function _paintBoss(area, st, branches) {
   const tapTarget = document.getElementById('boss-tap-target');
   tapTarget.addEventListener('click', (e) => _bossTap(area, tapTarget, e));
 
-  // Start regen countdown ticker (1Hz)
+  // Start regen countdown ticker (1Hz). Only re-render if user is STILL on boss screen.
   if (_bossState.timerInterval) clearInterval(_bossState.timerInterval);
   if (st.regen_seconds_left != null) {
     let secsLeft = st.regen_seconds_left;
     const timerEl = document.getElementById('boss-timer');
     _bossState.timerInterval = setInterval(() => {
       secsLeft -= 1;
+      // If boss screen no longer in DOM (user navigated away) — silently stop, no re-render
+      if (!document.getElementById('boss-root')) {
+        clearInterval(_bossState.timerInterval);
+        return;
+      }
       if (secsLeft <= 0) {
         clearInterval(_bossState.timerInterval);
-        // Boss regened — reload state to show full HP
         renderForgeBoss(_bossState.area);
         return;
       }
@@ -2042,7 +2046,7 @@ async function _flushBossBatch() {
       document.getElementById('balance-display').textContent = fmt(state.me.balance);
     }
 
-    // Reset regen timer (tap = re-engage)
+    // Reset regen timer (tap = re-engage). Stops silently if user leaves boss screen.
     if (r.regen_total_sec) {
       const timerEl = document.getElementById('boss-timer');
       const timerRow = document.getElementById('boss-timer-row');
@@ -2053,6 +2057,10 @@ async function _flushBossBatch() {
         if (_bossState.timerInterval) clearInterval(_bossState.timerInterval);
         _bossState.timerInterval = setInterval(() => {
           secsLeft -= 1;
+          if (!document.getElementById('boss-root')) {
+            clearInterval(_bossState.timerInterval);
+            return;
+          }
           if (secsLeft <= 0) {
             clearInterval(_bossState.timerInterval);
             renderForgeBoss(_bossState.area);
@@ -2073,9 +2081,11 @@ async function _flushBossBatch() {
       if (r.tier_unlocked) {
         toast(`🔓 Открыт новый тир: ${r.tier_unlocked}`, 4000);
       }
-      // If new tier unlocked or just want refresh, re-render
+      // If new tier unlocked, re-render — but only if user is still on boss screen
       if (r.tier_unlocked) {
-        setTimeout(() => renderForgeBoss(_bossState.area), 1500);
+        setTimeout(() => {
+          if (document.getElementById('boss-root')) renderForgeBoss(_bossState.area);
+        }, 1500);
       }
     }
   } catch (e) {
