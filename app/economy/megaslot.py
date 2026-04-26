@@ -359,10 +359,7 @@ async def spin(user_id: int, bet: int, bonus_buy: bool = False, bonus_type: str 
             s = _resolve_spin(bet, in_fs=True, persistent_mult=persistent_mult, rng=rng)
             persistent_mult = s["persistent_mult"]
             fs_total_base += s["final_win"]
-            # Retrigger on 3+ scatters within FS
-            if s["scatter_count"] >= FS_RETRIGGER_SCATTERS:
-                fs_spins_left += FS_RETRIGGER_ADD
-                s["retrigger"] = FS_RETRIGGER_ADD
+            # Retriggers disabled — always exactly the promised number of spins
             fs_spins.append(s)
 
         # Final FS win = raw total × (1 + accumulated mult) OR × mult only?
