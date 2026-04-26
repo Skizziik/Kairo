@@ -4079,7 +4079,15 @@ const MEGASLOT_GEM_CLASSES = {
 // Populated from /api/casino/megaslot/config
 const MEGASLOT_IMAGE = {};
 
-let _megaslotState = { busy: false, bet: 100, configLoaded: false };
+let _megaslotState = {
+  busy: false,
+  bet: 100,
+  configLoaded: false,
+  turbo: false,
+  autoCount: 0,        // remaining auto spins (0 = no auto active)
+  autoTotal: 0,        // total spins in current auto session (for X / Y display)
+  autoStopRequested: false,
+};
 
 async function renderMegaslot(area) {
   area.innerHTML = `
@@ -4107,6 +4115,18 @@ async function renderMegaslot(area) {
           <label>Ставка</label>
           <input type="text" inputmode="numeric" pattern="[0-9]*" id="ms-bet" value="100" autocomplete="off" />
           <div class="ms-bet-hint">макс. ставка 10 000</div>
+        </div>
+        <div class="ms-toggles-row">
+          <button class="ms-toggle-btn ${_megaslotState.turbo ? 'active' : ''}" id="ms-turbo" title="Быстрая прокрутка">
+            ⚡ ТУРБО
+          </button>
+          <button class="ms-toggle-btn" id="ms-auto" title="Авто-крутки подряд">
+            🔁 АВТО
+          </button>
+          <div class="ms-auto-counter" id="ms-auto-counter" style="display:none">
+            <span id="ms-auto-progress">0 / 0</span>
+            <button class="ms-auto-stop" id="ms-auto-stop">✕ STOP</button>
+          </div>
         </div>
         <button class="btn big-btn daily-btn" id="ms-spin">🎰 Крутить</button>
       </div>
@@ -4159,6 +4179,109 @@ async function renderMegaslot(area) {
   });
   document.getElementById('ms-spin').addEventListener('click', () => playMegaslot(false, null));
   document.getElementById('ms-buy').addEventListener('click', _openBonusBuyModal);
+  document.getElementById('ms-turbo').addEventListener('click', () => {
+    if (_megaslotState.busy) return;
+    _megaslotState.turbo = !_megaslotState.turbo;
+    const btn = document.getElementById('ms-turbo');
+    if (btn) btn.classList.toggle('active', _megaslotState.turbo);
+    tg?.HapticFeedback?.selectionChanged?.();
+  });
+  document.getElementById('ms-auto').addEventListener('click', _openAutoSpinModal);
+  document.getElementById('ms-auto-stop').addEventListener('click', () => {
+    _megaslotState.autoStopRequested = true;
+    toast('Остановим после текущей крутки');
+  });
+}
+
+function _openAutoSpinModal() {
+  if (_megaslotState.busy) return;
+  if (_megaslotState.autoCount > 0) {
+    // Already running — STOP button is active. Click the auto button = stop.
+    _megaslotState.autoStopRequested = true;
+    toast('Остановим после текущей крутки');
+    return;
+  }
+  const el = document.createElement('div');
+  el.className = 'ms-bonus-modal';
+  el.innerHTML = `
+    <div class="ms-bonus-backdrop"></div>
+    <div class="ms-bonus-card">
+      <div class="ms-bonus-title">🔁 Авто-крутки</div>
+      <div class="ms-auto-grid">
+        <button class="ms-auto-opt" data-n="10">10</button>
+        <button class="ms-auto-opt" data-n="25">25</button>
+        <button class="ms-auto-opt" data-n="50">50</button>
+        <button class="ms-auto-opt" data-n="100">100</button>
+        <button class="ms-auto-opt" data-n="250">250</button>
+        <button class="ms-auto-opt" data-n="9999">∞ (до баланса)</button>
+      </div>
+      <div class="ms-auto-hint">Будет крутиться по текущей ставке. Кнопкой STOP остановишь после текущей.</div>
+      <button class="ms-bonus-cancel">Отмена</button>
+    </div>
+  `;
+  document.body.appendChild(el);
+  const close = () => el.remove();
+  el.querySelector('.ms-bonus-backdrop').addEventListener('click', close);
+  el.querySelector('.ms-bonus-cancel').addEventListener('click', close);
+  el.querySelectorAll('.ms-auto-opt').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const n = parseInt(btn.dataset.n);
+      close();
+      _startAutoSpin(n);
+    });
+  });
+}
+
+async function _startAutoSpin(count) {
+  if (_megaslotState.autoCount > 0) return;
+  _megaslotState.autoCount = count;
+  _megaslotState.autoTotal = count;
+  _megaslotState.autoStopRequested = false;
+  _updateAutoSpinUi();
+
+  try {
+    while (_megaslotState.autoCount > 0 && !_megaslotState.autoStopRequested) {
+      // Bail out if balance dipped below bet (or game view changed)
+      if (!state.me || state.me.balance < _megaslotState.bet) {
+        toast('Не хватает на следующую крутку');
+        break;
+      }
+      if (!document.getElementById('ms-grid')) break; // user navigated away
+      _megaslotState.autoCount -= 1;
+      _updateAutoSpinUi();
+      await playMegaslot(false, null);
+      if (_megaslotState.autoCount > 0 && !_megaslotState.autoStopRequested) {
+        // brief pause between spins so the result is readable
+        await _sleep(_megaslotState.turbo ? 250 : 600);
+      }
+    }
+  } finally {
+    _megaslotState.autoCount = 0;
+    _megaslotState.autoTotal = 0;
+    _megaslotState.autoStopRequested = false;
+    _updateAutoSpinUi();
+  }
+}
+
+function _updateAutoSpinUi() {
+  const counter  = document.getElementById('ms-auto-counter');
+  const progress = document.getElementById('ms-auto-progress');
+  const autoBtn  = document.getElementById('ms-auto');
+  const spinBtn  = document.getElementById('ms-spin');
+  if (!counter || !autoBtn) return;
+  if (_megaslotState.autoCount > 0) {
+    counter.style.display = 'flex';
+    if (progress) {
+      const done = _megaslotState.autoTotal - _megaslotState.autoCount;
+      progress.textContent = `${done} / ${_megaslotState.autoTotal === 9999 ? '∞' : _megaslotState.autoTotal}`;
+    }
+    autoBtn.classList.add('active');
+    if (spinBtn) spinBtn.disabled = true;
+  } else {
+    counter.style.display = 'none';
+    autoBtn.classList.remove('active');
+    if (spinBtn) spinBtn.disabled = false;
+  }
 }
 
 function _openBonusBuyModal() {
@@ -4339,17 +4462,37 @@ async function _spinAnimation(finalGrid, baseDuration = 900, colDelay = 160) {
 }
 
 async function _animateSpin(spinData, spinMs = 900, colDelay = 160) {
-  const tumbles = spinData.tumbles || [];
-  const finalGrid = tumbles.length > 0 ? tumbles[0].grid : spinData.final_grid;
-  if (!finalGrid) return;
+  if (!spinData) return;
+  const turbo = !!_megaslotState.turbo;
+  // In turbo mode, slash all timings ~3×
+  if (turbo) { spinMs = Math.max(280, Math.round(spinMs * 0.35)); colDelay = Math.max(35, Math.round(colDelay * 0.35)); }
 
+  const tumbles = spinData.tumbles || [];
+  // Use the actual server-provided final_grid if available; fall back to first
+  // tumble's grid only if final_grid isn't there (legacy/edge cases).
+  let finalGrid = spinData.final_grid || (tumbles.length > 0 ? tumbles[0].grid : null);
+  // Last-resort: render a random preview so we never silently skip animation
+  if (!finalGrid) finalGrid = _randomGrid();
+
+  // Always run the spin reel animation (even on pure loss — no symbol matches)
   await _spinAnimation(finalGrid, spinMs, colDelay);
 
-  // If no tumbles at all (pure loss), we're done — just display the stopped grid
+  // No tumbles at all → result was determined on first roll without wins.
+  // Stopped grid is already rendered by _spinAnimation; small "no win" pulse for feedback.
   if (tumbles.length === 0) {
     _renderMegaslotGrid(finalGrid);
+    const gridEl = document.getElementById('ms-grid');
+    if (gridEl) {
+      gridEl.classList.add('no-win-flash');
+      setTimeout(() => gridEl.classList.remove('no-win-flash'), 400);
+    }
     return;
   }
+
+  const tumbleWait1 = turbo ? 180 : 500;
+  const tumbleWait2 = turbo ? 110 : 280;
+  const tumbleWait3 = turbo ? 120 : 300;
+  const orbOnlyWait = turbo ? 220 : 600;
 
   for (let i = 0; i < tumbles.length; i++) {
     const t = tumbles[i];
@@ -4357,19 +4500,19 @@ async function _animateSpin(spinData, spinMs = 900, colDelay = 160) {
     _renderMegaslotGrid(t.grid, { orbs: t.orbs, winningSymbols: winSyms });
 
     if (t.wins && t.wins.length > 0) {
-      await _sleep(500);
+      await _sleep(tumbleWait1);
       document.querySelectorAll('.ms-cell.winning').forEach(el => el.classList.add('exploding'));
-      await _sleep(280);
+      await _sleep(tumbleWait2);
       if (t.post_grid) {
         _renderMegaslotGrid(t.post_grid);
         const gridEl = document.getElementById('ms-grid');
         if (gridEl) {
           gridEl.querySelectorAll('.ms-cell').forEach(el => el.classList.add('tumble-in'));
         }
-        await _sleep(300);
+        await _sleep(tumbleWait3);
       }
     } else if (t.orbs && t.orbs.length > 0) {
-      await _sleep(600);
+      await _sleep(orbOnlyWait);
     }
   }
 }
@@ -4430,7 +4573,7 @@ async function playMegaslot(bonusBuy, bonusType) {
       if (r.base_spin.final_win > 0) {
         out.textContent = `+${fmt(r.base_spin.final_win)} 🪙`;
         out.className = 'megaslot-out win';
-        await _sleep(600);
+        await _sleep(_megaslotState.turbo ? 220 : 600);
       }
     }
 
@@ -4476,7 +4619,7 @@ async function playMegaslot(bonusBuy, bonusType) {
     }
 
     // Final summary
-    await _sleep(800);
+    await _sleep(_megaslotState.turbo ? 280 : 800);
     const capped = r.capped ? ' (MAX WIN!)' : '';
     if (r.bonus_buy) {
       const tw = r.total_win || 0;
@@ -4495,7 +4638,9 @@ async function playMegaslot(bonusBuy, bonusType) {
     toast(e.message);
   } finally {
     _megaslotState.busy = false;
-    if (spinBtn) spinBtn.disabled = false;
+    // While auto-spin is running, keep the manual spin button disabled — the
+    // auto loop will trigger the next call. Only release it when auto is idle.
+    if (spinBtn) spinBtn.disabled = (_megaslotState.autoCount > 0);
     if (buyBtn) buyBtn.disabled = false;
   }
 }

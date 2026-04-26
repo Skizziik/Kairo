@@ -3230,6 +3230,108 @@ h2 {
   font-weight: 800;
 }
 
+/* Turbo + Auto-spin toggle row */
+.ms-toggles-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+.ms-toggle-btn {
+  flex: 1;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-dim);
+  font-family: "Courier New", monospace;
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 1.5px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.ms-toggle-btn:hover { color: #fff; border-color: var(--accent-gold); }
+.ms-toggle-btn.active {
+  background: linear-gradient(135deg, rgba(245,176,66,0.25), rgba(245,176,66,0.10));
+  border-color: var(--accent-gold);
+  color: var(--accent-gold);
+  box-shadow: 0 0 12px rgba(245,176,66,0.4), inset 0 0 0 1px rgba(245,176,66,0.4);
+}
+.ms-toggle-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.ms-auto-counter {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: linear-gradient(135deg, rgba(235,75,75,0.18), rgba(235,75,75,0.06));
+  border: 1px solid rgba(235,75,75,0.5);
+  border-radius: 8px;
+  font-family: "Courier New", monospace;
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #ff8a8a;
+  min-width: 130px;
+  justify-content: space-between;
+}
+.ms-auto-counter span { white-space: nowrap; }
+.ms-auto-stop {
+  background: linear-gradient(135deg, #eb4b4b, #8c1818);
+  color: #fff;
+  border: 1px solid #ff8585;
+  border-radius: 5px;
+  padding: 3px 8px;
+  font-family: "Courier New", monospace;
+  font-weight: 900;
+  font-size: 11px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  text-shadow: 0 1px 0 rgba(0,0,0,0.4);
+}
+.ms-auto-stop:hover { box-shadow: 0 0 8px rgba(235,75,75,0.6); }
+
+/* Auto-spin count picker (re-uses bonus modal) */
+.ms-auto-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 10px 0;
+}
+.ms-auto-opt {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 14px 8px;
+  font-family: "Courier New", monospace;
+  font-weight: 900;
+  font-size: 16px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.ms-auto-opt:hover {
+  border-color: var(--accent-gold);
+  color: var(--accent-gold);
+  box-shadow: 0 0 10px rgba(245,176,66,0.3);
+}
+.ms-auto-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: center;
+  margin-bottom: 10px;
+  letter-spacing: 0.5px;
+}
+
+/* No-win flash on the grid after a pure-loss spin */
+.megaslot-grid.no-win-flash {
+  animation: msNoWinFlash 0.4s ease-out;
+}
+@keyframes msNoWinFlash {
+  0%, 100% { box-shadow: none; }
+  40%      { box-shadow: 0 0 0 2px rgba(235,75,75,0.45) inset, 0 0 22px rgba(235,75,75,0.25); }
+}
+
 .megaslot-out {
   text-align: center;
   font-size: 16px;
