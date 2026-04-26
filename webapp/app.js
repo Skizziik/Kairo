@@ -2228,6 +2228,28 @@ function _cfRenderJoinFlow(area, lobby) {
   });
 }
 
+// ---------------- AVATARS (deterministic by tg_id) ----------------
+// Generates a colored circle with name initials. Bot uses a robot mask.
+// Pure-CSS background — no remote photos needed.
+function _avatarHtml(name, tgId, isBot, sizeClass) {
+  const sz = sizeClass || '';
+  if (isBot || tgId === 1) {
+    return `<div class="cf-ava cf-ava-bot ${sz}"><span class="cf-ava-bot-emoji">🤖</span></div>`;
+  }
+  const ch = (name && name.trim().length > 0) ? name.trim()[0].toUpperCase() : '?';
+  // Hash tg_id → palette index
+  const palette = [
+    '#eb4b4b', '#f5b042', '#58e070', '#5aa9ff',
+    '#b667ff', '#00e4ff', '#ff7b9c', '#ffd84a',
+    '#7dd3fc', '#a78bfa',
+  ];
+  const idx = Math.abs((Number(tgId) || 0) % palette.length);
+  const color = palette[idx];
+  return `<div class="cf-ava ${sz}" style="background:${color}"><span class="cf-ava-letter">${escape(ch)}</span></div>`;
+}
+
+function _isBotId(id) { return Number(id) === 1; }
+
 // ---------------- COINFLIP ANIMATION ----------------
 function _cfRenderAnimation(area, lobby, creatorWon, spectatorMode) {
   const myId = state.me ? state.me.tg_id : null;
@@ -2235,20 +2257,29 @@ function _cfRenderAnimation(area, lobby, creatorWon, spectatorMode) {
   const winnerName = creatorWon ? lobby.creator_name : lobby.opponent_name;
   const loserName  = creatorWon ? lobby.opponent_name : lobby.creator_name;
 
+  const creatorAva  = _avatarHtml(lobby.creator_name,  lobby.creator_id,  _isBotId(lobby.creator_id),  'lg');
+  const opponentAva = _avatarHtml(lobby.opponent_name, lobby.opponent_id, _isBotId(lobby.opponent_id), 'lg');
+  // Coin faces — front = creator, back = opponent. The settle animation lands
+  // on the side of whoever won, so the visible avatar IS the winner's.
+  const creatorCoinAva  = _avatarHtml(lobby.creator_name,  lobby.creator_id,  _isBotId(lobby.creator_id),  'coin');
+  const opponentCoinAva = _avatarHtml(lobby.opponent_name, lobby.opponent_id, _isBotId(lobby.opponent_id), 'coin');
+
   area.innerHTML = `
     <div class="cf-wrap cf-anim-wrap">
       <div class="cf-anim-vs">
         <div class="cf-anim-side ${creatorWon ? 'is-winner' : 'is-loser'}">
+          ${creatorAva}
           <div class="cf-anim-name">${escape(lobby.creator_name || '—')}</div>
           <div class="cf-anim-value">${fmt(lobby.creator_value)} 🪙</div>
         </div>
         <div class="cf-anim-mid">
           <div class="cf-coin" id="cf-coin">
-            <div class="cf-coin-face cf-coin-front">⚔️</div>
-            <div class="cf-coin-face cf-coin-back">🛡</div>
+            <div class="cf-coin-face cf-coin-front">${creatorCoinAva}</div>
+            <div class="cf-coin-face cf-coin-back">${opponentCoinAva}</div>
           </div>
         </div>
         <div class="cf-anim-side ${creatorWon ? 'is-loser' : 'is-winner'}">
+          ${opponentAva}
           <div class="cf-anim-name">${escape(lobby.opponent_name || '—')}</div>
           <div class="cf-anim-value">${fmt(lobby.opponent_value || 0)} 🪙</div>
         </div>
@@ -2257,7 +2288,6 @@ function _cfRenderAnimation(area, lobby, creatorWon, spectatorMode) {
     </div>
   `;
   const coin = document.getElementById('cf-coin');
-  // Pure-CSS spin first (suspense), then settle to the final face
   coin.classList.add('spinning');
   if (creatorWon) coin.classList.add('settle-front');
   else            coin.classList.add('settle-back');
