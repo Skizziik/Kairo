@@ -422,47 +422,20 @@ async function openCaseMulti(caseId, count) {
   const placeholders = pool.length > 0 ? pool : [{ image_url: '', name: '?', rarity: 'mil-spec' }];
   const REEL_COUNT = 60;
   const WINNER_INDEX = 53;
-  const CELL_W = 90; // matches CSS .mr-cell flex-basis
+  const CELL_W = 90;
 
-  // Build N reels with random placeholders right away (visible during API call — no blank pause)
-  const reels = [];
-  let reelsHtml = '';
-  for (let i = 0; i < count; i++) {
-    const cells = [];
-    for (let j = 0; j < REEL_COUNT; j++) {
-      const it = placeholders[Math.floor(Math.random() * placeholders.length)];
-      cells.push(`<div class="mr-cell rarity-${it.rarity}"><img src="${it.image_url || ''}" alt="" /></div>`);
-    }
-    reels.push(cells);
-    reelsHtml += `<div class="multi-reel" data-reel="${i}"><div class="multi-reel-track" id="mr-track-${i}">${cells.join('')}</div><div class="multi-reel-marker"></div></div>`;
-  }
-  resultEl.innerHTML = `<div class="multi-reels-stack">${reelsHtml}</div>`;
+  // Show a "preparing" loader while we fetch the actual winners. We BUILD reels
+  // only AFTER the server returns so the cell under the marker is always the real
+  // winner — no mid-spin swap, no visible flicker at the end.
+  resultEl.innerHTML = `<div class="multi-open-loader">Готовим барабаны…</div>`;
 
-  // Fire API call but DON'T await — start the spin immediately so there's no perceived pause.
-  // The winner cells get swapped in mid-spin (during the fast/blurred phase the player can't see details anyway).
   tg?.HapticFeedback?.impactOccurred?.('heavy');
-  const apiPromise = api('/api/case/open_multi', {
-    method: 'POST',
-    body: JSON.stringify({ case_id: caseId, count }),
-  });
-
-  // Trigger spin — IDENTICAL to single-open: 6s cubic-bezier(0.15, 0.45, 0.1, 1) with jitter
-  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-  const reelEls = document.querySelectorAll('.multi-reel');
-  reelEls.forEach((el) => {
-    const track = el.querySelector('.multi-reel-track');
-    if (!track) return;
-    track.style.transition = 'transform 6s cubic-bezier(0.15, 0.45, 0.1, 1)';
-    const reelW = el.getBoundingClientRect().width;
-    const offset = (WINNER_INDEX * CELL_W) - (reelW / 2) + (CELL_W / 2);
-    const jitter = (Math.random() - 0.5) * (CELL_W * 0.4);
-    track.style.transform = `translateX(-${offset + jitter}px)`;
-  });
-
-  // While the spin plays, await the API result and swap winner cells before the reel decelerates onto them.
   let resp;
   try {
-    resp = await apiPromise;
+    resp = await api('/api/case/open_multi', {
+      method: 'POST',
+      body: JSON.stringify({ case_id: caseId, count }),
+    });
   } catch (e) {
     toast(`Не открылся: ${e.message}`);
     showView('cases');
@@ -486,21 +459,41 @@ async function openCaseMulti(caseId, count) {
     'Factory New':'FN','Minimal Wear':'MW','Field-Tested':'FT','Well-Worn':'WW','Battle-Scarred':'BS'
   }[w] || w || '');
 
-  // Swap winners at index 53. Spin is in fast-scroll phase so the swap is invisible.
+  // Build all reels with REAL winners pre-placed at index 53. The cell under
+  // the marker at the end of the animation is guaranteed to be the actual win.
+  let reelsHtml = '';
   for (let i = 0; i < resp.results.length; i++) {
-    const r = resp.results[i];
-    const skin = r.skin || {};
-    const rarity = skin.rarity || 'mil-spec';
-    const img = skin.image_url || '';
-    const track = document.getElementById(`mr-track-${i}`);
-    if (!track) continue;
-    const cellEls = track.children;
-    if (cellEls[WINNER_INDEX]) {
-      cellEls[WINNER_INDEX].outerHTML = `<div class="mr-cell winner rarity-${rarity}"><img src="${img}" alt="" /></div>`;
+    const winSkin   = (resp.results[i] && resp.results[i].skin) || {};
+    const winRarity = winSkin.rarity || 'mil-spec';
+    const winImg    = winSkin.image_url || '';
+    const cells = [];
+    for (let j = 0; j < REEL_COUNT; j++) {
+      if (j === WINNER_INDEX) {
+        cells.push(`<div class="mr-cell winner rarity-${winRarity}"><img src="${winImg}" alt="" /></div>`);
+      } else {
+        const it = placeholders[Math.floor(Math.random() * placeholders.length)];
+        cells.push(`<div class="mr-cell rarity-${it.rarity}"><img src="${it.image_url || ''}" alt="" /></div>`);
+      }
     }
+    reelsHtml += `<div class="multi-reel" data-reel="${i}"><div class="multi-reel-track" id="mr-track-${i}">${cells.join('')}</div><div class="multi-reel-marker"></div></div>`;
   }
+  resultEl.innerHTML = `<div class="multi-reels-stack">${reelsHtml}</div>`;
 
-  // Wait for animation completion (started ~immediately after click)
+  // Trigger spin — same params as single-open: 6s cubic-bezier with jitter.
+  // Reels are pre-built with real winners so the final position is guaranteed correct.
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const reelEls = document.querySelectorAll('.multi-reel');
+  reelEls.forEach((el) => {
+    const track = el.querySelector('.multi-reel-track');
+    if (!track) return;
+    track.style.transition = 'transform 6s cubic-bezier(0.15, 0.45, 0.1, 1)';
+    const reelW = el.getBoundingClientRect().width;
+    const offset = (WINNER_INDEX * CELL_W) - (reelW / 2) + (CELL_W / 2);
+    const jitter = (Math.random() - 0.5) * (CELL_W * 0.4);
+    track.style.transform = `translateX(-${offset + jitter}px)`;
+  });
+
+  // Wait for animation completion
   await new Promise(r => setTimeout(r, 6100));
 
   // Show summary below
@@ -1247,21 +1240,24 @@ const plinkoState = {
   config: null,        // /config response
   mode: 'classic',
   bet: 100,
-  busy: false,
   history: [],         // last ~12 multipliers, recent on right
-  rafId: null,
+  activeBalls: 0,      // currently-flying balls (for visual cap)
+  lastClickAt: 0,      // anti-double-click rate limit
+  ballSeq: 0,          // monotonic ball id
 };
 
 const PLINKO_BET_PRESETS = [50, 100, 200, 500, 1000];
+const PLINKO_MIN_CLICK_GAP_MS = 90;     // 11 drops/sec max
+const PLINKO_MAX_ACTIVE_BALLS  = 25;    // safety cap to prevent rendering catastrophe
 
 // Bucket color tier by multiplier value
 function _plinkoBucketTier(m) {
-  if (m >= 100)      return 'jackpot';   // gold/red
-  if (m >= 10)       return 'high';      // purple
-  if (m >= 4)        return 'mid';       // cyan
-  if (m >= 1.5)      return 'low';       // green
-  if (m >= 1.0)      return 'flat';      // amber (push)
-  return 'loss';                          // dark red
+  if (m >= 100)      return 'jackpot';
+  if (m >= 10)       return 'high';
+  if (m >= 4)        return 'mid';
+  if (m >= 1.5)      return 'low';
+  if (m >= 1.0)      return 'flat';
+  return 'loss';
 }
 
 function _plinkoFmtMult(m) {
@@ -1272,7 +1268,6 @@ function _plinkoFmtMult(m) {
 
 async function renderPlinko(area) {
   plinkoState.area = area;
-  if (plinkoState.rafId) { cancelAnimationFrame(plinkoState.rafId); plinkoState.rafId = null; }
   area.innerHTML = `<div class="plinko-play"><div class="loader">Загрузка…</div></div>`;
   try {
     if (!plinkoState.config) {
@@ -1355,7 +1350,8 @@ function _plinkoPaint() {
   // Wire events
   area.querySelectorAll('.pl-mode-chip[data-mode]').forEach(b => {
     b.addEventListener('click', () => {
-      if (plinkoState.busy) return;
+      // Don't allow mode change while balls are in flight (would change board geometry)
+      if (plinkoState.activeBalls > 0) return toast('Сначала пусть упадут все шарики');
       plinkoState.mode = b.dataset.mode;
       const newMax = cfg.modes[plinkoState.mode].max_bet;
       if (plinkoState.bet > newMax) plinkoState.bet = newMax;
@@ -1484,69 +1480,196 @@ function _plinkoBuildBoardSvg(rows, pays) {
   `;
 }
 
+// Drop a ball. Multi-click safe: each call → independent API + ball animation.
+// Frontend pre-validates balance; server is final authority.
 async function _plinkoDrop() {
-  if (plinkoState.busy) return;
-  if (plinkoState.bet < 10) return toast('Минимум 10 🪙');
-  if (!state.me || state.me.balance < plinkoState.bet) return toast('Не хватает монет');
+  // Anti-double click rate-limit (allows ~11 drops/sec)
+  const now = Date.now();
+  if (now - plinkoState.lastClickAt < PLINKO_MIN_CLICK_GAP_MS) return;
+  plinkoState.lastClickAt = now;
 
-  plinkoState.busy = true;
-  const dropBtn = document.getElementById('pl-drop-btn');
-  if (dropBtn) { dropBtn.disabled = true; dropBtn.classList.add('locked'); }
-  const out = document.getElementById('pl-out');
-  if (out) out.style.display = 'none';
+  // Cap simultaneous balls (prevents DoS on slow phones)
+  if (plinkoState.activeBalls >= PLINKO_MAX_ACTIVE_BALLS) {
+    return toast('Слишком много шариков в воздухе');
+  }
+
+  const bet = plinkoState.bet;
+  const mode = plinkoState.mode;
+  if (bet < 10) return toast('Минимум 10 🪙');
+  if (!state.me || state.me.balance < bet) return toast('Не хватает монет');
+
+  // Optimistic local balance deduction so rapid drops can clear server lag without overdrawing
+  state.me.balance -= bet;
+  const balEl = document.getElementById('balance-display');
+  if (balEl) balEl.textContent = fmt(state.me.balance);
 
   let resp;
   try {
     resp = await api('/api/casino/plinko/play', {
       method: 'POST',
-      body: JSON.stringify({ bet: plinkoState.bet, mode: plinkoState.mode }),
+      body: JSON.stringify({ bet, mode }),
     });
   } catch (e) {
+    // Revert optimistic deduction
+    state.me.balance += bet;
+    if (balEl) balEl.textContent = fmt(state.me.balance);
     toast(`Ошибка: ${e.message}`);
-    plinkoState.busy = false;
-    if (dropBtn) { dropBtn.disabled = false; dropBtn.classList.remove('locked'); }
     return;
   }
-  if (!resp.ok) {
-    toast(resp.error || 'Ошибка');
-    plinkoState.busy = false;
-    if (dropBtn) { dropBtn.disabled = false; dropBtn.classList.remove('locked'); }
+  if (!resp || !resp.ok) {
+    state.me.balance += bet;
+    if (balEl) balEl.textContent = fmt(state.me.balance);
+    toast((resp && resp.error) || 'Ошибка');
     return;
   }
 
-  // Apply balance immediately (server-side already did)
-  state.me.balance = resp.new_balance;
-  document.getElementById('balance-display').textContent = fmt(state.me.balance);
+  // Sync to server-authoritative balance (handles edge case where local was wrong)
+  if (typeof resp.new_balance === 'number') {
+    state.me.balance = resp.new_balance;
+    if (balEl) balEl.textContent = fmt(state.me.balance);
+  }
 
   tg?.HapticFeedback?.impactOccurred?.('light');
-  await _plinkoAnimateBall(resp.path, resp.bucket);
+  _plinkoSpawnBall(resp);
+}
 
-  // Flash bucket + show result
+// Spawn an independent ball element + run its own rAF loop.
+// Multiple balls can fly simultaneously; each completes independently.
+function _plinkoSpawnBall(resp) {
+  const cfg = plinkoState.config;
+  const mode = cfg && cfg.modes && cfg.modes[plinkoState.mode];
+  if (!mode) return;
+  const rows = mode.rows;
+  const lay  = _plinkoLayout(rows);
+  const svg  = document.querySelector('.pl-svg');
+  if (!svg) return;
+
+  // Defensive: validate path length matches mode
+  const path = Array.isArray(resp.path) ? resp.path : [];
+  if (path.length !== rows) {
+    toast('Bad server response');
+    return;
+  }
+
+  const ballId = ++plinkoState.ballSeq;
+
+  // Build waypoints: drop point → pegs → bucket
+  const waypoints = [];
+  waypoints.push({ x: lay.bW * (lay.rows / 2 + 0.5), y: 0 });
+  let prevR = 0;
+  for (let r = 0; r < rows; r++) {
+    const peg = _plinkoPegPos(r, prevR, lay);
+    waypoints.push({ x: peg.x, y: peg.y - PL_BALL_R - 1 });
+    if (path[r] === 'R') prevR += 1;
+  }
+  const finalCenter = _plinkoBucketCenter(resp.bucket, lay);
+  waypoints.push({ x: finalCenter.x, y: finalCenter.y });
+
+  // Each ball is a unique <circle>, identified by data-ball-id
+  const ball = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  ball.setAttribute('class', 'pl-ball');
+  ball.setAttribute('r', PL_BALL_R);
+  ball.setAttribute('fill', 'url(#pl-ball)');
+  ball.setAttribute('data-ball-id', String(ballId));
+  ball.setAttribute('cx', waypoints[0].x.toFixed(2));
+  ball.setAttribute('cy', waypoints[0].y.toFixed(2));
+  svg.appendChild(ball);
+  plinkoState.activeBalls += 1;
+
+  // Slightly slower drop than before so visuals are clearly visible.
+  // 8 rows ~2.0s, 12 rows ~2.4s, 16 rows ~2.6s
+  const segDur = Math.max(150, 240 - 8 * rows);
+  const totalDur = waypoints.length * segDur;
+  const startedAt = performance.now();
+  let lastSegIdx = -1;
+
+  function frame(now) {
+    // Ball was removed externally (e.g. paint reset) — abort
+    if (!ball.parentNode) {
+      plinkoState.activeBalls = Math.max(0, plinkoState.activeBalls - 1);
+      return;
+    }
+    const elapsed = now - startedAt;
+
+    if (elapsed >= totalDur) {
+      // Land
+      ball.setAttribute('cx', waypoints[waypoints.length - 1].x.toFixed(2));
+      ball.setAttribute('cy', waypoints[waypoints.length - 1].y.toFixed(2));
+      _plinkoBallLanded(ball, resp);
+      return;
+    }
+
+    // Linear x interp + gravity-eased y + small bounce arc per segment
+    const segIdx = Math.min(waypoints.length - 2, Math.floor(elapsed / segDur));
+    const t = (elapsed - segIdx * segDur) / segDur;
+    const a = waypoints[segIdx];
+    const b = waypoints[segIdx + 1];
+    const yT = Math.pow(t, 1.35);
+    let x = a.x + (b.x - a.x) * t;
+    let y = a.y + (b.y - a.y) * yT;
+    y -= Math.sin(Math.PI * t) * Math.min(4.5, lay.rowH * 0.35);
+    ball.setAttribute('cx', x.toFixed(2));
+    ball.setAttribute('cy', y.toFixed(2));
+
+    // Light up the peg this ball just touched (segIdx 0..rows-1 corresponds to row peg hits)
+    if (segIdx !== lastSegIdx) {
+      lastSegIdx = segIdx;
+      if (segIdx >= 0 && segIdx < rows) {
+        let cnt = 0;
+        for (let i = 0; i < segIdx; i++) if (path[i] === 'R') cnt += 1;
+        const pegPos = _plinkoPegPos(segIdx, cnt, lay);
+        const pegEls = svg.querySelectorAll('.pl-peg');
+        for (let i = 0; i < pegEls.length; i++) {
+          const el = pegEls[i];
+          const cx = parseFloat(el.getAttribute('cx'));
+          const cy = parseFloat(el.getAttribute('cy'));
+          if (Math.abs(cx - pegPos.x) < 0.5 && Math.abs(cy - pegPos.y) < 0.5) {
+            el.classList.add('hit');
+            setTimeout(() => el.classList.remove('hit'), 200);
+            break;
+          }
+        }
+      }
+    }
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
+function _plinkoBallLanded(ball, resp) {
+  plinkoState.activeBalls = Math.max(0, plinkoState.activeBalls - 1);
+
+  // Flash bucket
   const bucketEl = document.querySelector(`.pl-bucket[data-bucket="${resp.bucket}"]`);
-  if (bucketEl) bucketEl.classList.add('flash');
+  if (bucketEl) {
+    bucketEl.classList.add('flash');
+    setTimeout(() => bucketEl.classList.remove('flash'), 1100);
+  }
 
+  // Haptic per landing
   if (resp.win) {
     tg?.HapticFeedback?.notificationOccurred?.(resp.multiplier >= 50 ? 'success' : 'warning');
   } else {
     tg?.HapticFeedback?.notificationOccurred?.('error');
   }
 
-  // Push to history (recent on right)
-  plinkoState.history = [...plinkoState.history, resp.multiplier].slice(-12);
-
-  if (out) {
+  // Floating ±delta popup at the landing point (SVG text)
+  const svg = ball.parentNode;
+  if (svg) {
     const tier = _plinkoBucketTier(resp.multiplier);
-    const cls = resp.win ? `pl-out-win pl-tier-${tier}` : `pl-out-lose`;
-    const dlt = resp.delta;
-    out.className = `pl-out ${cls}`;
-    out.style.display = 'block';
-    out.innerHTML = `
-      <div class="pl-out-mult">${_plinkoFmtMult(resp.multiplier)}</div>
-      <div class="pl-out-amt">${dlt >= 0 ? '+' : ''}${fmt(dlt)} 🪙</div>
-    `;
+    const popup = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    popup.setAttribute('class', `pl-popup pl-tier-${tier}`);
+    popup.setAttribute('x', ball.getAttribute('cx'));
+    popup.setAttribute('y', (parseFloat(ball.getAttribute('cy')) - 4).toFixed(2));
+    popup.setAttribute('text-anchor', 'middle');
+    popup.textContent = (resp.delta >= 0 ? '+' : '') + fmt(resp.delta);
+    svg.appendChild(popup);
+    setTimeout(() => popup.remove(), 1200);
   }
 
-  // Re-render the history strip without rebuilding the board (preserve flash)
+  // Update history (recent on right)
+  plinkoState.history = [...plinkoState.history, resp.multiplier].slice(-12);
   const histEl = document.querySelector('.pl-history-strip');
   if (histEl) {
     histEl.innerHTML = plinkoState.history
@@ -1554,119 +1677,24 @@ async function _plinkoDrop() {
       .join('');
   }
 
-  // Re-enable drop after short cooldown
-  setTimeout(() => {
-    plinkoState.busy = false;
-    if (dropBtn) { dropBtn.disabled = false; dropBtn.classList.remove('locked'); }
-    bucketEl?.classList.remove('flash');
-    // Remove the ball
-    const svg = document.querySelector('.pl-svg');
-    svg?.querySelectorAll('.pl-ball, .pl-peg.hit').forEach(n => {
-      if (n.classList.contains('pl-ball')) n.remove();
-      else n.classList.remove('hit');
-    });
-  }, 1500);
-}
+  // Big result panel — only show for jackpot/high tier so rapid-fire isn't spammy
+  const out = document.getElementById('pl-out');
+  if (out && resp.multiplier >= 4) {
+    const tier = _plinkoBucketTier(resp.multiplier);
+    const cls = resp.win ? `pl-out-win pl-tier-${tier}` : `pl-out-lose`;
+    out.className = `pl-out ${cls}`;
+    out.style.display = 'block';
+    out.innerHTML = `
+      <div class="pl-out-mult">${_plinkoFmtMult(resp.multiplier)}</div>
+      <div class="pl-out-amt">${resp.delta >= 0 ? '+' : ''}${fmt(resp.delta)} 🪙</div>
+    `;
+    // Auto-fade after 2.4s, but if a higher win comes in, the next call overwrites
+    clearTimeout(out._fadeT);
+    out._fadeT = setTimeout(() => { out.style.display = 'none'; }, 2400);
+  }
 
-function _plinkoAnimateBall(path, bucket) {
-  return new Promise(resolve => {
-    const cfg = plinkoState.config;
-    const mode = cfg.modes[plinkoState.mode];
-    const rows = mode.rows;
-    const lay  = _plinkoLayout(rows);
-    const svg  = document.querySelector('.pl-svg');
-    if (!svg) return resolve();
-
-    // Compute waypoints: pre-row 0 (drop), row 0..rows-1 (peg hits), then bucket
-    const waypoints = [];
-    waypoints.push({ x: lay.bW * (lay.rows / 2 + 0.5), y: 0 }); // start (above board)
-
-    let prevR = 0; // R-count so far (== peg col on next row)
-    for (let r = 0; r < rows; r++) {
-      const peg = _plinkoPegPos(r, prevR, lay);
-      waypoints.push({ x: peg.x, y: peg.y - PL_BALL_R - 1 }); // sit on top of peg
-      if (path[r] === 'R') prevR += 1;
-    }
-    const finalCenter = _plinkoBucketCenter(bucket, lay);
-    waypoints.push({ x: finalCenter.x, y: finalCenter.y });   // settle in bucket
-
-    // Create the ball element
-    let ball = svg.querySelector('.pl-ball');
-    if (!ball) {
-      ball = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      ball.setAttribute('class', 'pl-ball');
-      ball.setAttribute('r', PL_BALL_R);
-      ball.setAttribute('fill', 'url(#pl-ball)');
-      svg.appendChild(ball);
-    }
-    ball.setAttribute('cx', waypoints[0].x.toFixed(2));
-    ball.setAttribute('cy', waypoints[0].y.toFixed(2));
-
-    const segDur = Math.max(110, 180 - 6 * rows); // 8r → 132ms, 16r → 84ms (keeps total < 2s)
-    const totalDur = waypoints.length * segDur;
-
-    const start = performance.now();
-    let lastSegment = -1;
-
-    function frame(now) {
-      const elapsed = now - start;
-      if (elapsed >= totalDur) {
-        ball.setAttribute('cx', waypoints[waypoints.length - 1].x.toFixed(2));
-        ball.setAttribute('cy', waypoints[waypoints.length - 1].y.toFixed(2));
-        plinkoState.rafId = null;
-        resolve();
-        return;
-      }
-      // Segment index
-      const segIdx = Math.min(waypoints.length - 2, Math.floor(elapsed / segDur));
-      const t = (elapsed - segIdx * segDur) / segDur; // 0..1
-      const a = waypoints[segIdx];
-      const b = waypoints[segIdx + 1];
-      // Ease-in y for gravity feel; linear x with slight overshoot bounce
-      const yEase = t * t * (3 - 2 * t); // smoothstep, but with gravity bias use t^1.4
-      const yT = Math.pow(t, 1.35);
-      const xT = t;
-      let x = a.x + (b.x - a.x) * xT;
-      let y = a.y + (b.y - a.y) * yT;
-      // Add a tiny "hop" arc (peak above the line) — feels like a bounce
-      const arcAmt = Math.min(4.5, lay.rowH * 0.35);
-      y -= Math.sin(Math.PI * t) * arcAmt;
-      ball.setAttribute('cx', x.toFixed(2));
-      ball.setAttribute('cy', y.toFixed(2));
-
-      // When transitioning to a new segment — ping the corresponding peg
-      if (segIdx !== lastSegment) {
-        lastSegment = segIdx;
-        // segIdx maps: 0=start→row0peg, 1=row0peg→row1peg, ..., rows=row(rows-1)peg→bucket
-        // Light up the peg the ball just LANDED on (= waypoint[segIdx+1] if it's a peg-row)
-        if (segIdx >= 0 && segIdx < rows) {
-          // The arrival peg is for row r = segIdx (because waypoints[1] is row 0 peg, etc.)
-          const r = segIdx;
-          const colC = (function() {
-            // R-count up to (and not including) this row's bounce
-            let cnt = 0;
-            for (let i = 0; i < r; i++) if (path[i] === 'R') cnt += 1;
-            return cnt;
-          })();
-          const pegPos = _plinkoPegPos(r, colC, lay);
-          // find peg by position match (cheap, fewer than 200 pegs)
-          svg.querySelectorAll('.pl-peg').forEach(el => {
-            const cx = parseFloat(el.getAttribute('cx'));
-            const cy = parseFloat(el.getAttribute('cy'));
-            if (Math.abs(cx - pegPos.x) < 0.3 && Math.abs(cy - pegPos.y) < 0.3) {
-              el.classList.add('hit');
-              setTimeout(() => el.classList.remove('hit'), 220);
-            }
-          });
-          // Subtle haptic only on rows that aren't too rapid
-          if (rows <= 12) tg?.HapticFeedback?.impactOccurred?.('light');
-        }
-      }
-
-      plinkoState.rafId = requestAnimationFrame(frame);
-    }
-    plinkoState.rafId = requestAnimationFrame(frame);
-  });
+  // Remove ball with a small "settle" delay so it visually rests in the bucket
+  setTimeout(() => ball.remove(), 350);
 }
 
 function _plinkoGrenadeSvg() {
@@ -2074,30 +2102,31 @@ function onForgeHit(e) {
   }, 1500);
 
   // ----- OPTIMISTIC LOCAL PREDICTION -----
+  // We DON'T predict crits locally — server is authoritative. Predicting crits
+  // causes a 20%-ish HP rebound: when local rolls crit (×3) but server doesn't,
+  // reconciliation pulls HP back up. Apply only base damage; server will reveal
+  // the real crit damage on flush, which only ever pulls HP DOWN (never up).
   const baseDmg = s.effects.damage || 1;
-  const critPct = s.effects.crit_chance || 0;
-  const critMult = s.effects.crit_multiplier || 3;
-  const isCrit = Math.random() * 100 < critPct;
-  const damage = isCrit ? Math.round(baseDmg * critMult) : baseDmg;
+  const damage = baseDmg;
 
-  // Apply to local HP immediately (no network wait)
+  // Apply base damage locally (matches Math.floor on server: int(base_dmg))
   const curHp = Math.max(0, (forgeState.displayedHp ?? s.weapon.hp) - damage);
   forgeState.displayedHp = curHp;
   forgeState.state.weapon.hp = Math.max(0, s.weapon.hp - damage);
   _renderHpDisplay(curHp, s.weapon.max_hp);
 
-  tg?.HapticFeedback?.impactOccurred?.(isCrit ? 'heavy' : 'light');
+  tg?.HapticFeedback?.impactOccurred?.('light');
 
-  // Shake animation
+  // Shake animation (generic — crit visuals come from the server flush)
   img.classList.remove('hit', 'crit-hit');
   void img.offsetWidth;
-  img.classList.add(isCrit ? 'crit-hit' : 'hit');
+  img.classList.add('hit');
 
-  // Damage popup
+  // Base damage popup (crit popup appears later on flush if a crit was rolled)
   _pruneEffects(wrap);
   const popup = document.createElement('div');
-  popup.className = 'dmg-popup' + (isCrit ? ' crit' : '');
-  popup.textContent = isCrit ? `CRIT -${damage}` : `-${damage}`;
+  popup.className = 'dmg-popup';
+  popup.textContent = `-${damage}`;
   const wrapRect = wrap.getBoundingClientRect();
   const imgRect = img.getBoundingClientRect();
   popup.style.left = (imgRect.left - wrapRect.left + imgRect.width * 0.5 + (Math.random()*60-30)) + 'px';
@@ -2131,6 +2160,28 @@ async function _flushForgeBatch() {
 
     const wrap = document.getElementById('weapon-wrap');
     const img = document.getElementById('weapon-img');
+
+    // Crit feedback (server is authoritative; we don't predict crits to avoid HP rebound).
+    // Show one floating CRIT popup per crit rolled in this batch + heavy haptic + crit shake.
+    if (r.crits > 0 && wrap && img) {
+      img.classList.remove('crit-hit');
+      void img.offsetWidth;
+      img.classList.add('crit-hit');
+      tg?.HapticFeedback?.impactOccurred?.('heavy');
+      const wrapRect = wrap.getBoundingClientRect();
+      const imgRect = img.getBoundingClientRect();
+      for (let i = 0; i < r.crits; i++) {
+        const cp = document.createElement('div');
+        cp.className = 'dmg-popup crit';
+        // Damage amount shown is approximate (server total / count) — for visual punch only
+        const approxCritDmg = Math.round(r.damage / Math.max(1, count));
+        cp.textContent = `CRIT -${approxCritDmg}`;
+        cp.style.left = (imgRect.left - wrapRect.left + imgRect.width * 0.5 + (Math.random()*70-35)) + 'px';
+        cp.style.top = (imgRect.top - wrapRect.top + imgRect.height * 0.3) + 'px';
+        wrap.appendChild(cp);
+        setTimeout(() => cp.remove(), 700);
+      }
+    }
 
     // Break visuals — if server reports at least one break in this batch
     if (r.breaks > 0 && wrap && img) {
@@ -2978,8 +3029,20 @@ function _paintBoss(area, st, branches) {
   branchesEl.innerHTML = branches.map(b => {
     const lvl = st.boss_levels[b.key] || 0;
     const isMaxed = lvl >= b.max_level;
-    const cur = (lvl * b.effect_per_level).toFixed(b.effect_per_level < 1 ? 2 : 0);
-    const next = isMaxed ? '—' : ((lvl + 1) * b.effect_per_level).toFixed(b.effect_per_level < 1 ? 2 : 0);
+    let curStr, nextStr;
+    if (b.key === 'boss_megahit') {
+      // Special: effect is "every Nth tap deals ×10". Server formula: max(15, 25 - lvl).
+      const curInterval  = lvl > 0 ? Math.max(15, 25 - lvl) : null;
+      const nextInterval = Math.max(15, 25 - (lvl + 1));
+      curStr  = lvl === 0 ? 'выкл' : `каждый ${curInterval}-й ×10`;
+      nextStr = isMaxed ? '—' : `каждый ${nextInterval}-й ×10`;
+    } else {
+      const cur  = (lvl * b.effect_per_level).toFixed(b.effect_per_level < 1 ? 2 : 0);
+      const next = isMaxed ? '—' : ((lvl + 1) * b.effect_per_level).toFixed(b.effect_per_level < 1 ? 2 : 0);
+      const unit = b.unit.startsWith('%') ? b.unit : (' ' + b.unit);
+      curStr  = `${cur}${unit}`;
+      nextStr = isMaxed ? '—' : `${next}${unit}`;
+    }
     const progressPct = (lvl / b.max_level) * 100;
     const cost = isMaxed ? null : (1 + Math.floor(lvl / 3));  // approx — server is authoritative
     return `
@@ -2991,8 +3054,8 @@ function _paintBoss(area, st, branches) {
         <div class="bb-desc">${escape(b.desc)}</div>
         <div class="bb-progress"><div class="bb-progress-fill" style="width:${progressPct}%"></div></div>
         ${isMaxed
-          ? `<div class="bb-effect maxed">МАКС: ${cur}${b.unit.startsWith('%') ? b.unit : ' '+b.unit}</div>`
-          : `<div class="bb-effect">Сейчас: ${cur} → ${next}${b.unit.startsWith('%') ? b.unit : ' '+b.unit}</div>
+          ? `<div class="bb-effect maxed">МАКС: ${curStr}</div>`
+          : `<div class="bb-effect">Сейчас: ${curStr} → ${nextStr}</div>
              <button class="btn bb-buy" data-bb="${b.key}">⬆ Прокачать (${cost} 🎖)</button>`}
       </div>
     `;
@@ -3118,13 +3181,21 @@ async function _flushBossBatch() {
       }
     }
 
+    // Always-on procs feedback (megahit/double/crit) — visible even on non-kill grinding.
+    if (r.megahits > 0) {
+      toast(`💥 ×${r.megahits} МЕГА-УДАР!`, 2200);
+      tg?.HapticFeedback?.notificationOccurred?.('success');
+    } else if (r.doubles > 0) {
+      toast(`⚡ ×${r.doubles} двойной удар`, 1600);
+    } else if (r.crits > 0 && r.crits >= 3) {
+      toast(`🎯 ×${r.crits} крита`, 1400);
+    }
+
     if (r.kills && r.kills.length > 0) {
       tg?.HapticFeedback?.notificationOccurred?.('success');
       for (const k of r.kills) {
         toast(`☠ ${k.icon} ${k.name} убит! +${fmt(k.coin_reward)} 🪙`, 3500);
       }
-      // Special crits/doubles toast
-      if (r.megahits > 0) toast(`💥 ×${r.megahits} МЕГА-УДАР!`, 2500);
       if (r.tier_unlocked) {
         toast(`🔓 Открыт новый тир: ${r.tier_unlocked}`, 4000);
       }

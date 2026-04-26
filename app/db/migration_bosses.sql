@@ -28,3 +28,8 @@ create table if not exists boss_progress (
 alter table boss_progress add column if not exists last_attack_at timestamptz;
 alter table boss_progress add column if not exists cooldown_until timestamptz;
 create index if not exists idx_boss_progress_tg on boss_progress (tg_id);
+
+-- Separate boss-attack counter so the megahit "every Nth tap" cycle isn't
+-- driven by global forge clicks. Without this, hammering the forge would
+-- pre-rotate the megahit cycle on the boss tab.
+alter table forge_users add column if not exists boss_attack_count bigint not null default 0;

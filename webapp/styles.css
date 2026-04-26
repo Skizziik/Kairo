@@ -4351,6 +4351,29 @@ h2 {
   to   { box-shadow: 0 0 36px rgba(245,176,66,0.7); }
 }
 
+/* Per-ball floating delta popup in SVG */
+.pl-popup {
+  font-family: "Courier New", ui-monospace, monospace;
+  font-weight: 900;
+  font-size: 9px;
+  pointer-events: none;
+  paint-order: stroke fill;
+  stroke: #0a0c14;
+  stroke-width: 0.8;
+  animation: plPopupRise 1.2s ease-out forwards;
+}
+.pl-popup.pl-tier-loss    { fill: #ffb5b5; }
+.pl-popup.pl-tier-flat    { fill: #ffe2a3; }
+.pl-popup.pl-tier-low     { fill: #b9f5cb; }
+.pl-popup.pl-tier-mid     { fill: #b8edff; font-size: 10px; }
+.pl-popup.pl-tier-high    { fill: #e0c3ff; font-size: 11px; }
+.pl-popup.pl-tier-jackpot { fill: #ffd984; font-size: 12px; }
+@keyframes plPopupRise {
+  0%   { opacity: 0; transform: translateY(0); }
+  20%  { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-12px); }
+}
+
 /* Compact for narrow screens */
 @media (max-width: 380px) {
   .pl-title { font-size: 16px; letter-spacing: 3px; }

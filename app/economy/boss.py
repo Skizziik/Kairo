@@ -390,7 +390,7 @@ async def attack(tg_id: int, taps: int = 1) -> dict:
                 "boss_dmg_lvl, boss_crit_lvl, boss_coin_lvl, boss_double_lvl, boss_pierce_lvl, boss_megahit_lvl, "
                 "damage_level, crit_level, crit_power_level, "
                 "hammer_power_lvl, sharpen_lvl, "
-                "gear_affixes, total_clicks "
+                "gear_affixes, total_clicks, boss_attack_count "
                 "from forge_users where tg_id = $1 for update",
                 tg_id,
             )
@@ -446,7 +446,9 @@ async def attack(tg_id: int, taps: int = 1) -> dict:
             gear_crit_dmg_mult = 1.0 + float(gear.get("crit_dmg", 0)) / 100
             crit_mult_base = crit_multiplier_at(crit_power_lvl) * gear_crit_dmg_mult
 
-            total_clicks = int(row["total_clicks"] or 0)
+            # Boss-specific counter (NOT global total_clicks) — so forge grinding
+            # doesn't pre-rotate the megahit cycle on this tab.
+            boss_clicks = int(row["boss_attack_count"] or 0)
             kills = []
             crits = 0
             doubles = 0
@@ -456,7 +458,7 @@ async def attack(tg_id: int, taps: int = 1) -> dict:
             current_tier = tier  # we're fighting THIS tier; killing it doesn't auto-advance
 
             for i in range(taps):
-                hit_idx = total_clicks + i + 1
+                hit_idx = boss_clicks + i + 1
                 is_crit = random.uniform(0, 100) < boss_crit_pct
                 effective_crit = crit_mult_base if is_crit else 1.0
                 hit_dmg = int(base_dmg * effective_crit * hp_pow_mult * boss_dmg_mult * gear_dmg_mult * gear_boss_dmg_mult)
@@ -521,7 +523,8 @@ async def attack(tg_id: int, taps: int = 1) -> dict:
                 "  boss_total_kills = $2, "
                 "  boss_max_tier = $3, "
                 "  boss_endless_kills = $4, "
-                "  total_clicks = total_clicks + $5 "
+                "  total_clicks = total_clicks + $5, "
+                "  boss_attack_count = boss_attack_count + $5 "
                 "where tg_id = $1",
                 tg_id, new_total_kills, new_max_tier, new_endless_kills, taps,
             )
