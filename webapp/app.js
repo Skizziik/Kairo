@@ -2052,6 +2052,7 @@ async function _cfRenderLobby(area, lobbyId) {
     if (isCreator) {
       _cfRenderCreatorWaiting(area, lobby);
     } else {
+      cfState.selectedIds.clear();          // fresh selection per lobby entry
       _cfRenderJoinFlow(area, lobby);
     }
   } catch (e) {
@@ -2135,7 +2136,9 @@ function _cfRenderCreatorWaiting(area, lobby) {
 }
 
 function _cfRenderJoinFlow(area, lobby) {
-  cfState.selectedIds.clear();
+  // NOTE: do NOT clear selectedIds here — this function is also called as a
+  // re-render after each item click. Clearing would wipe the user's selection
+  // on every tap. The set is cleared by the caller when first entering the flow.
   const inv = (state.inventory && state.inventory.items) || [];
   const usable = inv.filter(i => !i.locked && !i.coinflip_lobby_id).sort((a, b) => b.price - a.price);
 
