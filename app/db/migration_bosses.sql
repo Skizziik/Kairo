@@ -22,7 +22,9 @@ create table if not exists boss_progress (
   current_hp   bigint not null,
   kills        int    not null default 0,
   last_attack_at timestamptz,
+  cooldown_until timestamptz,
   primary key (tg_id, tier)
 );
 alter table boss_progress add column if not exists last_attack_at timestamptz;
+alter table boss_progress add column if not exists cooldown_until timestamptz;
 create index if not exists idx_boss_progress_tg on boss_progress (tg_id);

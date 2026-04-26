@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import random
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.db.client import pool
@@ -46,6 +46,27 @@ BOSS_REGEN_PER_TIER = 4    # +4s per tier (T10 = 30 + 36 = 66s)
 def boss_regen_seconds(tier: int) -> int:
     """How many idle seconds before this boss regens to full HP."""
     return BOSS_REGEN_BASE_SEC + max(0, tier - 1) * BOSS_REGEN_PER_TIER
+
+
+# Per-tier kill cooldown (in seconds). After killing a boss, the player can't
+# attack THAT tier again until cooldown expires. Stops autoclicker farming.
+BOSS_KILL_COOLDOWN: dict[int, int] = {
+    1:  60,         # 1 min
+    2:  180,        # 3 min
+    3:  600,        # 10 min
+    4:  1_800,      # 30 min
+    5:  3_600,      # 1 hour
+    6:  7_200,      # 2 hours
+    7:  14_400,     # 4 hours
+    8:  28_800,     # 8 hours
+    9:  57_600,     # 16 hours
+    10: 86_400,     # 24 hours
+}
+BOSS_KILL_COOLDOWN_ENDLESS = 86_400  # 24h for any tier above 10
+
+
+def boss_kill_cooldown_seconds(tier: int) -> int:
+    return BOSS_KILL_COOLDOWN.get(tier, BOSS_KILL_COOLDOWN_ENDLESS)
 
 
 def boss_for_tier(tier: int) -> dict:
@@ -168,11 +189,11 @@ def _compute_max_hp(tier: int, pierce_lvl: int) -> int:
     return int(boss["hp"] * (1 - pierce_pct / 100))
 
 
-async def _get_or_init_tier_hp(conn, tg_id: int, tier: int, max_hp: int) -> tuple[int, datetime | None]:
-    """Read persistent HP for a tier. Apply regen if last_attack_at is too old.
-    Returns (current_hp, last_attack_at)."""
+async def _get_or_init_tier_hp(conn, tg_id: int, tier: int, max_hp: int) -> tuple[int, datetime | None, datetime | None]:
+    """Read persistent HP + last_attack + cooldown_until. Apply regen if idle.
+    Returns (current_hp, last_attack_at, cooldown_until)."""
     row = await conn.fetchrow(
-        "select current_hp, last_attack_at from boss_progress where tg_id = $1 and tier = $2",
+        "select current_hp, last_attack_at, cooldown_until from boss_progress where tg_id = $1 and tier = $2",
         tg_id, tier,
     )
     if row is None:
@@ -180,9 +201,10 @@ async def _get_or_init_tier_hp(conn, tg_id: int, tier: int, max_hp: int) -> tupl
             "insert into boss_progress (tg_id, tier, current_hp) values ($1, $2, $3) on conflict do nothing",
             tg_id, tier, max_hp,
         )
-        return max_hp, None
+        return max_hp, None, None
     cur_hp = int(row["current_hp"])
     last = row["last_attack_at"]
+    cd = row["cooldown_until"]
     if last is not None and cur_hp < max_hp:
         elapsed = (datetime.now(timezone.utc) - last).total_seconds()
         regen_sec = boss_regen_seconds(tier)
@@ -193,7 +215,7 @@ async def _get_or_init_tier_hp(conn, tg_id: int, tier: int, max_hp: int) -> tupl
                 tg_id, tier, max_hp,
             )
             last = None
-    return cur_hp, last
+    return cur_hp, last, cd
 
 
 async def get_state(tg_id: int) -> dict:
@@ -221,16 +243,28 @@ async def get_state(tg_id: int) -> dict:
         pierce_lvl = int(row["boss_pierce_lvl"] or 0)
         boss = boss_for_tier(sel_tier)
         max_hp = _compute_max_hp(sel_tier, pierce_lvl)
-        cur_hp, last_attack = await _get_or_init_tier_hp(conn, tg_id, sel_tier, max_hp)
+        cur_hp, last_attack, cooldown_until = await _get_or_init_tier_hp(conn, tg_id, sel_tier, max_hp)
         if cur_hp <= 0 or cur_hp > max_hp:
             cur_hp = max_hp
 
         # Build unlocked tier list (for picker)
         progress_rows = await conn.fetch(
-            "select tier, current_hp, kills from boss_progress where tg_id = $1 and tier <= $2",
+            "select tier, current_hp, kills, cooldown_until from boss_progress where tg_id = $1 and tier <= $2",
             tg_id, max_tier,
         )
-        progress_map = {int(r["tier"]): {"hp": int(r["current_hp"]), "kills": int(r["kills"])} for r in progress_rows}
+        now_dt = datetime.now(timezone.utc)
+        progress_map = {}
+        for r in progress_rows:
+            cd_left = 0
+            if r["cooldown_until"] is not None:
+                left = (r["cooldown_until"] - now_dt).total_seconds()
+                if left > 0:
+                    cd_left = int(left)
+            progress_map[int(r["tier"])] = {
+                "hp": int(r["current_hp"]),
+                "kills": int(r["kills"]),
+                "cooldown_left": cd_left,
+            }
 
     # Regen countdown for selected tier
     regen_sec = boss_regen_seconds(sel_tier)
@@ -239,11 +273,18 @@ async def get_state(tg_id: int) -> dict:
         elapsed = (datetime.now(timezone.utc) - last_attack).total_seconds()
         seconds_until_regen = max(0, int(regen_sec - elapsed))
 
+    # Kill cooldown for selected tier
+    cd_left_sec = 0
+    if cooldown_until is not None:
+        left = (cooldown_until - datetime.now(timezone.utc)).total_seconds()
+        if left > 0:
+            cd_left_sec = int(left)
+
     tiers_info = []
     for t in range(1, max_tier + 1):
         b = boss_for_tier(t)
         b_max = _compute_max_hp(t, pierce_lvl)
-        p = progress_map.get(t, {"hp": b_max, "kills": 0})
+        p = progress_map.get(t, {"hp": b_max, "kills": 0, "cooldown_left": 0})
         tiers_info.append({
             "tier": t,
             "name": b["name"],
@@ -253,6 +294,8 @@ async def get_state(tg_id: int) -> dict:
             "kills": p["kills"],
             "coin_reward": int(b["coin_reward"]),
             "selected": t == sel_tier,
+            "cooldown_left": p.get("cooldown_left", 0),
+            "cooldown_total": boss_kill_cooldown_seconds(t),
         })
 
     dmg_per_hit = _preview_damage(row)
@@ -274,6 +317,8 @@ async def get_state(tg_id: int) -> dict:
         "tiers": tiers_info,
         "regen_total_sec": regen_sec,
         "regen_seconds_left": seconds_until_regen,
+        "cooldown_seconds_left": cd_left_sec,
+        "cooldown_total_sec": boss_kill_cooldown_seconds(sel_tier),
         "boss_levels": {
             "boss_dmg":    int(row["boss_dmg_lvl"] or 0),
             "boss_crit":   int(row["boss_crit_lvl"] or 0),
@@ -355,10 +400,26 @@ async def attack(tg_id: int, taps: int = 1) -> dict:
             tier = int(row["boss_selected_tier"] or 1)
             pierce_lvl = int(row["boss_pierce_lvl"] or 0)
             max_hp = _compute_max_hp(tier, pierce_lvl)
-            cur_hp, _last_attack = await _get_or_init_tier_hp(conn, tg_id, tier, max_hp)
+            cur_hp, _last_attack, cd_until = await _get_or_init_tier_hp(conn, tg_id, tier, max_hp)
             if cur_hp > max_hp:
                 cur_hp = max_hp
             now_ts = datetime.now(timezone.utc)
+
+            # Cooldown check — boss is "asleep" after recent kill
+            if cd_until is not None and cd_until > now_ts:
+                left_sec = int((cd_until - now_ts).total_seconds())
+                return {
+                    "ok": False,
+                    "error": "cooldown",
+                    "cooldown_left": left_sec,
+                    "boss_after": {
+                        "tier": tier,
+                        "hp": cur_hp,
+                        "max_hp": max_hp,
+                        "name": boss_for_tier(tier)["name"],
+                        "icon": boss_for_tier(tier)["icon"],
+                    },
+                }
 
             # Damage components
             dmg_lvl = int(row["damage_level"])
@@ -425,11 +486,16 @@ async def attack(tg_id: int, taps: int = 1) -> dict:
                     # Refill same tier (player can keep grinding, doesn't auto-advance)
                     cur_hp = max_hp
 
-            # Persist HP + last_attack_at timestamp (for regen countdown)
+            # Persist HP + last_attack timestamp; if killed, set cooldown_until
+            kill_cd_until = None
+            if len(kills) > 0:
+                cd_sec = boss_kill_cooldown_seconds(current_tier)
+                kill_cd_until = now_ts + timedelta(seconds=cd_sec)
             await conn.execute(
-                "update boss_progress set current_hp = $3, kills = kills + $4, last_attack_at = $5 "
+                "update boss_progress set current_hp = $3, kills = kills + $4, "
+                "last_attack_at = $5, cooldown_until = coalesce($6, cooldown_until) "
                 "where tg_id = $1 and tier = $2",
-                tg_id, current_tier, max(0, cur_hp), len(kills), now_ts,
+                tg_id, current_tier, max(0, cur_hp), len(kills), now_ts, kill_cd_until,
             )
 
             # Track max_tier reached + auto-advance selection
@@ -495,6 +561,8 @@ async def attack(tg_id: int, taps: int = 1) -> dict:
         "coin_reward": coin_reward_total,
         "new_balance": new_bal,
         "regen_total_sec": boss_regen_seconds(current_tier),
+        "cooldown_total_sec": boss_kill_cooldown_seconds(current_tier) if kills else 0,
+        "cooldown_left_sec": int((kill_cd_until - now_ts).total_seconds()) if kill_cd_until else 0,
     }
 
 

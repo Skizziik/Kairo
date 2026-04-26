@@ -1832,7 +1832,13 @@ function escape(s) {
 // BOSS RAIDS SCREEN
 // ============================================================
 
-const _bossState = { busy: false, pendingTaps: 0, flushTimer: null, area: null, st: null };
+const _bossState = { busy: false, pendingTaps: 0, flushTimer: null, area: null, st: null, cdInterval: null };
+
+function _fmtCooldown(sec) {
+  if (sec >= 3600) return Math.ceil(sec / 3600) + 'ч';
+  if (sec >= 60) return Math.ceil(sec / 60) + 'м';
+  return Math.max(0, sec) + 'с';
+}
 
 async function renderForgeBoss(area) {
   _stopForgePolling();
@@ -1860,12 +1866,13 @@ function _paintBoss(area, st, branches) {
   // Boss tier picker (carousel of unlocked bosses)
   const tiersHtml = (st.tiers || []).map(t => {
     const tierHpPct = Math.max(0, (t.hp / t.max_hp) * 100);
+    const onCd = (t.cooldown_left || 0) > 0;
     return `
-      <button class="boss-tier-card ${t.selected ? 'active' : ''}" data-tier="${t.tier}">
+      <button class="boss-tier-card ${t.selected ? 'active' : ''} ${onCd ? 'cooldown' : ''}" data-tier="${t.tier}">
         <div class="btc-icon">${t.icon}</div>
         <div class="btc-tier">T${t.tier}</div>
         <div class="btc-hp-bar"><div class="btc-hp-fill" style="width:${tierHpPct}%"></div></div>
-        <div class="btc-kills">${t.kills}× kills</div>
+        <div class="btc-kills">${onCd ? '💤 ' + _fmtCooldown(t.cooldown_left) : t.kills + '× kills'}</div>
       </button>
     `;
   }).join('');
@@ -1878,9 +1885,10 @@ function _paintBoss(area, st, branches) {
       <div class="boss-name">${escape(st.name)}</div>
       <div class="boss-lore">${escape(st.lore)}</div>
 
-      <div class="boss-tap-target" id="boss-tap-target">
+      <div class="boss-tap-target ${st.cooldown_seconds_left > 0 ? 'cooldown' : ''}" id="boss-tap-target">
         <div class="boss-icon-big" id="boss-icon-big">${st.icon}</div>
-        <div class="boss-tap-hint">тапай</div>
+        <div class="boss-tap-hint" id="boss-tap-hint">${st.cooldown_seconds_left > 0 ? '💤 спит' : 'тапай'}</div>
+        ${st.cooldown_seconds_left > 0 ? `<div class="boss-cd-overlay" id="boss-cd-overlay">💤<br>${_fmtCooldown(st.cooldown_seconds_left)}</div>` : ''}
       </div>
 
       <div class="boss-hp-bar">
@@ -1914,6 +1922,31 @@ function _paintBoss(area, st, branches) {
   // Wire tap-to-attack on the boss icon area
   const tapTarget = document.getElementById('boss-tap-target');
   tapTarget.addEventListener('click', (e) => _bossTap(area, tapTarget, e));
+
+  // Start cooldown countdown ticker — updates the overlay "💤 Xм" every second
+  if (_bossState.cdInterval) clearInterval(_bossState.cdInterval);
+  if ((st.cooldown_seconds_left || 0) > 0) {
+    let cdLeft = st.cooldown_seconds_left;
+    _bossState.cdInterval = setInterval(() => {
+      if (!document.getElementById('boss-root')) {
+        clearInterval(_bossState.cdInterval);
+        return;
+      }
+      cdLeft -= 1;
+      if (_bossState.st) _bossState.st.cooldown_seconds_left = Math.max(0, cdLeft);
+      const overlay = document.getElementById('boss-cd-overlay');
+      if (cdLeft <= 0) {
+        clearInterval(_bossState.cdInterval);
+        if (overlay) overlay.remove();
+        const tap = document.getElementById('boss-tap-target');
+        if (tap) tap.classList.remove('cooldown');
+        const hint = document.getElementById('boss-tap-hint');
+        if (hint) hint.textContent = 'тапай';
+      } else if (overlay) {
+        overlay.innerHTML = '💤<br>' + _fmtCooldown(cdLeft);
+      }
+    }, 1000);
+  }
 
   // Start regen countdown ticker (1Hz). Only re-render if user is STILL on boss screen.
   if (_bossState.timerInterval) clearInterval(_bossState.timerInterval);
@@ -1977,6 +2010,10 @@ async function _selectBossTier(area, tier) {
 
 function _bossTap(area, tapTarget, evt) {
   if (!_bossState.st) return;
+  if ((_bossState.st.cooldown_seconds_left || 0) > 0) {
+    toast('💤 Босс отдыхает после убийства');
+    return;
+  }
 
   // Visual: spawn floating damage number from tap point
   const rect = tapTarget.getBoundingClientRect();
@@ -2025,7 +2062,13 @@ async function _flushBossBatch() {
 
   try {
     const r = await api('/api/forge/boss/attack', { method: 'POST', body: JSON.stringify({ taps }) });
-    if (!r.ok) return;
+    if (!r.ok) {
+      if (r.error === 'cooldown' && r.cooldown_left) {
+        toast(`💤 Босс отдыхает: ${_fmtCooldown(r.cooldown_left)}`);
+        renderForgeBoss(_bossState.area);
+      }
+      return;
+    }
 
     // Reconcile state from server truth
     if (_bossState.st) {
