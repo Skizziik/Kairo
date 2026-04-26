@@ -338,6 +338,7 @@ async def inventory_of(user_id: int, limit: int = 200) -> list[dict]:
         rows = await conn.fetch(
             """
             select i.id, i.skin_id, i.float_value, i.wear, i.stat_trak, i.price, i.acquired_at, i.locked,
+                   coalesce(i.coinflip_lobby_id, 0) as coinflip_lobby_id,
                    s.full_name, s.weapon, s.skin_name, s.rarity, s.rarity_color, s.image_url, s.category
             from economy_inventory i
             join economy_skins_catalog s on s.id = i.skin_id

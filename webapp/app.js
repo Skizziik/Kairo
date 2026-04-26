@@ -822,6 +822,8 @@ function renderGamePlay(game, target) {
     renderMines(area);
   } else if (game === 'plinko') {
     renderPlinko(area);
+  } else if (game === 'cfpvp') {
+    renderCfPvp(area);
   } else if (game === 'forge') {
     renderForge(area);
   }
@@ -1797,6 +1799,457 @@ function _plinkoGrenadeSvg() {
     <line x1="12" y1="2" x2="14" y2="4" stroke="#aaa"/>
     <circle cx="14" cy="2.5" r="1.2" fill="#888"/>
   </svg>`;
+}
+
+// ======================= COINFLIP 1v1 (PvP) =======================
+
+const cfState = {
+  area: null,
+  selectedIds: new Set(),  // creator: skins to stake. opponent: skins to match.
+  pendingLobbyId: null,    // when navigated via deep link
+};
+
+const CF_MATCH_TOLERANCE = 0.10;
+
+async function renderCfPvp(area) {
+  cfState.area = area;
+  cfState.selectedIds.clear();
+  area.innerHTML = `<div class="cf-wrap"><div class="loader">Загрузка лобби…</div></div>`;
+  try {
+    const data = await api('/api/pvp/coinflip/list');
+    _cfRenderHub(area, data);
+  } catch (e) {
+    area.innerHTML = `<div class="cf-wrap"><div class="loader">Ошибка: ${escape(e.message)}</div></div>`;
+  }
+}
+
+function _cfRenderHub(area, data) {
+  const open = data.open || [];
+  const recent = data.recent || [];
+
+  const openHtml = open.length === 0
+    ? `<div class="cf-empty">Открытых лобби нет. Создай первое!</div>`
+    : open.map(l => _cfLobbyCard(l)).join('');
+
+  const recentHtml = recent.length === 0
+    ? `<div class="cf-empty cf-empty-sm">История пуста</div>`
+    : recent.map(l => {
+        const winner = l.winner_id === l.creator_id ? l.creator_name : l.opponent_name;
+        const loser  = l.winner_id === l.creator_id ? l.opponent_name : l.creator_name;
+        return `
+          <div class="cf-recent-row">
+            <span class="cf-recent-winner">🏆 ${escape(winner || '—')}</span>
+            <span class="cf-recent-vs">vs</span>
+            <span class="cf-recent-loser">${escape(loser || '—')}</span>
+            <span class="cf-recent-pot">${fmt(l.pot_value || 0)} 🪙</span>
+          </div>
+        `;
+      }).join('');
+
+  area.innerHTML = `
+    <div class="cf-wrap">
+      <div class="cf-title">
+        <span class="cf-title-bracket">[</span> COINFLIP <span class="cf-title-bracket">]</span>
+        <span class="cf-title-sub">SKIN DUEL</span>
+      </div>
+
+      <button class="btn big-btn cf-create-btn" id="cf-create">
+        ⚔️ Создать лобби
+      </button>
+
+      <div class="cf-section-label">ОТКРЫТЫЕ ЛОББИ</div>
+      <div class="cf-lobbies-list">${openHtml}</div>
+
+      <div class="cf-section-label">НЕДАВНИЕ БИТВЫ</div>
+      <div class="cf-recent-list">${recentHtml}</div>
+    </div>
+  `;
+
+  document.getElementById('cf-create').addEventListener('click', () => _cfRenderCreate(area));
+  area.querySelectorAll('.cf-lobby-card[data-lobby-id]').forEach(c => {
+    c.addEventListener('click', () => _cfRenderLobby(area, parseInt(c.dataset.lobbyId)));
+  });
+  area.querySelectorAll('[data-cancel-lobby]').forEach(b => {
+    b.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = parseInt(b.dataset.cancelLobby);
+      if (!confirm('Отменить лобби и вернуть скины?')) return;
+      try {
+        const r = await api('/api/pvp/coinflip/cancel', { method: 'POST', body: JSON.stringify({ lobby_id: id }) });
+        if (r.ok) { toast('Лобби отменено'); renderCfPvp(area); }
+        else toast(r.error || 'Не удалось');
+      } catch (err) { toast(err.message); }
+    });
+  });
+
+  // If we arrived via deep-link (cf_<id>), auto-open that lobby now
+  if (cfState.pendingLobbyId) {
+    const target = cfState.pendingLobbyId;
+    cfState.pendingLobbyId = null;
+    setTimeout(() => _cfRenderLobby(area, target), 50);
+  }
+}
+
+function _cfLobbyCard(l) {
+  const skins = l.creator_skins || [];
+  const previews = skins.slice(0, 4).map(s => `<img class="cf-thumb rarity-${s.rarity}" src="${s.image_url}" alt="" />`).join('');
+  const more = skins.length > 4 ? `<span class="cf-thumb-more">+${skins.length - 4}</span>` : '';
+  const expiresIn = l.expires_at ? Math.max(0, Math.round((new Date(l.expires_at) - Date.now()) / 60000)) : null;
+  return `
+    <div class="cf-lobby-card ${l.is_mine ? 'mine' : ''}" data-lobby-id="${l.id}">
+      <div class="cf-lobby-row">
+        <div class="cf-lobby-creator">${escape(l.creator_name || '—')}${l.is_mine ? ' <span class="cf-mine-tag">ТЫ</span>' : ''}</div>
+        <div class="cf-lobby-value">${fmt(l.creator_value)} 🪙</div>
+      </div>
+      <div class="cf-lobby-thumbs">${previews}${more}</div>
+      <div class="cf-lobby-row cf-lobby-foot">
+        <div class="cf-lobby-meta">${skins.length} предмет(ов)${expiresIn !== null ? ` · ${expiresIn}м осталось` : ''}</div>
+        ${l.is_mine
+          ? `<button class="cf-cancel-btn" data-cancel-lobby="${l.id}">отменить</button>`
+          : `<div class="cf-lobby-action">⚔️ Принять →</div>`}
+      </div>
+    </div>
+  `;
+}
+
+// ---------------- CREATE flow ----------------
+async function _cfRenderCreate(area) {
+  cfState.selectedIds.clear();
+  area.innerHTML = `<div class="cf-wrap"><div class="loader">Загрузка инвентаря…</div></div>`;
+  try {
+    if (!state.inventory || !state.inventory.items) await loadInventory();
+    _cfPaintCreate(area);
+  } catch (e) {
+    area.innerHTML = `<div class="cf-wrap"><div class="loader">Ошибка: ${escape(e.message)}</div></div>`;
+  }
+}
+
+function _cfPaintCreate(area) {
+  const inv = (state.inventory && state.inventory.items) || [];
+  // Filter: not locked, not in another coinflip lobby
+  const usable = inv.filter(i => !i.locked && !i.coinflip_lobby_id);
+  // Sort by price desc
+  usable.sort((a, b) => b.price - a.price);
+
+  const grid = usable.map(it => {
+    const sel = cfState.selectedIds.has(it.id) ? 'selected' : '';
+    return `
+      <div class="cf-inv-item rarity-${it.rarity} ${sel}" data-inv-id="${it.id}">
+        <img src="${it.image_url}" alt="" loading="lazy" />
+        <div class="cf-inv-name">${escape(it.weapon || '')}</div>
+        <div class="cf-inv-price">${fmt(it.price)} 🪙</div>
+      </div>
+    `;
+  }).join('');
+
+  const total = _cfSelectedTotal(usable);
+  const count = cfState.selectedIds.size;
+
+  area.innerHTML = `
+    <div class="cf-wrap">
+      <button class="back-btn" id="cf-back">← к лобби</button>
+      <div class="cf-title">
+        <span class="cf-title-bracket">[</span> СОЗДАТЬ ЛОББИ <span class="cf-title-bracket">]</span>
+      </div>
+      <div class="cf-create-summary">
+        <div>Выбрано: <b>${count}</b> · Сумма: <b class="gold">${fmt(total)} 🪙</b></div>
+        <div class="cf-create-hint">Оппонент должен поставить ±${Math.round(CF_MATCH_TOLERANCE * 100)}% от суммы</div>
+      </div>
+      ${usable.length === 0
+        ? `<div class="cf-empty">Нет доступных скинов (всё заблокировано или в других лобби)</div>`
+        : `<div class="cf-inv-grid">${grid}</div>`}
+      <div class="cf-create-actions">
+        <button class="btn secondary" id="cf-clear-sel">Очистить</button>
+        <button class="btn big-btn cf-create-confirm" id="cf-create-confirm" ${count === 0 ? 'disabled' : ''}>
+          ⚔️ Создать (${fmt(total)} 🪙)
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('cf-back').addEventListener('click', () => renderCfPvp(area));
+  document.getElementById('cf-clear-sel').addEventListener('click', () => {
+    cfState.selectedIds.clear();
+    _cfPaintCreate(area);
+  });
+  area.querySelectorAll('.cf-inv-item[data-inv-id]').forEach(el => {
+    el.addEventListener('click', () => {
+      const id = parseInt(el.dataset.invId);
+      if (cfState.selectedIds.has(id)) cfState.selectedIds.delete(id);
+      else cfState.selectedIds.add(id);
+      _cfPaintCreate(area);
+    });
+  });
+  document.getElementById('cf-create-confirm').addEventListener('click', () => _cfCreateConfirm(area));
+}
+
+function _cfSelectedTotal(items) {
+  let s = 0;
+  for (const it of items) if (cfState.selectedIds.has(it.id)) s += (it.price || 0);
+  return s;
+}
+
+async function _cfCreateConfirm(area) {
+  const ids = Array.from(cfState.selectedIds);
+  if (ids.length === 0) return;
+  try {
+    const r = await api('/api/pvp/coinflip/create', { method: 'POST', body: JSON.stringify({ inventory_ids: ids }) });
+    if (!r.ok) { toast(r.error || 'Ошибка'); return; }
+    cfState.selectedIds.clear();
+    tg?.HapticFeedback?.notificationOccurred?.('success');
+    toast('Лобби создано');
+    // Reload inventory to reflect locked items, then go to lobby view
+    state.inventory = null;
+    await loadInventory();
+    _cfRenderLobby(area, r.lobby.id);
+  } catch (e) { toast(e.message); }
+}
+
+// ---------------- LOBBY VIEW (creator preview / opponent matchmaking) ----------------
+async function _cfRenderLobby(area, lobbyId) {
+  area.innerHTML = `<div class="cf-wrap"><div class="loader">Загрузка лобби…</div></div>`;
+  try {
+    const lobby = await api(`/api/pvp/coinflip/lobby/${lobbyId}`);
+    const myId = state.me ? state.me.tg_id : null;
+    const isCreator = myId && lobby.creator_id === myId;
+
+    // If lobby already settled — show result animation
+    if (lobby.status === 'settled') {
+      _cfRenderSettledView(area, lobby, isCreator);
+      return;
+    }
+    if (lobby.status === 'cancelled' || lobby.status === 'expired') {
+      area.innerHTML = `<div class="cf-wrap"><div class="loader">Лобби закрыто (${lobby.status})</div><button class="btn" id="cf-back2">← к списку</button></div>`;
+      document.getElementById('cf-back2').addEventListener('click', () => renderCfPvp(area));
+      return;
+    }
+
+    if (isCreator) {
+      _cfRenderCreatorWaiting(area, lobby);
+    } else {
+      _cfRenderJoinFlow(area, lobby);
+    }
+  } catch (e) {
+    area.innerHTML = `<div class="cf-wrap"><div class="loader">Ошибка: ${escape(e.message)}</div></div>`;
+  }
+}
+
+function _cfRenderCreatorWaiting(area, lobby) {
+  const skinsHtml = (lobby.creator_skins || []).map(s => `
+    <div class="cf-stack-item rarity-${s.rarity}">
+      <img src="${s.image_url}" alt="" />
+      <div class="cf-stack-name">${escape(s.weapon || '')}</div>
+      <div class="cf-stack-price">${fmt(s.price)} 🪙</div>
+    </div>
+  `).join('');
+
+  area.innerHTML = `
+    <div class="cf-wrap">
+      <button class="back-btn" id="cf-back">← к лобби</button>
+      <div class="cf-title">
+        <span class="cf-title-bracket">[</span> ТВОЁ ЛОББИ #${lobby.id} <span class="cf-title-bracket">]</span>
+      </div>
+      <div class="cf-status-pill open">⏳ Ждём оппонента</div>
+
+      <div class="cf-stack-block">
+        <div class="cf-stack-label">ТВОЯ СТАВКА · ${fmt(lobby.creator_value)} 🪙</div>
+        <div class="cf-stack-grid">${skinsHtml}</div>
+      </div>
+
+      <div class="cf-share-block">
+        <button class="btn big-btn cf-share-btn" id="cf-share" ${lobby.invited_to_chat ? 'disabled' : ''}>
+          ${lobby.invited_to_chat ? '✓ Уже отправлено в чат' : '📨 Кинуть приглашение в чат'}
+        </button>
+        <div class="cf-share-hint">Бот пришлёт пацанам кнопку «Принять вызов» в групповой чат</div>
+      </div>
+
+      <button class="btn secondary cf-cancel-full" id="cf-cancel">Отменить лобби (вернуть скины)</button>
+    </div>
+  `;
+  document.getElementById('cf-back').addEventListener('click', () => renderCfPvp(area));
+  document.getElementById('cf-cancel').addEventListener('click', async () => {
+    if (!confirm('Отменить лобби?')) return;
+    try {
+      const r = await api('/api/pvp/coinflip/cancel', { method: 'POST', body: JSON.stringify({ lobby_id: lobby.id }) });
+      if (r.ok) { toast('Лобби отменено'); state.inventory = null; renderCfPvp(area); }
+      else toast(r.error || 'Не удалось');
+    } catch (e) { toast(e.message); }
+  });
+  const shareBtn = document.getElementById('cf-share');
+  if (shareBtn && !lobby.invited_to_chat) {
+    shareBtn.addEventListener('click', async () => {
+      shareBtn.disabled = true;
+      try {
+        const r = await api('/api/pvp/coinflip/share', { method: 'POST', body: JSON.stringify({ lobby_id: lobby.id }) });
+        if (r.ok) {
+          toast('✓ Приглашение отправлено в чат');
+          shareBtn.textContent = '✓ Уже отправлено в чат';
+        } else {
+          toast(r.error || 'Не удалось');
+          shareBtn.disabled = false;
+        }
+      } catch (e) { toast(e.message); shareBtn.disabled = false; }
+    });
+  }
+
+  // Periodic poll: detect when opponent joins so we auto-show the result
+  if (cfState.pollTimer) clearInterval(cfState.pollTimer);
+  cfState.pollTimer = setInterval(async () => {
+    if (!document.querySelector('.cf-wrap')) { clearInterval(cfState.pollTimer); cfState.pollTimer = null; return; }
+    try {
+      const fresh = await api(`/api/pvp/coinflip/lobby/${lobby.id}`);
+      if (fresh.status === 'settled') {
+        clearInterval(cfState.pollTimer); cfState.pollTimer = null;
+        _cfRenderAnimation(area, fresh, /*creatorWon*/ fresh.winner_id === fresh.creator_id, /*spectatorMode*/ false);
+      } else if (fresh.status !== 'open') {
+        clearInterval(cfState.pollTimer); cfState.pollTimer = null;
+        renderCfPvp(area);
+      }
+    } catch (_) {}
+  }, 3500);
+}
+
+function _cfRenderJoinFlow(area, lobby) {
+  cfState.selectedIds.clear();
+  const inv = (state.inventory && state.inventory.items) || [];
+  const usable = inv.filter(i => !i.locked && !i.coinflip_lobby_id).sort((a, b) => b.price - a.price);
+
+  const lo = Math.round(lobby.creator_value * (1 - CF_MATCH_TOLERANCE));
+  const hi = Math.round(lobby.creator_value * (1 + CF_MATCH_TOLERANCE));
+
+  const creatorThumbs = (lobby.creator_skins || []).slice(0, 6).map(s =>
+    `<img class="cf-thumb rarity-${s.rarity}" src="${s.image_url}" alt="" />`
+  ).join('');
+  const moreCount = (lobby.creator_skins || []).length - 6;
+
+  const myGrid = usable.map(it => {
+    const sel = cfState.selectedIds.has(it.id) ? 'selected' : '';
+    return `
+      <div class="cf-inv-item rarity-${it.rarity} ${sel}" data-inv-id="${it.id}">
+        <img src="${it.image_url}" alt="" loading="lazy" />
+        <div class="cf-inv-name">${escape(it.weapon || '')}</div>
+        <div class="cf-inv-price">${fmt(it.price)} 🪙</div>
+      </div>
+    `;
+  }).join('');
+
+  const myTotal = _cfSelectedTotal(usable);
+  const inRange = myTotal >= lo && myTotal <= hi && cfState.selectedIds.size > 0;
+
+  area.innerHTML = `
+    <div class="cf-wrap">
+      <button class="back-btn" id="cf-back">← назад</button>
+      <div class="cf-title">
+        <span class="cf-title-bracket">[</span> ВЫЗОВ ОТ ${escape(lobby.creator_name || '—')} <span class="cf-title-bracket">]</span>
+      </div>
+
+      <div class="cf-vs-row">
+        <div class="cf-vs-side">
+          <div class="cf-vs-label">${escape(lobby.creator_name || '—')}</div>
+          <div class="cf-vs-thumbs">${creatorThumbs}${moreCount > 0 ? `<span class="cf-thumb-more">+${moreCount}</span>` : ''}</div>
+          <div class="cf-vs-value">${fmt(lobby.creator_value)} 🪙</div>
+        </div>
+        <div class="cf-vs-mid">VS</div>
+        <div class="cf-vs-side cf-vs-me">
+          <div class="cf-vs-label">ТЫ</div>
+          <div class="cf-vs-thumbs cf-vs-thumbs-empty">собери стак ↓</div>
+          <div class="cf-vs-value ${inRange ? 'gold' : 'danger'}">${fmt(myTotal)} 🪙</div>
+        </div>
+      </div>
+
+      <div class="cf-join-range">
+        Нужно поставить от <b>${fmt(lo)}</b> до <b>${fmt(hi)}</b> 🪙
+      </div>
+
+      ${usable.length === 0
+        ? `<div class="cf-empty">Нет доступных скинов</div>`
+        : `<div class="cf-inv-grid">${myGrid}</div>`}
+
+      <button class="btn big-btn cf-join-confirm ${inRange ? '' : 'disabled'}" id="cf-join-confirm" ${inRange ? '' : 'disabled'}>
+        ⚔️ Принять вызов (${fmt(myTotal)} 🪙)
+      </button>
+    </div>
+  `;
+
+  document.getElementById('cf-back').addEventListener('click', () => renderCfPvp(area));
+  area.querySelectorAll('.cf-inv-item[data-inv-id]').forEach(el => {
+    el.addEventListener('click', () => {
+      const id = parseInt(el.dataset.invId);
+      if (cfState.selectedIds.has(id)) cfState.selectedIds.delete(id);
+      else cfState.selectedIds.add(id);
+      _cfRenderJoinFlow(area, lobby);
+    });
+  });
+  document.getElementById('cf-join-confirm').addEventListener('click', async () => {
+    if (!inRange) return;
+    const ids = Array.from(cfState.selectedIds);
+    try {
+      const r = await api('/api/pvp/coinflip/join', { method: 'POST', body: JSON.stringify({ lobby_id: lobby.id, inventory_ids: ids }) });
+      if (!r.ok) { toast(r.error || 'Ошибка'); return; }
+      cfState.selectedIds.clear();
+      state.inventory = null;
+      const creatorWon = r.creator_won;
+      _cfRenderAnimation(area, r.lobby, creatorWon, /*spectatorMode*/ false);
+    } catch (e) { toast(e.message); }
+  });
+}
+
+// ---------------- COINFLIP ANIMATION ----------------
+function _cfRenderAnimation(area, lobby, creatorWon, spectatorMode) {
+  const myId = state.me ? state.me.tg_id : null;
+  const iWon = (creatorWon && lobby.creator_id === myId) || (!creatorWon && lobby.opponent_id === myId);
+  const winnerName = creatorWon ? lobby.creator_name : lobby.opponent_name;
+  const loserName  = creatorWon ? lobby.opponent_name : lobby.creator_name;
+
+  area.innerHTML = `
+    <div class="cf-wrap cf-anim-wrap">
+      <div class="cf-anim-vs">
+        <div class="cf-anim-side ${creatorWon ? 'is-winner' : 'is-loser'}">
+          <div class="cf-anim-name">${escape(lobby.creator_name || '—')}</div>
+          <div class="cf-anim-value">${fmt(lobby.creator_value)} 🪙</div>
+        </div>
+        <div class="cf-anim-mid">
+          <div class="cf-coin" id="cf-coin">
+            <div class="cf-coin-face cf-coin-front">⚔️</div>
+            <div class="cf-coin-face cf-coin-back">🛡</div>
+          </div>
+        </div>
+        <div class="cf-anim-side ${creatorWon ? 'is-loser' : 'is-winner'}">
+          <div class="cf-anim-name">${escape(lobby.opponent_name || '—')}</div>
+          <div class="cf-anim-value">${fmt(lobby.opponent_value || 0)} 🪙</div>
+        </div>
+      </div>
+      <div class="cf-anim-status" id="cf-anim-status">Подбрасываем монету…</div>
+    </div>
+  `;
+  const coin = document.getElementById('cf-coin');
+  // Pure-CSS spin first (suspense), then settle to the final face
+  coin.classList.add('spinning');
+  if (creatorWon) coin.classList.add('settle-front');
+  else            coin.classList.add('settle-back');
+
+  // After ~3s, replace with the result panel
+  setTimeout(() => {
+    const status = document.getElementById('cf-anim-status');
+    if (status) {
+      const verdict = spectatorMode
+        ? `🏆 ${escape(winnerName || '—')} забрал${winnerName && winnerName.endsWith('а') ? 'а' : ''} ${fmt(lobby.pot_value || 0)} 🪙`
+        : (iWon
+            ? `🏆 ПОБЕДА! Забрал ${fmt(lobby.pot_value || 0)} 🪙`
+            : `💀 ПРОИГРЫШ. ${escape(winnerName || '—')} забрал стак на ${fmt(lobby.pot_value || 0)} 🪙`);
+      status.innerHTML = `<div class="cf-anim-verdict ${iWon ? 'win' : (spectatorMode ? 'neutral' : 'lose')}">${verdict}</div>
+        <button class="btn cf-replay-btn" id="cf-replay">К списку лобби</button>`;
+      document.getElementById('cf-replay')?.addEventListener('click', () => renderCfPvp(area));
+    }
+    if (!spectatorMode) {
+      tg?.HapticFeedback?.notificationOccurred?.(iWon ? 'success' : 'error');
+    }
+  }, 3100);
+}
+
+function _cfRenderSettledView(area, lobby, isCreator) {
+  const creatorWon = lobby.winner_id === lobby.creator_id;
+  _cfRenderAnimation(area, lobby, creatorWon, /*spectatorMode*/ !isCreator && lobby.opponent_id !== (state.me && state.me.tg_id));
 }
 
 // ======================= FORGE =======================
@@ -3996,4 +4449,27 @@ async function playMegaslot(bonusBuy, bonusType) {
   }
   await loadMe();
   await loadCases();
+
+  // Deep-link handler: if app was opened via t.me/<bot>/<app>?startapp=cf_<id>,
+  // jump straight to the PvP screen and auto-open that lobby.
+  try {
+    const startParam = tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param;
+    if (typeof startParam === 'string' && /^cf_\d+$/.test(startParam)) {
+      const lobbyId = parseInt(startParam.slice(3));
+      // Mark for renderCfPvp to auto-jump after rendering hub
+      cfState.pendingLobbyId = lobbyId;
+      // Switch to games view and trigger PvP card
+      showView('games');
+      const grid = document.querySelector('.game-grid');
+      if (grid) grid.style.display = 'none';
+      const area = document.getElementById('game-play-area');
+      if (area) {
+        area.innerHTML = `<button class="back-btn" id="game-back-btn" style="margin-bottom:10px">← к играм</button>`;
+        const holder = document.createElement('div');
+        area.appendChild(holder);
+        document.getElementById('game-back-btn').addEventListener('click', closeGameScreen);
+        renderCfPvp(holder);
+      }
+    }
+  } catch (e) { /* non-critical */ }
 })();

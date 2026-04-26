@@ -48,6 +48,7 @@ def _skin_to_dict(item: dict) -> dict:
         "price": int(item["price"]),
         "acquired_at": item["acquired_at"].isoformat() if item.get("acquired_at") else None,
         "locked": bool(item.get("locked", False)),
+        "coinflip_lobby_id": int(item["coinflip_lobby_id"]) if item.get("coinflip_lobby_id") else 0,
     }
 
 
@@ -753,3 +754,104 @@ async def api_plinko_config(user: dict = Depends(require_user)) -> dict:
 @router.post("/casino/plinko/play")
 async def api_plinko_play(req: PlinkoPlayReq, user: dict = Depends(require_user)) -> dict:
     return await _plinko.play_drop(int(user["id"]), req.bet, req.mode)
+
+
+# ================ PVP COINFLIP (skin duels) ================
+from app.economy import coinflip_pvp as _cfpvp
+
+
+class CFCreateReq(BaseModel):
+    inventory_ids: list[int] = Field(..., min_length=1, max_length=20)
+
+
+class CFJoinReq(BaseModel):
+    lobby_id: int = Field(..., ge=1)
+    inventory_ids: list[int] = Field(..., min_length=1, max_length=20)
+
+
+class CFLobbyIdReq(BaseModel):
+    lobby_id: int = Field(..., ge=1)
+
+
+@router.post("/pvp/coinflip/create")
+async def api_cf_create(req: CFCreateReq, user: dict = Depends(require_user)) -> dict:
+    return await _cfpvp.create_lobby(int(user["id"]), [int(i) for i in req.inventory_ids])
+
+
+@router.post("/pvp/coinflip/join")
+async def api_cf_join(req: CFJoinReq, user: dict = Depends(require_user)) -> dict:
+    return await _cfpvp.join_lobby(int(user["id"]), int(req.lobby_id), [int(i) for i in req.inventory_ids])
+
+
+@router.post("/pvp/coinflip/cancel")
+async def api_cf_cancel(req: CFLobbyIdReq, user: dict = Depends(require_user)) -> dict:
+    return await _cfpvp.cancel_lobby(int(user["id"]), int(req.lobby_id))
+
+
+@router.get("/pvp/coinflip/list")
+async def api_cf_list(user: dict = Depends(require_user)) -> dict:
+    open_ = await _cfpvp.list_open_lobbies(int(user["id"]))
+    recent = await _cfpvp.list_recent_settled(limit=10)
+    return {"open": open_, "recent": recent}
+
+
+@router.get("/pvp/coinflip/lobby/{lobby_id}")
+async def api_cf_get(lobby_id: int, user: dict = Depends(require_user)) -> dict:
+    _ = user
+    lobby = await _cfpvp.get_lobby(int(lobby_id))
+    if lobby is None:
+        raise HTTPException(status_code=404, detail="Лобби не найдено")
+    return lobby
+
+
+@router.post("/pvp/coinflip/share")
+async def api_cf_share(req: CFLobbyIdReq, user: dict = Depends(require_user)) -> dict:
+    """Share an open lobby to the bot's allowed group chat. One-shot per lobby."""
+    tg_id = int(user["id"])
+    lobby = await _cfpvp.get_lobby(int(req.lobby_id))
+    if lobby is None:
+        raise HTTPException(status_code=404, detail="Лобби не найдено")
+    if int(lobby["creator_id"]) != tg_id:
+        raise HTTPException(status_code=403, detail="Не твоё лобби")
+    if lobby["status"] != "open":
+        raise HTTPException(status_code=400, detail="Лобби уже неактивно")
+
+    # Mark as invited (idempotent — second call returns ok=False)
+    mark = await _cfpvp.mark_invited_to_chat(int(req.lobby_id), tg_id)
+    if not mark.get("ok"):
+        return mark
+
+    # Compose message + send to group via bot
+    from app.bot import get_bot
+    from app.config import get_settings
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    s = get_settings()
+    if s.tg_allowed_chat_id is None:
+        return {"ok": False, "error": "Group chat не настроен"}
+    bot = get_bot()
+    creator_name = lobby.get("creator_name") or f"user{lobby['creator_id']}"
+    n_items = len(lobby.get("creator_skins") or [])
+    value = int(lobby.get("creator_value") or 0)
+
+    # Build deep-link to mini app with start_param so the receiver auto-opens this lobby
+    # Format: t.me/<bot>/<app>?startapp=cf_<id>  (Telegram passes start_param to webapp)
+    if s.miniapp_tme_url:
+        deep_link = f"{s.miniapp_tme_url}?startapp=cf_{int(req.lobby_id)}"
+    else:
+        deep_link = (s.miniapp_url or "")
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="⚔️ Принять вызов", url=deep_link),
+    ]])
+    text = (
+        f"⚔️ <b>{creator_name}</b> бросил вызов в Coinflip!\n\n"
+        f"🎒 Ставка: <b>{n_items}</b> предмет(ов) на <b>{value:,} 🪙</b>\n"
+        f"⚖️ Матч: ±10% по стоимости\n"
+        f"⏱ Лобби активно 24ч\n\n"
+        f"Кто рискнёт?"
+    )
+    try:
+        await bot.send_message(s.tg_allowed_chat_id, text, reply_markup=keyboard)
+    except Exception as e:
+        log.warning("coinflip share send_message failed: %s", e)
+        return {"ok": False, "error": "Не удалось отправить в чат"}
+    return {"ok": True}
