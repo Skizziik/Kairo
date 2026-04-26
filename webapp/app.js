@@ -1241,10 +1241,14 @@ const plinkoState = {
   mode: 'classic',
   bet: 100,
   history: [],         // last ~12 multipliers, recent on right
-  activeBalls: 0,      // currently-flying balls (for visual cap)
   lastClickAt: 0,      // anti-double-click rate limit
   ballSeq: 0,          // monotonic ball id
 };
+
+// Source of truth for "balls currently in flight" — live DOM, never desynced.
+function _plinkoBallsInFlight() {
+  return document.querySelectorAll('.pl-svg .pl-ball').length;
+}
 
 const PLINKO_BET_PRESETS = [50, 100, 200, 500, 1000];
 const PLINKO_MIN_CLICK_GAP_MS = 90;     // 11 drops/sec max
@@ -1350,8 +1354,9 @@ function _plinkoPaint() {
   // Wire events
   area.querySelectorAll('.pl-mode-chip[data-mode]').forEach(b => {
     b.addEventListener('click', () => {
-      // Don't allow mode change while balls are in flight (would change board geometry)
-      if (plinkoState.activeBalls > 0) return toast('Сначала пусть упадут все шарики');
+      // Switching mode rebuilds the SVG; in-flight balls would lose their geometry.
+      // Block only if there are ACTUAL balls in the DOM (no stale counter).
+      if (_plinkoBallsInFlight() > 0) return toast('Сначала пусть упадут все шарики');
       plinkoState.mode = b.dataset.mode;
       const newMax = cfg.modes[plinkoState.mode].max_bet;
       if (plinkoState.bet > newMax) plinkoState.bet = newMax;
@@ -1488,8 +1493,8 @@ async function _plinkoDrop() {
   if (now - plinkoState.lastClickAt < PLINKO_MIN_CLICK_GAP_MS) return;
   plinkoState.lastClickAt = now;
 
-  // Cap simultaneous balls (prevents DoS on slow phones)
-  if (plinkoState.activeBalls >= PLINKO_MAX_ACTIVE_BALLS) {
+  // Cap simultaneous balls (prevents DoS on slow phones). DOM-based — never stale.
+  if (_plinkoBallsInFlight() >= PLINKO_MAX_ACTIVE_BALLS) {
     return toast('Слишком много шариков в воздухе');
   }
 
@@ -1571,7 +1576,6 @@ function _plinkoSpawnBall(resp) {
   ball.setAttribute('cx', waypoints[0].x.toFixed(2));
   ball.setAttribute('cy', waypoints[0].y.toFixed(2));
   svg.appendChild(ball);
-  plinkoState.activeBalls += 1;
 
   // Slightly slower drop than before so visuals are clearly visible.
   // 8 rows ~2.0s, 12 rows ~2.4s, 16 rows ~2.6s
@@ -1581,11 +1585,8 @@ function _plinkoSpawnBall(resp) {
   let lastSegIdx = -1;
 
   function frame(now) {
-    // Ball was removed externally (e.g. paint reset) — abort
-    if (!ball.parentNode) {
-      plinkoState.activeBalls = Math.max(0, plinkoState.activeBalls - 1);
-      return;
-    }
+    // Ball was removed externally (e.g. SVG rebuilt by mode change) — just stop.
+    if (!ball.parentNode) return;
     const elapsed = now - startedAt;
 
     if (elapsed >= totalDur) {
@@ -1635,8 +1636,6 @@ function _plinkoSpawnBall(resp) {
 }
 
 function _plinkoBallLanded(ball, resp) {
-  plinkoState.activeBalls = Math.max(0, plinkoState.activeBalls - 1);
-
   // Credit the payout NOW (bet was deducted on click; payout arrives on landing).
   // resp.payout = bet * multiplier (0 on full loss). Visible balance += payout.
   if (typeof resp.payout === 'number' && resp.payout > 0) {
