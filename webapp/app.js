@@ -415,24 +415,30 @@ async function openCaseMulti(caseId, count) {
   document.querySelectorAll('.case-open-marker, .case-open-reel').forEach(el => el.style.display = 'none');
   titleEl.textContent = `${caseData.name} × ${count}`;
   resultEl.classList.add('shown');
-  // 5 parallel reels, each spinning placeholder symbols
-  const pool = caseData.items || [];
-  const placeholders = pool.length > 0 ? pool : [{ image_url: '', name: '?', rarity: 'mil-spec' }];
-  const buildStrip = () => {
-    let html = '';
-    for (let i = 0; i < 12; i++) {
-      const it = placeholders[Math.floor(Math.random() * placeholders.length)];
-      html += `<div class="mr-cell rarity-${it.rarity}"><img src="${it.image_url || ''}" alt="" /></div>`;
-    }
-    return html;
-  };
-  let reelsHtml = '';
-  for (let i = 0; i < count; i++) {
-    reelsHtml += `<div class="multi-reel" data-reel="${i}"><div class="multi-reel-track" id="mr-track-${i}">${buildStrip()}</div><div class="multi-reel-marker"></div></div>`;
-  }
-  resultEl.innerHTML = `<div class="multi-reels-stack">${reelsHtml}</div>`;
   actionsEl.style.display = 'none';
 
+  // Same params as single-open: 60 items, winner at index 53, 6s cubic-bezier
+  const pool = caseData.items || [];
+  const placeholders = pool.length > 0 ? pool : [{ image_url: '', name: '?', rarity: 'mil-spec' }];
+  const REEL_COUNT = 60;
+  const WINNER_INDEX = 53;
+  const CELL_W = 90; // matches CSS .mr-cell flex-basis
+
+  // Build N reels with random placeholders right away (visible during API call — no blank pause)
+  const reels = [];
+  let reelsHtml = '';
+  for (let i = 0; i < count; i++) {
+    const cells = [];
+    for (let j = 0; j < REEL_COUNT; j++) {
+      const it = placeholders[Math.floor(Math.random() * placeholders.length)];
+      cells.push(`<div class="mr-cell rarity-${it.rarity}"><img src="${it.image_url || ''}" alt="" /></div>`);
+    }
+    reels.push(cells);
+    reelsHtml += `<div class="multi-reel" data-reel="${i}"><div class="multi-reel-track" id="mr-track-${i}">${cells.join('')}</div><div class="multi-reel-marker"></div></div>`;
+  }
+  resultEl.innerHTML = `<div class="multi-reels-stack">${reelsHtml}</div>`;
+
+  // Fire API call in parallel with rendered placeholders (user sees reels immediately)
   let resp;
   try {
     resp = await api('/api/case/open_multi', {
@@ -449,8 +455,6 @@ async function openCaseMulti(caseId, count) {
     showView('cases');
     return;
   }
-
-  // Sanity: warn if some opens failed
   if (resp.opened < (resp.expected || count)) {
     toast(`⚠ Открылось только ${resp.opened} из ${resp.expected || count}`, 4500);
   }
@@ -466,37 +470,35 @@ async function openCaseMulti(caseId, count) {
     'Factory New':'FN','Minimal Wear':'MW','Field-Tested':'FT','Well-Worn':'WW','Battle-Scarred':'BS'
   }[w] || w || '');
 
-  // For each opened case, append the WIN tile to its reel and animate scroll to it
+  // Swap in winner cells at index 53 of each reel
   for (let i = 0; i < resp.results.length; i++) {
     const r = resp.results[i];
     const skin = r.skin || {};
     const rarity = skin.rarity || 'mil-spec';
     const img = skin.image_url || '';
     const track = document.getElementById(`mr-track-${i}`);
-    if (track) {
-      // Append winner cell at the end of the strip so we can translate to it
-      track.innerHTML += `<div class="mr-cell winner rarity-${rarity}"><img src="${img}" alt="" /></div>`;
+    if (!track) continue;
+    const cellEls = track.children;
+    if (cellEls[WINNER_INDEX]) {
+      cellEls[WINNER_INDEX].outerHTML = `<div class="mr-cell winner rarity-${rarity}"><img src="${img}" alt="" /></div>`;
     }
   }
 
-  // Trigger the spin animation: each reel scrolls left by N*cellWidth where N is the offset to winner
+  // Trigger spin — IDENTICAL to single-open: 6s cubic-bezier(0.15, 0.45, 0.1, 1) with jitter
   await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
   const reelEls = document.querySelectorAll('.multi-reel');
-  const cellW = 90; // matches CSS
-  const winnerOffset = 12 * cellW; // 12 placeholder cells before winner
-  reelEls.forEach((el, idx) => {
+  reelEls.forEach((el) => {
     const track = el.querySelector('.multi-reel-track');
     if (!track) return;
-    const dur = 1500 + idx * 250;
-    track.style.transition = `transform ${dur}ms cubic-bezier(0.18, 0.5, 0.2, 1)`;
-    // Center winner under marker (subtract half reel width)
+    track.style.transition = 'transform 6s cubic-bezier(0.15, 0.45, 0.1, 1)';
     const reelW = el.getBoundingClientRect().width;
-    track.style.transform = `translateX(-${winnerOffset - (reelW / 2 - cellW / 2)}px)`;
+    const offset = (WINNER_INDEX * CELL_W) - (reelW / 2) + (CELL_W / 2);
+    const jitter = (Math.random() - 0.5) * (CELL_W * 0.4);
+    track.style.transform = `translateX(-${offset + jitter}px)`;
   });
 
-  // Wait until last reel stops
-  const totalSpinTime = 1500 + (resp.results.length - 1) * 250 + 200;
-  await new Promise(r => setTimeout(r, totalSpinTime));
+  // Wait for animation completion
+  await new Promise(r => setTimeout(r, 6100));
 
   // Show summary below
   const totalGot = resp.results.reduce((sum, r) => sum + (r.price || 0), 0);
