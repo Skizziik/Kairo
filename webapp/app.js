@@ -566,8 +566,27 @@ function renderInventory() {
   document.getElementById('inv-count').textContent = inv.count;
   document.getElementById('inv-value').textContent = fmt(inv.total_value);
 
+  // Coinflip-lock notice — shown only when at least one item is staked in PvP
+  const summaryEl = document.querySelector('.inv-summary');
+  let cfNote = document.getElementById('inv-cf-locked-note');
+  const lockedCount = inv.coinflip_locked_count || 0;
+  const lockedValue = inv.coinflip_locked_value || 0;
+  if (lockedCount > 0) {
+    if (!cfNote) {
+      cfNote = document.createElement('div');
+      cfNote.id = 'inv-cf-locked-note';
+      cfNote.className = 'inv-cf-locked';
+      summaryEl?.insertAdjacentElement('afterend', cfNote);
+    }
+    cfNote.innerHTML = `🔒 <b>${lockedCount}</b> предмет(ов) на <b>${fmt(lockedValue)} 🪙</b> в Coinflip-лобби`;
+  } else if (cfNote) {
+    cfNote.remove();
+  }
+
   if (!inv.items.length) {
-    grid.innerHTML = '<div class="loader">Пусто. Открой первый кейс!</div>';
+    grid.innerHTML = lockedCount > 0
+      ? '<div class="loader">Все скины поставлены в coinflip-лобби. Жди исхода или отмени лобби.</div>'
+      : '<div class="loader">Пусто. Открой первый кейс!</div>';
     return;
   }
 

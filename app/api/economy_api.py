@@ -252,11 +252,24 @@ async def api_case_pool(case_id: int, user: dict = Depends(require_user)) -> dic
 async def api_inventory(user: dict = Depends(require_user)) -> dict:
     tg_id = int(user["id"])
     items = await eco.inventory_of(tg_id, limit=500)
-    total_value = sum(int(i["price"]) for i in items)
+    # Items currently locked in a coinflip lobby are physically still owned by
+    # the player but are NOT part of their visible inventory — they belong to
+    # the pot until the lobby resolves. Bucket them separately so the UI can
+    # show a 'locked in coinflip' note + filter them out of sells/uses.
+    visible: list[dict] = []
+    locked:  list[dict] = []
+    for i in items:
+        if i.get("coinflip_lobby_id"):
+            locked.append(i)
+        else:
+            visible.append(i)
     return {
-        "count": len(items),
-        "total_value": total_value,
-        "items": [_skin_to_dict(i) for i in items],
+        "count":             len(visible),
+        "total_value":       sum(int(i["price"]) for i in visible),
+        "items":             [_skin_to_dict(i) for i in visible],
+        "coinflip_locked_count": len(locked),
+        "coinflip_locked_value": sum(int(i["price"]) for i in locked),
+        "coinflip_locked_items": [_skin_to_dict(i) for i in locked],
     }
 
 

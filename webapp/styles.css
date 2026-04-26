@@ -4758,6 +4758,22 @@ h2 {
   letter-spacing: 1.5px; font-weight: 900;
   box-shadow: 0 0 6px rgba(245,176,66,0.5);
 }
+
+/* Inventory: notice about coinflip-locked items */
+.inv-cf-locked {
+  margin: 8px 14px;
+  padding: 10px 12px;
+  background: linear-gradient(180deg, rgba(245,176,66,0.12), rgba(245,176,66,0.04));
+  border: 1px solid rgba(245,176,66,0.4);
+  border-radius: 8px;
+  color: var(--accent-gold);
+  font-size: 13px;
+  font-family: "Courier New", monospace;
+  letter-spacing: 0.5px;
+  text-align: center;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+}
+.inv-cf-locked b { color: #ffd984; }
 .cf-lobby-row { display: flex; align-items: center; justify-content: space-between; }
 .cf-lobby-creator { font-weight: 800; font-size: 14px; color: #fff; }
 .cf-mine-tag { font-size: 9px; padding: 1px 5px; border-radius: 3px; background: var(--cf-blue); color: #000; margin-left: 4px; vertical-align: middle; letter-spacing: 1px; }
