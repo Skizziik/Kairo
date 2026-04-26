@@ -136,12 +136,14 @@ async def _enrich_lobby(conn, lobby: dict) -> dict:
         )
         umap = {int(r["tg_id"]): r for r in urows}
         c = umap.get(lobby["creator_id"])
-        out["creator_name"] = (c["username"] or c["first_name"] or f"user{lobby['creator_id']}") if c else f"user{lobby['creator_id']}"
+        out["creator_name"] = (c["first_name"] or c["username"] or f"user{lobby['creator_id']}") if c else f"user{lobby['creator_id']}"
         if lobby.get("opponent_id"):
             o = umap.get(lobby["opponent_id"])
-            out["opponent_name"] = (o["username"] or o["first_name"] or f"user{lobby['opponent_id']}") if o else None
+            out["opponent_name"] = (o["first_name"] or o["username"] or f"user{lobby['opponent_id']}") if o else None
         else:
             out["opponent_name"] = None
+    # Flag bot-owned lobbies for the frontend
+    out["is_bot"] = (int(lobby.get("creator_id") or 0) == BOT_USER_ID)
     return out
 
 
@@ -279,12 +281,19 @@ async def join_lobby(opponent_id: int, lobby_id: int, inv_ids: list[int]) -> dic
             creator_wins = roll < creator_chance
             winner_id = int(lrow["creator_id"]) if creator_wins else opponent_id
 
-            # Transfer ALL skins to the winner (just rewrite user_id) and clear locks
-            await conn.execute(
-                "update economy_inventory set user_id = $1, coinflip_lobby_id = null "
-                "where coinflip_lobby_id = $2",
-                winner_id, lobby_id,
-            )
+            # If the casino bot is the winner, delete the entire pot — the bot is
+            # the house, it doesn't accumulate inventory. Otherwise transfer to winner.
+            if winner_id == BOT_USER_ID:
+                await conn.execute(
+                    "delete from economy_inventory where coinflip_lobby_id = $1",
+                    lobby_id,
+                )
+            else:
+                await conn.execute(
+                    "update economy_inventory set user_id = $1, coinflip_lobby_id = null "
+                    "where coinflip_lobby_id = $2",
+                    winner_id, lobby_id,
+                )
 
             # Mark lobby as settled
             await conn.execute(
@@ -383,26 +392,40 @@ async def cancel_lobby(creator_id: int, lobby_id: int) -> dict:
 # ============================================================
 
 async def expire_old() -> int:
-    """Expire any lobby past its TTL while still open. Returns count."""
+    """Expire any lobby past its TTL while still open. Returns count.
+
+    Special handling for bot-owned lobbies: instead of just unlocking the
+    inventory (which would leave it sitting unused on the bot), we DELETE the
+    rows — the bot "sells" stale offers and rotates fresh stock.
+    Real-user lobbies just have their lock cleared so the player gets skins back.
+    """
     async with pool().acquire() as conn:
         async with conn.transaction():
             rows = await conn.fetch(
-                "select id from coinflip_lobbies "
+                "select id, creator_id from coinflip_lobbies "
                 "where status = 'open' and expires_at < now() for update",
             )
-            ids = [int(r["id"]) for r in rows]
-            if not ids:
+            if not rows:
                 return 0
-            await conn.execute(
-                "update economy_inventory set coinflip_lobby_id = null "
-                "where coinflip_lobby_id = any($1::bigint[])",
-                ids,
-            )
+            bot_lobby_ids   = [int(r["id"]) for r in rows if int(r["creator_id"]) == BOT_USER_ID]
+            human_lobby_ids = [int(r["id"]) for r in rows if int(r["creator_id"]) != BOT_USER_ID]
+            if bot_lobby_ids:
+                await conn.execute(
+                    "delete from economy_inventory where coinflip_lobby_id = any($1::bigint[])",
+                    bot_lobby_ids,
+                )
+            if human_lobby_ids:
+                await conn.execute(
+                    "update economy_inventory set coinflip_lobby_id = null "
+                    "where coinflip_lobby_id = any($1::bigint[])",
+                    human_lobby_ids,
+                )
+            all_ids = bot_lobby_ids + human_lobby_ids
             await conn.execute(
                 "update coinflip_lobbies set status = 'expired' where id = any($1::bigint[])",
-                ids,
+                all_ids,
             )
-    return len(ids)
+    return len(rows)
 
 
 # ============================================================
@@ -481,3 +504,175 @@ async def mark_invited_to_chat(lobby_id: int, creator_id: int) -> dict:
                 lobby_id,
             )
     return {"ok": True}
+
+
+# ============================================================
+# CASINO BOT — autonomous lobby creator
+# ============================================================
+#
+# A house bot keeps ~24 open lobbies at all times. One spawns every hour with
+# random skins / value, lives 24h, then the inventory is auto-deleted (the bot
+# "sells" stale offers). When a player beats the bot, they keep both stacks.
+# When the bot wins (player joined and lost), all skins are deleted (the bot
+# is the house — it doesn't accumulate inventory).
+
+BOT_USER_ID  = 1                 # synthetic tg_id for the casino bot
+BOT_USERNAME = "casino_bot"
+BOT_DISPLAY_NAME = "🤖 RIP-BOT"
+BOT_LOBBY_TARGET = 24
+
+
+async def ensure_bot_user() -> None:
+    async with pool().acquire() as conn:
+        await conn.execute(
+            "insert into users (tg_id, username, first_name) values ($1, $2, $3) "
+            "on conflict (tg_id) do update set username = excluded.username, first_name = excluded.first_name",
+            BOT_USER_ID, BOT_USERNAME, BOT_DISPLAY_NAME,
+        )
+        await conn.execute(
+            "insert into economy_users (tg_id) values ($1) on conflict (tg_id) do nothing",
+            BOT_USER_ID,
+        )
+
+
+# Stake brackets — drives the variance of bot offers so there are cheap/mid/whale lobbies
+_BOT_BRACKETS = [
+    # (label, weight, item_count_range, rarity_weights)
+    ("cheap",   55, (1, 3),  {"consumer": 25, "industrial": 35, "mil-spec": 30, "restricted": 10}),
+    ("mid",     30, (2, 4),  {"mil-spec": 25, "restricted": 35, "classified": 30, "covert": 10}),
+    ("premium", 12, (2, 5),  {"restricted": 15, "classified": 35, "covert": 40, "exceedingly_rare": 10}),
+    ("whale",    3, (1, 3),  {"covert": 55, "exceedingly_rare": 45}),
+]
+
+
+async def _pick_bot_skins() -> list[dict]:
+    import random as _r
+    from app.economy.pricing import compute_price, roll_float, wear_from_float
+
+    labels  = [b[0] for b in _BOT_BRACKETS]
+    weights = [b[1] for b in _BOT_BRACKETS]
+    chosen  = _r.choices(labels, weights=weights, k=1)[0]
+    bracket = next(b for b in _BOT_BRACKETS if b[0] == chosen)
+    n_min, n_max  = bracket[2]
+    rarity_weights = bracket[3]
+    n_items = _r.randint(n_min, n_max)
+
+    out: list[dict] = []
+    rarities  = list(rarity_weights.keys())
+    rweights  = list(rarity_weights.values())
+    async with pool().acquire() as conn:
+        for _ in range(n_items):
+            rarity = _r.choices(rarities, weights=rweights, k=1)[0]
+            row = await conn.fetchrow(
+                "select id, base_price from economy_skins_catalog "
+                "where rarity = $1 order by random() limit 1",
+                rarity,
+            )
+            if row is None:
+                continue
+            float_val = roll_float()
+            wear, _ = wear_from_float(float_val)
+            stat_trak = _r.random() < 0.05
+            price = compute_price(int(row["base_price"]), float_val, wear, stat_trak)
+            out.append({
+                "skin_id":   int(row["id"]),
+                "float":     float(float_val),
+                "wear":      wear,
+                "stat_trak": stat_trak,
+                "price":     int(price),
+            })
+    return out
+
+
+async def create_bot_lobby(expire_in_hours: int = 24) -> int | None:
+    """Spawn a fresh bot-owned lobby. Inventory rows are conjured at insertion."""
+    skins = await _pick_bot_skins()
+    if not skins:
+        log.warning("bot lobby: no skins picked")
+        return None
+
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            inv_ids: list[int] = []
+            for s in skins:
+                inv_id = await conn.fetchval(
+                    "insert into economy_inventory "
+                    "(user_id, skin_id, float_value, wear, stat_trak, price, source) "
+                    "values ($1, $2, $3, $4, $5, $6, 'bot_lobby') returning id",
+                    BOT_USER_ID, s["skin_id"], s["float"], s["wear"], s["stat_trak"], s["price"],
+                )
+                inv_ids.append(int(inv_id))
+            total_value = sum(int(s["price"]) for s in skins)
+            lobby_id = await conn.fetchval(
+                "insert into coinflip_lobbies (creator_id, creator_skins, creator_value, expires_at) "
+                "values ($1, $2::jsonb, $3, now() + ($4 || ' hours')::interval) returning id",
+                BOT_USER_ID, json.dumps(inv_ids), total_value, str(expire_in_hours),
+            )
+            await conn.execute(
+                "update economy_inventory set coinflip_lobby_id = $2 where id = any($1::bigint[])",
+                inv_ids, lobby_id,
+            )
+    return int(lobby_id)
+
+
+async def _count_open_bot_lobbies() -> int:
+    async with pool().acquire() as conn:
+        n = await conn.fetchval(
+            "select count(*) from coinflip_lobbies "
+            "where creator_id = $1 and status = 'open' and expires_at > now()",
+            BOT_USER_ID,
+        )
+    return int(n or 0)
+
+
+async def cleanup_orphan_bot_inventory() -> int:
+    """Hard-delete any bot-owned inventory rows not tied to an active lobby.
+    Called after settles where bot won (so we don't accumulate ghost skins).
+    Also covers any inconsistencies after expire/cancel paths."""
+    async with pool().acquire() as conn:
+        n = await conn.fetchval(
+            "with del as ("
+            "  delete from economy_inventory "
+            "  where user_id = $1 and coinflip_lobby_id is null "
+            "  returning 1"
+            ") select count(*) from del",
+            BOT_USER_ID,
+        )
+    return int(n or 0)
+
+
+async def bot_coinflip_loop() -> None:
+    """Background task: maintain ~24 active bot lobbies, +1 every hour.
+
+    On startup, backfills with staggered expiry so they don't all expire at the
+    same minute. Each cycle: create one fresh lobby + clean orphan inventory.
+    """
+    import asyncio
+    try:
+        await ensure_bot_user()
+    except Exception:
+        log.exception("bot coinflip: ensure_bot_user failed")
+
+    # Startup backfill — stagger so they expire 1h apart
+    try:
+        existing = await _count_open_bot_lobbies()
+        if existing < BOT_LOBBY_TARGET:
+            need = BOT_LOBBY_TARGET - existing
+            for i in range(need):
+                hrs = max(1, i + 1)
+                await create_bot_lobby(expire_in_hours=hrs)
+            log.info("bot coinflip: backfilled %d lobbies on startup", need)
+    except Exception:
+        log.exception("bot coinflip: backfill failed")
+
+    # Hourly: spawn a new full-life lobby + cleanup
+    while True:
+        try:
+            await asyncio.sleep(3600)
+            await create_bot_lobby(expire_in_hours=24)
+            await expire_old()
+            killed = await cleanup_orphan_bot_inventory()
+            if killed:
+                log.info("bot coinflip: cleaned %d orphan bot items", killed)
+        except Exception:
+            log.exception("bot coinflip: hourly tick failed")

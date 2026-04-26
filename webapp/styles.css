@@ -4743,6 +4743,21 @@ h2 {
 }
 .cf-lobby-card:hover { border-color: var(--cf-amber); transform: translateY(-1px); }
 .cf-lobby-card.mine { border-color: rgba(90,169,255,0.6); background: rgba(90,169,255,0.08); }
+.cf-lobby-card.bot {
+  border-color: rgba(245,176,66,0.5);
+  background:
+    repeating-linear-gradient(135deg, rgba(245,176,66,0.04) 0 8px, transparent 8px 16px),
+    var(--cf-plate);
+}
+.cf-lobby-card.bot:hover { border-color: var(--cf-amber); }
+.cf-bot-tag {
+  display: inline-block;
+  font-size: 9px; padding: 1px 5px; border-radius: 3px;
+  background: linear-gradient(135deg, #f5b042, #d68417);
+  color: #1a1004; margin-left: 4px; vertical-align: middle;
+  letter-spacing: 1.5px; font-weight: 900;
+  box-shadow: 0 0 6px rgba(245,176,66,0.5);
+}
 .cf-lobby-row { display: flex; align-items: center; justify-content: space-between; }
 .cf-lobby-creator { font-weight: 800; font-size: 14px; color: #fff; }
 .cf-mine-tag { font-size: 9px; padding: 1px 5px; border-radius: 3px; background: var(--cf-blue); color: #000; margin-left: 4px; vertical-align: middle; letter-spacing: 1px; }

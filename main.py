@@ -84,6 +84,10 @@ async def lifespan(_: FastAPI):
     else:
         log.info("chat events disabled (CASINO_CHAT_EVENTS_ENABLED=false)")
 
+    # Casino-bot coinflip — keeps ~24 active lobbies, +1 every hour
+    scheduler_tasks.append(asyncio.create_task(_cfpvp.bot_coinflip_loop()))
+    log.info("coinflip bot loop started (target %d active lobbies)", _cfpvp.BOT_LOBBY_TARGET)
+
     try:
         yield
     finally:

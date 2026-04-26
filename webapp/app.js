@@ -1895,15 +1895,21 @@ function _cfLobbyCard(l) {
   const previews = skins.slice(0, 4).map(s => `<img class="cf-thumb rarity-${s.rarity}" src="${s.image_url}" alt="" />`).join('');
   const more = skins.length > 4 ? `<span class="cf-thumb-more">+${skins.length - 4}</span>` : '';
   const expiresIn = l.expires_at ? Math.max(0, Math.round((new Date(l.expires_at) - Date.now()) / 60000)) : null;
+  // Format expiry time as "Hh Mm" if > 60 min
+  const expiryStr = expiresIn === null ? '' : (expiresIn >= 60 ? `${Math.floor(expiresIn/60)}ч ${expiresIn%60}м` : `${expiresIn}м`);
+  const classExtra = (l.is_mine ? ' mine' : '') + (l.is_bot ? ' bot' : '');
+  const tagHtml = l.is_mine
+    ? '<span class="cf-mine-tag">ТЫ</span>'
+    : (l.is_bot ? '<span class="cf-bot-tag">BOT</span>' : '');
   return `
-    <div class="cf-lobby-card ${l.is_mine ? 'mine' : ''}" data-lobby-id="${l.id}">
+    <div class="cf-lobby-card${classExtra}" data-lobby-id="${l.id}">
       <div class="cf-lobby-row">
-        <div class="cf-lobby-creator">${escape(l.creator_name || '—')}${l.is_mine ? ' <span class="cf-mine-tag">ТЫ</span>' : ''}</div>
+        <div class="cf-lobby-creator">${escape(l.creator_name || '—')} ${tagHtml}</div>
         <div class="cf-lobby-value">${fmt(l.creator_value)} 🪙</div>
       </div>
       <div class="cf-lobby-thumbs">${previews}${more}</div>
       <div class="cf-lobby-row cf-lobby-foot">
-        <div class="cf-lobby-meta">${skins.length} предмет(ов)${expiresIn !== null ? ` · ${expiresIn}м осталось` : ''}</div>
+        <div class="cf-lobby-meta">${skins.length} предмет(ов)${expiryStr ? ` · ${expiryStr}` : ''}</div>
         ${l.is_mine
           ? `<button class="cf-cancel-btn" data-cancel-lobby="${l.id}">отменить</button>`
           : `<div class="cf-lobby-action">⚔️ Принять →</div>`}
