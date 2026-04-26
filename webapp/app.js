@@ -2661,9 +2661,14 @@ async function playMegaslot(bonusBuy, bonusType) {
       return;
     }
 
-    // Save final balance — applied AFTER all animations finish so user sees the
-    // result land at the end, not before they've watched the spin/free-spin.
-    const finalBalance = (typeof r.new_balance === 'number') ? r.new_balance : null;
+    // Apply balance IMMEDIATELY — the server has already committed the spin
+    // (cost deducted + winnings credited atomically). If we defer, user can
+    // navigate away mid-animation and exploit by seeing 'no deduction'.
+    if (typeof r.new_balance === 'number') {
+      state.me.balance = r.new_balance;
+      const bel = document.getElementById('balance-display');
+      if (bel) bel.textContent = fmt(state.me.balance);
+    }
 
     // Base spin animation (skipped on bonus buy) — plays even on no-win spins
     if (r.base_spin) {
@@ -2744,13 +2749,6 @@ async function playMegaslot(bonusBuy, bonusType) {
         ? `✅ Итого: +${fmt(delta)} 🪙${capped}`
         : `❌ ${fmt(delta)} 🪙`;
       out.className = 'megaslot-out ' + (delta >= 0 ? 'win' : 'lose');
-    }
-
-    // NOW apply final balance (after all animations + summary)
-    if (finalBalance != null) {
-      state.me.balance = finalBalance;
-      const bel = document.getElementById('balance-display');
-      if (bel) bel.textContent = fmt(state.me.balance);
     }
   } catch (e) {
     toast(e.message);
