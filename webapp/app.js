@@ -436,8 +436,12 @@ async function openCaseMulti(caseId, count) {
     return;
   }
 
+  // Sanity: warn if some opens failed
+  if (resp.opened < (resp.expected || count)) {
+    toast(`⚠ Открылось только ${resp.opened} из ${resp.expected || count}`, 4500);
+  }
+
   tg?.HapticFeedback?.impactOccurred?.('heavy');
-  // Update balance from last result
   const last = resp.results[resp.results.length - 1];
   if (last && typeof last.new_balance === 'number') {
     state.me.balance = last.new_balance;
@@ -445,20 +449,29 @@ async function openCaseMulti(caseId, count) {
   }
 
   // Render result grid (one card per opened case) with stagger fade-in
+  const wearShort = (w) => ({
+    'Factory New':'FN','Minimal Wear':'MW','Field-Tested':'FT','Well-Worn':'WW','Battle-Scarred':'BS'
+  }[w] || w || '');
   const cards = resp.results.map((r, i) => {
-    const it = r.item;
+    const skin = r.skin || {};
+    const rarity = skin.rarity || 'mil-spec';
+    const name = skin.full_name || 'Unknown';
+    const img = skin.image_url || '';
+    const ws = wearShort(r.wear);
+    const price = r.price || 0;
+    const st = !!r.stat_trak;
     return `
-      <div class="multi-open-card rarity-${it.rarity}" style="animation-delay:${i * 150}ms">
-        ${it.stat_trak ? '<div class="stattrak-badge">ST™</div>' : ''}
-        <img class="result-img" src="${it.image_url}" alt="" />
-        <div class="result-name">${escape(it.name)}</div>
-        <div class="result-meta">${it.wear_short} · ${fmt(it.price)} 🪙</div>
+      <div class="multi-open-card rarity-${rarity}" style="animation-delay:${i * 150}ms">
+        ${st ? '<div class="stattrak-badge">ST™</div>' : ''}
+        <img class="result-img" src="${img}" alt="" />
+        <div class="result-name">${escape(name)}</div>
+        <div class="result-meta">${ws} · ${fmt(price)} 🪙</div>
       </div>
     `;
   }).join('');
 
   // Calculate net delta
-  const totalGot = resp.results.reduce((sum, r) => sum + (r.item?.price || 0), 0);
+  const totalGot = resp.results.reduce((sum, r) => sum + (r.price || 0), 0);
   const netDelta = totalGot - totalCost;
 
   resultEl.innerHTML = `
