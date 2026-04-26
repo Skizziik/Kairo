@@ -438,51 +438,13 @@ async function openCaseMulti(caseId, count) {
   }
   resultEl.innerHTML = `<div class="multi-reels-stack">${reelsHtml}</div>`;
 
-  // Fire API call in parallel with rendered placeholders (user sees reels immediately)
-  let resp;
-  try {
-    resp = await api('/api/case/open_multi', {
-      method: 'POST',
-      body: JSON.stringify({ case_id: caseId, count }),
-    });
-  } catch (e) {
-    toast(`Не открылся: ${e.message}`);
-    showView('cases');
-    return;
-  }
-  if (!resp.ok) {
-    toast(resp.error || 'Ошибка');
-    showView('cases');
-    return;
-  }
-  if (resp.opened < (resp.expected || count)) {
-    toast(`⚠ Открылось только ${resp.opened} из ${resp.expected || count}`, 4500);
-  }
-
+  // Fire API call but DON'T await — start the spin immediately so there's no perceived pause.
+  // The winner cells get swapped in mid-spin (during the fast/blurred phase the player can't see details anyway).
   tg?.HapticFeedback?.impactOccurred?.('heavy');
-  const last = resp.results[resp.results.length - 1];
-  if (last && typeof last.new_balance === 'number') {
-    state.me.balance = last.new_balance;
-    document.getElementById('balance-display').textContent = fmt(state.me.balance);
-  }
-
-  const wearShort = (w) => ({
-    'Factory New':'FN','Minimal Wear':'MW','Field-Tested':'FT','Well-Worn':'WW','Battle-Scarred':'BS'
-  }[w] || w || '');
-
-  // Swap in winner cells at index 53 of each reel
-  for (let i = 0; i < resp.results.length; i++) {
-    const r = resp.results[i];
-    const skin = r.skin || {};
-    const rarity = skin.rarity || 'mil-spec';
-    const img = skin.image_url || '';
-    const track = document.getElementById(`mr-track-${i}`);
-    if (!track) continue;
-    const cellEls = track.children;
-    if (cellEls[WINNER_INDEX]) {
-      cellEls[WINNER_INDEX].outerHTML = `<div class="mr-cell winner rarity-${rarity}"><img src="${img}" alt="" /></div>`;
-    }
-  }
+  const apiPromise = api('/api/case/open_multi', {
+    method: 'POST',
+    body: JSON.stringify({ case_id: caseId, count }),
+  });
 
   // Trigger spin — IDENTICAL to single-open: 6s cubic-bezier(0.15, 0.45, 0.1, 1) with jitter
   await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
@@ -497,7 +459,48 @@ async function openCaseMulti(caseId, count) {
     track.style.transform = `translateX(-${offset + jitter}px)`;
   });
 
-  // Wait for animation completion
+  // While the spin plays, await the API result and swap winner cells before the reel decelerates onto them.
+  let resp;
+  try {
+    resp = await apiPromise;
+  } catch (e) {
+    toast(`Не открылся: ${e.message}`);
+    showView('cases');
+    return;
+  }
+  if (!resp.ok) {
+    toast(resp.error || 'Ошибка');
+    showView('cases');
+    return;
+  }
+  if (resp.opened < (resp.expected || count)) {
+    toast(`⚠ Открылось только ${resp.opened} из ${resp.expected || count}`, 4500);
+  }
+  const last = resp.results[resp.results.length - 1];
+  if (last && typeof last.new_balance === 'number') {
+    state.me.balance = last.new_balance;
+    document.getElementById('balance-display').textContent = fmt(state.me.balance);
+  }
+
+  const wearShort = (w) => ({
+    'Factory New':'FN','Minimal Wear':'MW','Field-Tested':'FT','Well-Worn':'WW','Battle-Scarred':'BS'
+  }[w] || w || '');
+
+  // Swap winners at index 53. Spin is in fast-scroll phase so the swap is invisible.
+  for (let i = 0; i < resp.results.length; i++) {
+    const r = resp.results[i];
+    const skin = r.skin || {};
+    const rarity = skin.rarity || 'mil-spec';
+    const img = skin.image_url || '';
+    const track = document.getElementById(`mr-track-${i}`);
+    if (!track) continue;
+    const cellEls = track.children;
+    if (cellEls[WINNER_INDEX]) {
+      cellEls[WINNER_INDEX].outerHTML = `<div class="mr-cell winner rarity-${rarity}"><img src="${img}" alt="" /></div>`;
+    }
+  }
+
+  // Wait for animation completion (started ~immediately after click)
   await new Promise(r => setTimeout(r, 6100));
 
   // Show summary below
