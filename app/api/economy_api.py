@@ -21,6 +21,11 @@ class OpenCaseReq(BaseModel):
     case_id: int = Field(..., ge=1)
 
 
+class OpenCaseMultiReq(BaseModel):
+    case_id: int = Field(..., ge=1)
+    count: int = Field(default=1, ge=1, le=5)
+
+
 def _skin_to_dict(item: dict) -> dict:
     """Normalize inventory row for JSON output."""
     return {
@@ -145,6 +150,23 @@ async def api_case_open(req: OpenCaseReq, user: dict = Depends(require_user)) ->
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("error", "error"))
     return result
+
+
+@router.post("/case/open_multi")
+async def api_case_open_multi(req: OpenCaseMultiReq, user: dict = Depends(require_user)) -> dict:
+    """Open the same case `count` times (max 5). Returns list of results.
+    Stops early if user runs out of coins."""
+    tg_id = int(user["id"])
+    results = []
+    for i in range(req.count):
+        r = await eco.open_case(tg_id, req.case_id)
+        if not r.get("ok"):
+            if i == 0:
+                raise HTTPException(status_code=400, detail=r.get("error", "error"))
+            # Partial open succeeded then ran out of money — return what we got
+            break
+        results.append(r)
+    return {"ok": True, "results": results, "opened": len(results)}
 
 
 @router.get("/case/{case_id}/pool")

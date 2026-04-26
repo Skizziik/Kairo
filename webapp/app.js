@@ -273,9 +273,13 @@ async function openCasePreview(caseId) {
           <span class="btn-icon">🎁</span>
           <span class="btn-text">Открыть за ${fmt(data.price)} 🪙</span>
         </button>
+        <button class="btn big-btn case-open-5x-btn" id="case-preview-open5-btn">
+          ⚡ Открыть 5× за ${fmt(data.price * 5)} 🪙
+        </button>
       </div>
     `;
     document.getElementById('case-preview-open-btn').addEventListener('click', () => openCase(caseId));
+    document.getElementById('case-preview-open5-btn').addEventListener('click', () => openCaseMulti(caseId, 5));
   } catch (e) {
     wrap.innerHTML = `<div class="loader">Ошибка: ${e.message}</div>`;
   }
@@ -393,6 +397,79 @@ async function openCase(caseId) {
       loadInventory();
     };
   }, 6100);
+}
+
+// =================== MULTI-OPEN ===================
+async function openCaseMulti(caseId, count) {
+  const caseData = state.currentCase;
+  if (!caseData) return;
+  const totalCost = caseData.price * count;
+  if (!confirm(`Открыть ${count}× за ${fmt(totalCost)} 🪙?`)) return;
+
+  showView('case-open');
+  const titleEl = document.getElementById('case-open-title');
+  const resultEl = document.getElementById('case-open-result');
+  const actionsEl = document.getElementById('case-open-actions');
+  titleEl.textContent = `${caseData.name} × ${count}`;
+  resultEl.classList.remove('shown');
+  resultEl.innerHTML = `<div class="multi-open-loader">⚡ Открываем ${count} кейсов…</div>`;
+  actionsEl.style.display = 'none';
+
+  let resp;
+  try {
+    resp = await api('/api/case/open_multi', {
+      method: 'POST',
+      body: JSON.stringify({ case_id: caseId, count }),
+    });
+  } catch (e) {
+    toast(`Не открылся: ${e.message}`);
+    showView('cases');
+    return;
+  }
+  if (!resp.ok) {
+    toast(resp.error || 'Ошибка');
+    showView('cases');
+    return;
+  }
+
+  tg?.HapticFeedback?.impactOccurred?.('heavy');
+  // Update balance from last result
+  const last = resp.results[resp.results.length - 1];
+  if (last && typeof last.new_balance === 'number') {
+    state.me.balance = last.new_balance;
+    document.getElementById('balance-display').textContent = fmt(state.me.balance);
+  }
+
+  // Render result grid (one card per opened case) with stagger fade-in
+  const cards = resp.results.map((r, i) => {
+    const it = r.item;
+    return `
+      <div class="multi-open-card rarity-${it.rarity}" style="animation-delay:${i * 150}ms">
+        ${it.stat_trak ? '<div class="stattrak-badge">ST™</div>' : ''}
+        <img class="result-img" src="${it.image_url}" alt="" />
+        <div class="result-name">${escape(it.name)}</div>
+        <div class="result-meta">${it.wear_short} · ${fmt(it.price)} 🪙</div>
+      </div>
+    `;
+  }).join('');
+
+  // Calculate net delta
+  const totalGot = resp.results.reduce((sum, r) => sum + (r.item?.price || 0), 0);
+  const netDelta = totalGot - totalCost;
+
+  resultEl.innerHTML = `
+    <div class="multi-open-summary ${netDelta >= 0 ? 'win' : 'lose'}">
+      Получил скинов на <b>${fmt(totalGot)} 🪙</b> (${netDelta >= 0 ? '+' : ''}${fmt(netDelta)} 🪙)
+    </div>
+    <div class="multi-open-grid">${cards}</div>
+  `;
+  resultEl.classList.add('shown');
+  actionsEl.style.display = 'flex';
+
+  // Top haptic on big wins
+  if (netDelta > totalCost) tg?.HapticFeedback?.notificationOccurred?.('success');
+
+  loadInventory();  // refresh inventory in background
 }
 
 const invFilter = { rarity: '', sort: 'price_desc' };

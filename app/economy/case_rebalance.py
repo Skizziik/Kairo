@@ -133,6 +133,10 @@ async def rebalance_all() -> None:
         await ensure_knife_or_nothing()
     except Exception as e:
         log.warning("knife_or_nothing seed failed: %s", e)
+    try:
+        await ensure_dragon_log()
+    except Exception as e:
+        log.warning("dragon_log seed failed: %s", e)
 
 
 # ============================================================
@@ -209,11 +213,8 @@ async def ensure_knife_or_nothing() -> None:
                 json.dumps(loot_pool),
                 0.0,
             )
-            log.info("knife_or_nothing: created (knife=%d base=%d, cheap=%d base=%d)",
-                     int(knife["id"]), int(knife["base_price"]),
-                     int(cheap["id"]), int(cheap["base_price"]))
+            log.info("knife_or_nothing: created")
         else:
-            # Idempotency: only update if pool/price/description differ
             cur_pool = existing["loot_pool"]
             if isinstance(cur_pool, str):
                 cur_pool = json.loads(cur_pool)
@@ -235,3 +236,106 @@ async def ensure_knife_or_nothing() -> None:
                 0.0,
             )
             log.info("knife_or_nothing: updated")
+
+
+# ============================================================
+# DRAGON LORE CASE — 30% AWP Dragon Lore, 70% cheap weapon trash
+# ============================================================
+
+DRAGON_LOG_KEY = "dragon_log"
+DRAGON_LOG_PRICE = 49_999
+DRAGON_LOG_IMAGE = (
+    "https://community.akamai.steamstatic.com/economy/image/"
+    "i0CoZ81Ui0m-9KwlBY1L_18myuGuq1wfhWSaZgMttyVfPaERSR0Wqmu7LAocGJKz2lu_XsnXwtmkJjSU"
+    "91dh8bj35VTqVBP4io_frnAVvfb6aqduc_TFVjTCxbx05OU4S3jilE9w4DzRnImtIy2Sa1JzDJEhRPlK7EcO4U8gfA"
+)
+
+
+async def ensure_dragon_log() -> None:
+    """30/70 lottery: 30% AWP Dragon Lore (or top covert AWP), 70% cheapest weapon."""
+    async with pool().acquire() as conn:
+        # Find AWP Dragon Lore exactly; if missing, fall back to top-priced AWP
+        dragon = await conn.fetchrow(
+            "select id, rarity, base_price from economy_skins_catalog "
+            "where weapon = 'AWP' and skin_name = 'Dragon Lore' and active limit 1",
+        )
+        if dragon is None:
+            dragon = await conn.fetchrow(
+                "select id, rarity, base_price from economy_skins_catalog "
+                "where weapon = 'AWP' and active and rarity = 'covert' "
+                "order by base_price desc limit 1",
+            )
+        cheap = await conn.fetchrow(
+            "select id, rarity, base_price from economy_skins_catalog "
+            "where category = 'weapon' and active "
+            "order by base_price asc limit 1",
+        )
+        if dragon is None or cheap is None:
+            log.warning("dragon_log: catalog missing required skins, skip")
+            return
+
+        dragon_rarity = dragon["rarity"]
+        cheap_rarity = cheap["rarity"]
+        if dragon_rarity == cheap_rarity:
+            log.warning("dragon_log: dragon and cheap share rarity %s, skipping", dragon_rarity)
+            return
+
+        loot_pool = {
+            "by_rarity": {
+                dragon_rarity: [int(dragon["id"])],
+                cheap_rarity:  [int(cheap["id"])],
+            },
+            "rarity_weights": {
+                dragon_rarity: 0.30,
+                cheap_rarity:  0.70,
+            },
+        }
+
+        existing = await conn.fetchrow(
+            "select id, loot_pool, price from economy_cases where key = $1",
+            DRAGON_LOG_KEY,
+        )
+        description = (
+            f"30% — AWP Dragon Lore (база {int(dragon['base_price']):,} ⚙). "
+            f"70% — мусор (база {int(cheap['base_price']):,} ⚙). "
+            "За 49 999 — рулетка элиты."
+        ).replace(",", " ")
+
+        if existing is None:
+            await conn.execute(
+                """
+                insert into economy_cases (key, name, description, price, image_url, loot_pool, stat_trak_chance)
+                values ($1, $2, $3, $4, $5, $6::jsonb, $7)
+                """,
+                DRAGON_LOG_KEY,
+                "🐲 Dragon Lore",
+                description,
+                DRAGON_LOG_PRICE,
+                DRAGON_LOG_IMAGE,
+                json.dumps(loot_pool),
+                0.05,
+            )
+            log.info("dragon_log: created (dragon=%d, cheap=%d)",
+                     int(dragon["id"]), int(cheap["id"]))
+        else:
+            cur_pool = existing["loot_pool"]
+            if isinstance(cur_pool, str):
+                cur_pool = json.loads(cur_pool)
+            if cur_pool == loot_pool and int(existing["price"]) == DRAGON_LOG_PRICE:
+                return
+            await conn.execute(
+                """
+                update economy_cases set
+                    name = $2, description = $3, price = $4, image_url = $5,
+                    loot_pool = $6::jsonb, stat_trak_chance = $7
+                where id = $1
+                """,
+                int(existing["id"]),
+                "🐲 Dragon Lore",
+                description,
+                DRAGON_LOG_PRICE,
+                DRAGON_LOG_IMAGE,
+                json.dumps(loot_pool),
+                0.05,
+            )
+            log.info("dragon_log: updated")
