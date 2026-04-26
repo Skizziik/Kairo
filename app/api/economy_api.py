@@ -178,13 +178,26 @@ async def api_case_open_multi(req: OpenCaseMultiReq, user: dict = Depends(requir
             )
 
     results = []
+    errors = []
     for i in range(req.count):
-        r = await eco.open_case(tg_id, req.case_id)
+        try:
+            r = await eco.open_case(tg_id, req.case_id)
+        except Exception as e:
+            log.exception("multi-open #%d failed for tg_id=%s case_id=%s", i, tg_id, req.case_id)
+            errors.append({"i": i, "error": str(e)})
+            continue
         if not r.get("ok"):
-            # Pre-check passed but a per-open failed — race condition; bail.
-            raise HTTPException(status_code=400, detail=r.get("error", "open failed"))
+            log.warning("multi-open #%d returned not-ok for tg_id=%s: %s", i, tg_id, r.get("error"))
+            errors.append({"i": i, "error": r.get("error", "unknown")})
+            continue
         results.append(r)
-    return {"ok": True, "results": results, "opened": len(results)}
+    return {
+        "ok": True,
+        "results": results,
+        "opened": len(results),
+        "expected": req.count,
+        "errors": errors,
+    }
 
 
 @router.get("/case/{case_id}/pool")

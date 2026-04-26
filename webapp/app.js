@@ -412,11 +412,25 @@ async function openCaseMulti(caseId, count) {
   const titleEl = document.getElementById('case-open-title');
   const resultEl = document.getElementById('case-open-result');
   const actionsEl = document.getElementById('case-open-actions');
-  // Hide single-open reel UI; replace with multi-open content
   document.querySelectorAll('.case-open-marker, .case-open-reel').forEach(el => el.style.display = 'none');
   titleEl.textContent = `${caseData.name} × ${count}`;
-  resultEl.classList.add('shown');  // force visible immediately
-  resultEl.innerHTML = `<div class="multi-open-loader">⚡ Открываем ${count} кейсов…</div>`;
+  resultEl.classList.add('shown');
+  // 5 parallel reels, each spinning placeholder symbols
+  const pool = caseData.items || [];
+  const placeholders = pool.length > 0 ? pool : [{ image_url: '', name: '?', rarity: 'mil-spec' }];
+  const buildStrip = () => {
+    let html = '';
+    for (let i = 0; i < 12; i++) {
+      const it = placeholders[Math.floor(Math.random() * placeholders.length)];
+      html += `<div class="mr-cell rarity-${it.rarity}"><img src="${it.image_url || ''}" alt="" /></div>`;
+    }
+    return html;
+  };
+  let reelsHtml = '';
+  for (let i = 0; i < count; i++) {
+    reelsHtml += `<div class="multi-reel" data-reel="${i}"><div class="multi-reel-track" id="mr-track-${i}">${buildStrip()}</div><div class="multi-reel-marker"></div></div>`;
+  }
+  resultEl.innerHTML = `<div class="multi-reels-stack">${reelsHtml}</div>`;
   actionsEl.style.display = 'none';
 
   let resp;
@@ -448,11 +462,46 @@ async function openCaseMulti(caseId, count) {
     document.getElementById('balance-display').textContent = fmt(state.me.balance);
   }
 
-  // Render result grid (one card per opened case) with stagger fade-in
   const wearShort = (w) => ({
     'Factory New':'FN','Minimal Wear':'MW','Field-Tested':'FT','Well-Worn':'WW','Battle-Scarred':'BS'
   }[w] || w || '');
-  const cards = resp.results.map((r, i) => {
+
+  // For each opened case, append the WIN tile to its reel and animate scroll to it
+  for (let i = 0; i < resp.results.length; i++) {
+    const r = resp.results[i];
+    const skin = r.skin || {};
+    const rarity = skin.rarity || 'mil-spec';
+    const img = skin.image_url || '';
+    const track = document.getElementById(`mr-track-${i}`);
+    if (track) {
+      // Append winner cell at the end of the strip so we can translate to it
+      track.innerHTML += `<div class="mr-cell winner rarity-${rarity}"><img src="${img}" alt="" /></div>`;
+    }
+  }
+
+  // Trigger the spin animation: each reel scrolls left by N*cellWidth where N is the offset to winner
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const reelEls = document.querySelectorAll('.multi-reel');
+  const cellW = 90; // matches CSS
+  const winnerOffset = 12 * cellW; // 12 placeholder cells before winner
+  reelEls.forEach((el, idx) => {
+    const track = el.querySelector('.multi-reel-track');
+    if (!track) return;
+    const dur = 1500 + idx * 250;
+    track.style.transition = `transform ${dur}ms cubic-bezier(0.18, 0.5, 0.2, 1)`;
+    // Center winner under marker (subtract half reel width)
+    const reelW = el.getBoundingClientRect().width;
+    track.style.transform = `translateX(-${winnerOffset - (reelW / 2 - cellW / 2)}px)`;
+  });
+
+  // Wait until last reel stops
+  const totalSpinTime = 1500 + (resp.results.length - 1) * 250 + 200;
+  await new Promise(r => setTimeout(r, totalSpinTime));
+
+  // Show summary below
+  const totalGot = resp.results.reduce((sum, r) => sum + (r.price || 0), 0);
+  const netDelta = totalGot - totalCost;
+  const cards = resp.results.map((r) => {
     const skin = r.skin || {};
     const rarity = skin.rarity || 'mil-spec';
     const name = skin.full_name || 'Unknown';
@@ -461,7 +510,7 @@ async function openCaseMulti(caseId, count) {
     const price = r.price || 0;
     const st = !!r.stat_trak;
     return `
-      <div class="multi-open-card rarity-${rarity}" style="animation-delay:${i * 150}ms">
+      <div class="multi-open-card rarity-${rarity}">
         ${st ? '<div class="stattrak-badge">ST™</div>' : ''}
         <img class="result-img" src="${img}" alt="" />
         <div class="result-name">${escape(name)}</div>
@@ -469,24 +518,15 @@ async function openCaseMulti(caseId, count) {
       </div>
     `;
   }).join('');
-
-  // Calculate net delta
-  const totalGot = resp.results.reduce((sum, r) => sum + (r.price || 0), 0);
-  const netDelta = totalGot - totalCost;
-
   resultEl.innerHTML = `
     <div class="multi-open-summary ${netDelta >= 0 ? 'win' : 'lose'}">
       Получил скинов на <b>${fmt(totalGot)} 🪙</b> (${netDelta >= 0 ? '+' : ''}${fmt(netDelta)} 🪙)
     </div>
     <div class="multi-open-grid">${cards}</div>
   `;
-  resultEl.classList.add('shown');
   actionsEl.style.display = 'flex';
-
-  // Top haptic on big wins
   if (netDelta > totalCost) tg?.HapticFeedback?.notificationOccurred?.('success');
-
-  loadInventory();  // refresh inventory in background
+  loadInventory();
 }
 
 const invFilter = { rarity: '', sort: 'price_desc' };

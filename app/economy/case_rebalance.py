@@ -275,8 +275,16 @@ async def ensure_dragon_log() -> None:
                 "order by base_price desc limit 1",
             )
         if dragon is not None:
-            log.info("dragon_log: using skin id=%d name='%s' rarity=%s",
-                     int(dragon["id"]), dragon["full_name"], dragon["rarity"])
+            log.info("dragon_log: using skin id=%d name='%s' rarity=%s base=%d",
+                     int(dragon["id"]), dragon["full_name"], dragon["rarity"], int(dragon["base_price"]))
+            # Bump price to 100k so the case feels rewarding (was ~9k → reward ~9k from 50k case = always loss)
+            DRAGON_TARGET_BASE = 100_000
+            if int(dragon["base_price"]) < DRAGON_TARGET_BASE:
+                await conn.execute(
+                    "update economy_skins_catalog set base_price = $2 where id = $1",
+                    int(dragon["id"]), DRAGON_TARGET_BASE,
+                )
+                log.info("dragon_log: bumped skin id=%d base_price → %d", int(dragon["id"]), DRAGON_TARGET_BASE)
         cheap = await conn.fetchrow(
             "select id, rarity, base_price from economy_skins_catalog "
             "where category = 'weapon' and active "
