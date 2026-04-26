@@ -630,7 +630,7 @@ function renderGamePlay(game, target) {
       <div class="game-play">
         <h3>🪙 Coinflip</h3>
         <label>Ставка</label>
-        <input type="number" id="cf-bet" min="1" value="100" />
+        <input type="text" inputmode="numeric" pattern="[0-9]*" id="cf-bet" value="100" autocomplete="off" />
         <div class="game-row">
           <button class="btn" data-side="heads">🪙 Орёл</button>
           <button class="btn" data-side="tails">✨ Решка</button>
@@ -647,7 +647,7 @@ function renderGamePlay(game, target) {
       <div class="game-play">
         <h3>🎰 Слоты</h3>
         <label>Ставка</label>
-        <input type="number" id="sl-bet" min="1" value="100" />
+        <input type="text" inputmode="numeric" pattern="[0-9]*" id="sl-bet" value="100" autocomplete="off" />
         <div class="slots-machine" id="sl-machine">
           <div class="slot-reel" id="sl-reel-0"><span>❓</span></div>
           <div class="slot-reel" id="sl-reel-1"><span>❓</span></div>
@@ -663,9 +663,9 @@ function renderGamePlay(game, target) {
       <div class="game-play">
         <h3>💥 Crash</h3>
         <label>Ставка (макс 10 000)</label>
-        <input type="number" id="cr-bet" min="1" max="10000" value="100" />
+        <input type="text" inputmode="numeric" pattern="[0-9]*" id="cr-bet" value="100" autocomplete="off" />
         <label>Таргет множитель (1.20 – 50.00)</label>
-        <input type="number" id="cr-target" min="1.20" max="50" step="0.05" value="2" />
+        <input type="text" inputmode="decimal" id="cr-target" value="2" autocomplete="off" />
         <button class="btn big-btn daily-btn" id="cr-play">Играть</button>
         <div class="game-out" id="cr-out" style="display:none"></div>
       </div>
@@ -1381,7 +1381,7 @@ function renderForgeExchange(area) {
         Курс: 10 ⚙️ = 1 🪙. У тебя сейчас <b>${fmt(s.particles)}</b> ⚙️.
       </p>
       <label>Сколько particles обменять</label>
-      <input type="number" id="ex-amount" min="10" max="${s.particles}" step="10" value="${Math.min(s.particles, 1000)}" />
+      <input type="text" inputmode="numeric" pattern="[0-9]*" id="ex-amount" value="${Math.min(s.particles, 1000)}" autocomplete="off" />
       <div style="font-size:13px; margin-bottom:12px; color:var(--accent-gold)">
         Получишь: <b id="ex-preview">${Math.floor(Math.min(s.particles, 1000) / 10)}</b> 🪙
       </div>
@@ -1394,9 +1394,13 @@ function renderForgeExchange(area) {
   const input = document.getElementById('ex-amount');
   const preview = document.getElementById('ex-preview');
   input.addEventListener('input', () => {
-    const v = parseInt(input.value || '0');
+    // Strip non-digits so user can paste/type freely
+    const raw = (input.value || '').replace(/[^0-9]/g, '');
+    if (raw !== input.value) input.value = raw;
+    const v = parseInt(raw || '0');
     preview.textContent = Math.floor(v / 10);
   });
+  input.addEventListener('focus', () => input.select());
 
   document.getElementById('ex-btn').addEventListener('click', async () => {
     const amount = parseInt(input.value || '0');
@@ -2360,7 +2364,7 @@ async function renderMegaslot(area) {
       <div class="megaslot-controls">
         <div class="ms-bet-row">
           <label>Ставка</label>
-          <input type="number" id="ms-bet" min="10" max="10000" step="10" value="100" />
+          <input type="text" inputmode="numeric" pattern="[0-9]*" id="ms-bet" value="100" autocomplete="off" />
           <div class="ms-bet-hint">макс. ставка 10 000</div>
         </div>
         <button class="btn big-btn daily-btn" id="ms-spin">🎰 Крутить</button>
