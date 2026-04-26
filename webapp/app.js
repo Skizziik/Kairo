@@ -294,6 +294,8 @@ async function openCase(caseId) {
   document.getElementById('case-open-result').classList.remove('shown');
   document.getElementById('case-open-result').innerHTML = '';
   document.getElementById('case-open-actions').style.display = 'none';
+  // Restore single-open reel UI in case multi-open hid it earlier
+  document.querySelectorAll('.case-open-marker, .case-open-reel').forEach(el => el.style.display = '');
 
   // Start API call immediately (parallel with animation)
   let result;
@@ -410,8 +412,10 @@ async function openCaseMulti(caseId, count) {
   const titleEl = document.getElementById('case-open-title');
   const resultEl = document.getElementById('case-open-result');
   const actionsEl = document.getElementById('case-open-actions');
+  // Hide single-open reel UI; replace with multi-open content
+  document.querySelectorAll('.case-open-marker, .case-open-reel').forEach(el => el.style.display = 'none');
   titleEl.textContent = `${caseData.name} × ${count}`;
-  resultEl.classList.remove('shown');
+  resultEl.classList.add('shown');  // force visible immediately
   resultEl.innerHTML = `<div class="multi-open-loader">⚡ Открываем ${count} кейсов…</div>`;
   actionsEl.style.display = 'none';
 

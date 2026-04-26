@@ -252,19 +252,31 @@ DRAGON_LOG_IMAGE = (
 
 
 async def ensure_dragon_log() -> None:
-    """30/70 lottery: 30% AWP Dragon Lore (or top covert AWP), 70% cheapest weapon."""
+    """30/70 lottery: 30% AWP Dragon Lore, 70% cheapest weapon. If catalog has
+    no Dragon Lore exactly, try fuzzy (ILIKE), then fall back to top covert AWP."""
     async with pool().acquire() as conn:
-        # Find AWP Dragon Lore exactly; if missing, fall back to top-priced AWP
+        # Strict: exact name match
         dragon = await conn.fetchrow(
-            "select id, rarity, base_price from economy_skins_catalog "
+            "select id, full_name, rarity, base_price from economy_skins_catalog "
             "where weapon = 'AWP' and skin_name = 'Dragon Lore' and active limit 1",
         )
+        # Fuzzy: maybe stored as 'Дракон лора' or with extra text
         if dragon is None:
             dragon = await conn.fetchrow(
-                "select id, rarity, base_price from economy_skins_catalog "
+                "select id, full_name, rarity, base_price from economy_skins_catalog "
+                "where weapon = 'AWP' and active and (skin_name ilike '%dragon%' or skin_name ilike '%лор%') "
+                "order by base_price desc limit 1",
+            )
+        # Last resort: top covert AWP (might be Asiimov or whatever else)
+        if dragon is None:
+            dragon = await conn.fetchrow(
+                "select id, full_name, rarity, base_price from economy_skins_catalog "
                 "where weapon = 'AWP' and active and rarity = 'covert' "
                 "order by base_price desc limit 1",
             )
+        if dragon is not None:
+            log.info("dragon_log: using skin id=%d name='%s' rarity=%s",
+                     int(dragon["id"]), dragon["full_name"], dragon["rarity"])
         cheap = await conn.fetchrow(
             "select id, rarity, base_price from economy_skins_catalog "
             "where category = 'weapon' and active "
