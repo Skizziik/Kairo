@@ -4701,6 +4701,18 @@ h2 {
   color: var(--cf-amber);
   text-shadow: 0 0 12px rgba(245,176,66,0.45);
   padding: 4px 0 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Smaller variant — used when the title contains a dynamic name that would
+   otherwise wrap and push the brackets onto their own lines. */
+.cf-title.cf-title-sm {
+  font-size: 13px;
+  letter-spacing: 2px;
+}
+.cf-title.cf-title-sm .cf-title-bracket {
+  margin: 0 4px;
 }
 .cf-title-bracket { color: var(--cf-blue); margin: 0 6px; text-shadow: 0 0 10px rgba(90,169,255,0.5); }
 .cf-title-sub {

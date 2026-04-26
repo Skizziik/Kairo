@@ -2167,7 +2167,7 @@ function _cfRenderJoinFlow(area, lobby) {
   area.innerHTML = `
     <div class="cf-wrap">
       <button class="back-btn" id="cf-back">← назад</button>
-      <div class="cf-title">
+      <div class="cf-title cf-title-sm">
         <span class="cf-title-bracket">[</span> ВЫЗОВ ОТ ${escape(lobby.creator_name || '—')} <span class="cf-title-bracket">]</span>
       </div>
 
