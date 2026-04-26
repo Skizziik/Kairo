@@ -1535,104 +1535,180 @@ async function _plinkoDrop() {
   _plinkoSpawnBall(resp);
 }
 
-// Spawn an independent ball element + run its own rAF loop.
-// Multiple balls can fly simultaneously; each completes independently.
-function _plinkoSpawnBall(resp) {
-  const cfg = plinkoState.config;
-  const mode = cfg && cfg.modes && cfg.modes[plinkoState.mode];
-  if (!mode) return;
-  const rows = mode.rows;
-  const lay  = _plinkoLayout(rows);
-  const svg  = document.querySelector('.pl-svg');
-  if (!svg) return;
+// ==================== ANIMATION ENGINE ====================
+// One global rAF loop for ALL Plinko balls. Avoids per-ball recursive rAF
+// (which can be silently lost if one frame throws or the tab is throttled),
+// and is more efficient when many balls are in flight.
+//
+// Invariants:
+//  - A ball lives in `_plinkoLiveBalls` until it lands (or its SVG element
+//    leaves the DOM, e.g. mode change rebuilt the board).
+//  - The loop ticks while there is at least one ball; otherwise it idles.
+//  - The loop never `return`s on a per-ball error — each ball is wrapped in
+//    try/catch so one bad ball can't freeze the others.
 
-  // Defensive: validate path length matches mode
-  const path = Array.isArray(resp.path) ? resp.path : [];
-  if (path.length !== rows) {
-    toast('Bad server response');
-    return;
-  }
+const _plinkoLiveBalls = [];   // array of ball-state objects
+let   _plinkoLoopRunning = false;
 
-  const ballId = ++plinkoState.ballSeq;
+function _plinkoStartLoopIfIdle() {
+  if (_plinkoLoopRunning) return;
+  _plinkoLoopRunning = true;
+  requestAnimationFrame(_plinkoTick);
+}
 
-  // Build waypoints: drop point → pegs → bucket
-  const waypoints = [];
-  waypoints.push({ x: lay.bW * (lay.rows / 2 + 0.5), y: 0 });
-  let prevR = 0;
-  for (let r = 0; r < rows; r++) {
-    const peg = _plinkoPegPos(r, prevR, lay);
-    waypoints.push({ x: peg.x, y: peg.y - PL_BALL_R - 1 });
-    if (path[r] === 'R') prevR += 1;
-  }
-  const finalCenter = _plinkoBucketCenter(resp.bucket, lay);
-  waypoints.push({ x: finalCenter.x, y: finalCenter.y });
+function _plinkoTick(now) {
+  // Iterate from end so we can splice safely.
+  for (let i = _plinkoLiveBalls.length - 1; i >= 0; i--) {
+    const b = _plinkoLiveBalls[i];
+    try {
+      // Element was removed externally (mode change, view nav) — drop the entry
+      if (!b.el.isConnected) {
+        _plinkoLiveBalls.splice(i, 1);
+        continue;
+      }
+      const elapsed = Math.max(0, now - b.startedAt);
 
-  // Each ball is a unique <circle>, identified by data-ball-id
-  const ball = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-  ball.setAttribute('class', 'pl-ball');
-  ball.setAttribute('r', PL_BALL_R);
-  ball.setAttribute('fill', 'url(#pl-ball)');
-  ball.setAttribute('data-ball-id', String(ballId));
-  ball.setAttribute('cx', waypoints[0].x.toFixed(2));
-  ball.setAttribute('cy', waypoints[0].y.toFixed(2));
-  svg.appendChild(ball);
+      if (elapsed >= b.totalDur) {
+        // Settle in bucket and call landed handler
+        const last = b.waypoints[b.waypoints.length - 1];
+        b.el.setAttribute('cx', last.x.toFixed(2));
+        b.el.setAttribute('cy', last.y.toFixed(2));
+        _plinkoLiveBalls.splice(i, 1);
+        _plinkoBallLanded(b.el, b.resp);
+        continue;
+      }
 
-  // Slightly slower drop than before so visuals are clearly visible.
-  // 8 rows ~2.0s, 12 rows ~2.4s, 16 rows ~2.6s
-  const segDur = Math.max(150, 240 - 8 * rows);
-  const totalDur = waypoints.length * segDur;
-  const startedAt = performance.now();
-  let lastSegIdx = -1;
+      // Determine which segment we're in (clamp to [0, segments-1])
+      const segCount = b.waypoints.length - 1;
+      const segIdx = Math.min(segCount - 1, Math.max(0, Math.floor(elapsed / b.segDur)));
+      const t = Math.min(1, Math.max(0, (elapsed - segIdx * b.segDur) / b.segDur));
 
-  function frame(now) {
-    // Ball was removed externally (e.g. SVG rebuilt by mode change) — just stop.
-    if (!ball.parentNode) return;
-    const elapsed = now - startedAt;
+      const a = b.waypoints[segIdx];
+      const c = b.waypoints[segIdx + 1];
+      // Gravity-bias y, linear x, plus a small parabolic hop to suggest a bounce
+      const yT = Math.pow(t, 1.35);
+      const x = a.x + (c.x - a.x) * t;
+      let   y = a.y + (c.y - a.y) * yT;
+      y -= Math.sin(Math.PI * t) * b.bounceAmp;
+      b.el.setAttribute('cx', x.toFixed(2));
+      b.el.setAttribute('cy', y.toFixed(2));
 
-    if (elapsed >= totalDur) {
-      // Land
-      ball.setAttribute('cx', waypoints[waypoints.length - 1].x.toFixed(2));
-      ball.setAttribute('cy', waypoints[waypoints.length - 1].y.toFixed(2));
-      _plinkoBallLanded(ball, resp);
-      return;
-    }
-
-    // Linear x interp + gravity-eased y + small bounce arc per segment
-    const segIdx = Math.min(waypoints.length - 2, Math.floor(elapsed / segDur));
-    const t = (elapsed - segIdx * segDur) / segDur;
-    const a = waypoints[segIdx];
-    const b = waypoints[segIdx + 1];
-    const yT = Math.pow(t, 1.35);
-    let x = a.x + (b.x - a.x) * t;
-    let y = a.y + (b.y - a.y) * yT;
-    y -= Math.sin(Math.PI * t) * Math.min(4.5, lay.rowH * 0.35);
-    ball.setAttribute('cx', x.toFixed(2));
-    ball.setAttribute('cy', y.toFixed(2));
-
-    // Light up the peg this ball just touched (segIdx 0..rows-1 corresponds to row peg hits)
-    if (segIdx !== lastSegIdx) {
-      lastSegIdx = segIdx;
-      if (segIdx >= 0 && segIdx < rows) {
-        let cnt = 0;
-        for (let i = 0; i < segIdx; i++) if (path[i] === 'R') cnt += 1;
-        const pegPos = _plinkoPegPos(segIdx, cnt, lay);
-        const pegEls = svg.querySelectorAll('.pl-peg');
-        for (let i = 0; i < pegEls.length; i++) {
-          const el = pegEls[i];
-          const cx = parseFloat(el.getAttribute('cx'));
-          const cy = parseFloat(el.getAttribute('cy'));
-          if (Math.abs(cx - pegPos.x) < 0.5 && Math.abs(cy - pegPos.y) < 0.5) {
-            el.classList.add('hit');
-            setTimeout(() => el.classList.remove('hit'), 200);
-            break;
+      // Peg-light when a new segment begins (and only on actual peg-rows)
+      if (segIdx !== b.lastSegIdx) {
+        b.lastSegIdx = segIdx;
+        if (segIdx >= 0 && segIdx < b.rows) {
+          // Count R's in path[0..segIdx-1] → peg column
+          let rcount = 0;
+          for (let p = 0; p < segIdx; p++) if (b.path[p] === 'R') rcount += 1;
+          const pegPos = _plinkoPegPos(segIdx, rcount, b.lay);
+          // Peg elements live in the SVG containing the ball
+          const svg = b.el.parentNode;
+          if (svg) {
+            const pegEls = svg.querySelectorAll('.pl-peg');
+            for (let p = 0; p < pegEls.length; p++) {
+              const el = pegEls[p];
+              const px = parseFloat(el.getAttribute('cx'));
+              const py = parseFloat(el.getAttribute('cy'));
+              if (Math.abs(px - pegPos.x) < 0.5 && Math.abs(py - pegPos.y) < 0.5) {
+                el.classList.add('hit');
+                setTimeout(() => el.classList.remove('hit'), 200);
+                break;
+              }
+            }
           }
         }
       }
+    } catch (err) {
+      // A single misbehaving ball must NEVER stop the others.
+      // Drop the offender and continue.
+      try { b.el.remove(); } catch (_) {}
+      _plinkoLiveBalls.splice(i, 1);
     }
-
-    requestAnimationFrame(frame);
   }
-  requestAnimationFrame(frame);
+
+  if (_plinkoLiveBalls.length > 0) {
+    requestAnimationFrame(_plinkoTick);
+  } else {
+    _plinkoLoopRunning = false;
+  }
+}
+
+// Spawn an animated ball. Validates inputs, registers it with the global loop.
+// Returns true on success, false if input was malformed.
+function _plinkoSpawnBall(resp) {
+  // ---- Validate config + mode ----
+  const cfg = plinkoState.config;
+  const mode = cfg && cfg.modes && cfg.modes[plinkoState.mode];
+  if (!mode) return false;
+  const rows = mode.rows;
+  if (!Number.isFinite(rows) || rows < 1) return false;
+
+  const svg = document.querySelector('.pl-svg');
+  if (!svg) return false;
+
+  // ---- Validate server response ----
+  const path = Array.isArray(resp && resp.path) ? resp.path : null;
+  if (!path || path.length !== rows) {
+    // Mode/path mismatch — happens if user switched modes after click but before
+    // the API resolved. Sync the visible balance to server-authoritative value
+    // (which already includes the payout) so we're not desynced. No animation.
+    if (resp && typeof resp.new_balance === 'number') {
+      state.me.balance = resp.new_balance;
+      const balEl = document.getElementById('balance-display');
+      if (balEl) balEl.textContent = fmt(state.me.balance);
+    }
+    toast('Режим сменился во время дропа');
+    return false;
+  }
+  // path entries must be 'L' or 'R'
+  for (let i = 0; i < path.length; i++) {
+    if (path[i] !== 'L' && path[i] !== 'R') return false;
+  }
+  const bucket = Number(resp.bucket);
+  if (!Number.isInteger(bucket) || bucket < 0 || bucket > rows) return false;
+
+  // ---- Build waypoints (drop point → pegs → bucket) ----
+  const lay = _plinkoLayout(rows);
+  const waypoints = new Array(rows + 2);
+  waypoints[0] = { x: lay.bW * (lay.rows / 2 + 0.5), y: 0 };
+  let prevR = 0;
+  for (let r = 0; r < rows; r++) {
+    const peg = _plinkoPegPos(r, prevR, lay);
+    waypoints[r + 1] = { x: peg.x, y: peg.y - PL_BALL_R - 1 };
+    if (path[r] === 'R') prevR += 1;
+  }
+  const fin = _plinkoBucketCenter(bucket, lay);
+  waypoints[rows + 1] = { x: fin.x, y: fin.y };
+  // Sanity: every waypoint must be a finite number
+  for (let i = 0; i < waypoints.length; i++) {
+    if (!Number.isFinite(waypoints[i].x) || !Number.isFinite(waypoints[i].y)) return false;
+  }
+
+  // ---- Create the SVG element ----
+  const ballId = ++plinkoState.ballSeq;
+  const el = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  el.setAttribute('class', 'pl-ball');
+  el.setAttribute('r', String(PL_BALL_R));
+  el.setAttribute('fill', 'url(#pl-ball)');
+  el.setAttribute('data-ball-id', String(ballId));
+  el.setAttribute('cx', waypoints[0].x.toFixed(2));
+  el.setAttribute('cy', waypoints[0].y.toFixed(2));
+  svg.appendChild(el);
+
+  // ---- Register with global loop ----
+  // Per-row drop time is roughly constant (~165ms) regardless of rows so the
+  // visual cadence feels the same: 8r ≈ 1.65s, 12r ≈ 2.31s, 16r ≈ 2.97s.
+  const segDur = 165;
+  _plinkoLiveBalls.push({
+    el, resp, path, rows, lay, waypoints,
+    startedAt: performance.now(),
+    segDur,
+    totalDur: (waypoints.length - 1) * segDur,
+    bounceAmp: Math.min(4.5, lay.rowH * 0.35),
+    lastSegIdx: -1,
+  });
+  _plinkoStartLoopIfIdle();
+  return true;
 }
 
 function _plinkoBallLanded(ball, resp) {
