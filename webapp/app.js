@@ -2886,10 +2886,17 @@ function renderLeaderboard() {
     const rankStr = medals[i] || `#${rank}`;
     const rankClass = i === 0 ? 'top1' : i === 1 ? 'top2' : i === 2 ? 'top3' : '';
     const name = r.username ? `@${r.username}` : (r.first_name || `user${r.tg_id}`);
+    // Badges next to nickname — rare flair, hover/title shows badge name + desc
+    const badgesHtml = (Array.isArray(r.badges) ? r.badges : [])
+      .map(b => `<span class="lb-badge rarity-${escape(b.rarity || 'rare')}" title="${escape(b.name || '')}${b.desc ? ' — ' + escape(b.desc) : ''}">${escape(b.icon || '')}</span>`)
+      .join('');
     return `
       <div class="lb-row">
         <div class="lb-rank ${rankClass}">${rankStr}</div>
-        <div class="lb-name">${escape(name)}</div>
+        <div class="lb-name">
+          <span class="lb-name-text">${escape(name)}</span>
+          ${badgesHtml ? `<span class="lb-badges">${badgesHtml}</span>` : ''}
+        </div>
         <div class="lb-bal">${fmt(r.balance)} 🪙</div>
       </div>
     `;
@@ -2982,6 +2989,36 @@ function escape(s) {
 
 const _bossState = { busy: false, pendingTaps: 0, flushTimer: null, area: null, st: null, cdInterval: null };
 
+// Cinematic badge unlock overlay — used when a rare badge is granted (e.g. RIP kill).
+// Self-dismissing after 5s, also closeable via tap.
+function _showBadgeUnlockOverlay(badge) {
+  if (!badge || !badge.icon) return;
+  let overlay = document.getElementById('badge-unlock-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'badge-unlock-overlay';
+    overlay.className = 'badge-unlock-overlay';
+    document.body.appendChild(overlay);
+  }
+  overlay.innerHTML = `
+    <div class="bu-modal rarity-${escape(badge.rarity || 'rare')}">
+      <div class="bu-burst"></div>
+      <div class="bu-eyebrow">★ MYTHIC UNLOCK ★</div>
+      <div class="bu-icon">${escape(badge.icon)}</div>
+      <div class="bu-name">${escape(badge.name || 'Награда')}</div>
+      <div class="bu-desc">${escape(badge.desc || '')}</div>
+      <div class="bu-hint">Тап чтобы закрыть</div>
+    </div>
+  `;
+  overlay.classList.add('shown');
+  const close = () => {
+    overlay.classList.remove('shown');
+    setTimeout(() => { try { overlay.remove(); } catch (_) {} }, 350);
+  };
+  overlay.onclick = close;
+  setTimeout(close, 5500);
+}
+
 function _fmtCooldown(sec) {
   if (sec >= 3600) return Math.ceil(sec / 3600) + 'ч';
   if (sec >= 60) return Math.ceil(sec / 60) + 'м';
@@ -3009,33 +3046,49 @@ function _paintBoss(area, st, branches) {
   const root = document.getElementById('boss-root');
   if (!root) return;
   const hpPct = Math.max(0, (st.hp / st.max_hp) * 100);
-  const isEndless = st.selected_tier > 10;
+  const isEndless = st.selected_tier > 11;
+  const isHero    = !!st.is_hero;
+  const heroImg   = st.image_url || null;
 
   // Boss tier picker (carousel of unlocked bosses)
   const tiersHtml = (st.tiers || []).map(t => {
     const tierHpPct = Math.max(0, (t.hp / t.max_hp) * 100);
     const onCd = (t.cooldown_left || 0) > 0;
+    const iconHtml = t.is_hero && t.image_url
+      ? `<div class="btc-icon btc-hero-thumb"><img src="${t.image_url}" alt="" /></div>`
+      : `<div class="btc-icon">${t.icon}</div>`;
     return `
-      <button class="boss-tier-card ${t.selected ? 'active' : ''} ${onCd ? 'cooldown' : ''}" data-tier="${t.tier}">
-        <div class="btc-icon">${t.icon}</div>
-        <div class="btc-tier">T${t.tier}</div>
+      <button class="boss-tier-card ${t.selected ? 'active' : ''} ${onCd ? 'cooldown' : ''} ${t.is_hero ? 'hero' : ''}" data-tier="${t.tier}">
+        ${iconHtml}
+        <div class="btc-tier">T${t.tier}${t.is_hero ? ' 👑' : ''}</div>
         <div class="btc-hp-bar"><div class="btc-hp-fill" style="width:${tierHpPct}%"></div></div>
         <div class="btc-kills">${onCd ? '💤 ' + _fmtCooldown(t.cooldown_left) : t.kills + '× kills'}</div>
       </button>
     `;
   }).join('');
 
+  // Tap target — hero bosses (t11) use the full image, others use the emoji icon
+  const tapTargetInner = isHero && heroImg
+    ? `
+      <img class="boss-hero-img" id="boss-hero-img" src="${heroImg}" alt="${escape(st.name)}" draggable="false" />
+      <div class="boss-hero-glow"></div>
+      <div class="boss-tap-hint hero" id="boss-tap-hint">${st.cooldown_seconds_left > 0 ? '💤 СПИТ' : 'TAP TO KILL'}</div>
+    `
+    : `
+      <div class="boss-icon-big" id="boss-icon-big">${st.icon}</div>
+      <div class="boss-tap-hint" id="boss-tap-hint">${st.cooldown_seconds_left > 0 ? '💤 спит' : 'тапай'}</div>
+    `;
+
   root.innerHTML = `
     <div class="boss-tier-picker" id="boss-tier-picker">${tiersHtml}</div>
 
-    <div class="boss-fight-card">
-      <div class="boss-tier-label">Тир ${st.selected_tier}${isEndless ? ' · ENDLESS' : ''}</div>
-      <div class="boss-name">${escape(st.name)}</div>
+    <div class="boss-fight-card ${isHero ? 'hero-mode' : ''}">
+      <div class="boss-tier-label">${isHero ? '👑 ФИНАЛЬНЫЙ БОСС · ' : ''}Тир ${st.selected_tier}${isEndless ? ' · ENDLESS' : ''}</div>
+      <div class="boss-name ${isHero ? 'hero' : ''}">${escape(st.name)}</div>
       <div class="boss-lore">${escape(st.lore)}</div>
 
-      <div class="boss-tap-target ${st.cooldown_seconds_left > 0 ? 'cooldown' : ''}" id="boss-tap-target">
-        <div class="boss-icon-big" id="boss-icon-big">${st.icon}</div>
-        <div class="boss-tap-hint" id="boss-tap-hint">${st.cooldown_seconds_left > 0 ? '💤 спит' : 'тапай'}</div>
+      <div class="boss-tap-target ${st.cooldown_seconds_left > 0 ? 'cooldown' : ''} ${isHero ? 'hero' : ''}" id="boss-tap-target">
+        ${tapTargetInner}
         ${st.cooldown_seconds_left > 0 ? `<div class="boss-cd-overlay" id="boss-cd-overlay">💤<br>${_fmtCooldown(st.cooldown_seconds_left)}</div>` : ''}
       </div>
 
@@ -3189,12 +3242,12 @@ function _bossTap(area, tapTarget, evt) {
   tapTarget.appendChild(pop);
   setTimeout(() => pop.remove(), 800);
 
-  // Visual: shake the icon
-  const icon = document.getElementById('boss-icon-big');
-  if (icon) {
-    icon.classList.remove('hit');
-    void icon.offsetWidth;
-    icon.classList.add('hit');
+  // Visual: shake whichever target is currently rendered (emoji icon or hero image)
+  const target = document.getElementById('boss-icon-big') || document.getElementById('boss-hero-img');
+  if (target) {
+    target.classList.remove('hit');
+    void target.offsetWidth;
+    target.classList.add('hit');
   }
 
   tg?.HapticFeedback?.impactOccurred?.('light');
@@ -3291,6 +3344,13 @@ async function _flushBossBatch() {
       }
       if (r.tier_unlocked) {
         toast(`🔓 Открыт новый тир: ${r.tier_unlocked}`, 4000);
+      }
+      // Cinematic badge unlock — fullscreen overlay with the rare flair
+      if (Array.isArray(r.badges_unlocked) && r.badges_unlocked.length > 0) {
+        for (const badge of r.badges_unlocked) {
+          _showBadgeUnlockOverlay(badge);
+          tg?.HapticFeedback?.notificationOccurred?.('success');
+        }
       }
       // If new tier unlocked, re-render — but only if user is still on boss screen
       if (r.tier_unlocked) {

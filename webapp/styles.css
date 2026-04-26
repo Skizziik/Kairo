@@ -1740,6 +1740,288 @@ h2 {
   pointer-events: none;
 }
 
+/* ===================================================================
+   HERO BOSS (tier 11 — RIP) : full-image clickable target with epic flair
+   =================================================================== */
+.boss-fight-card.hero-mode {
+  background:
+    radial-gradient(ellipse at top, rgba(245,176,66,0.18) 0%, transparent 60%),
+    linear-gradient(135deg, rgba(40,10,10,0.5), rgba(20,15,8,0.4));
+  border: 1px solid rgba(245,176,66,0.55);
+  box-shadow:
+    inset 0 0 28px rgba(245,176,66,0.08),
+    0 0 28px rgba(235,75,75,0.18);
+}
+.boss-name.hero {
+  font-size: 22px;
+  letter-spacing: 3px;
+  font-weight: 900;
+  background: linear-gradient(135deg, #ffd984 0%, #f5b042 50%, #eb4b4b 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-transform: uppercase;
+  filter: drop-shadow(0 0 10px rgba(245,176,66,0.45));
+  margin: 4px 0 6px;
+}
+
+.boss-tap-target.hero {
+  width: 100%;
+  max-width: 360px;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  margin: 14px auto;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 2px solid rgba(245,176,66,0.6);
+  box-shadow:
+    0 0 28px rgba(235,75,75,0.45),
+    inset 0 0 0 1px rgba(0,0,0,0.5);
+  position: relative;
+}
+.boss-tap-target.hero::before {
+  /* CT scanline overlay */
+  content: "";
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(0deg, rgba(0,0,0,0.07) 0 2px, transparent 2px 5px);
+  pointer-events: none;
+  mix-blend-mode: multiply;
+  z-index: 2;
+}
+.boss-hero-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;        /* clicks bubble to .boss-tap-target */
+  transition: transform 0.1s cubic-bezier(0.34, 1.56, 0.64, 1);
+  z-index: 1;
+}
+.boss-hero-img.hit {
+  animation: bossHeroHit 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes bossHeroHit {
+  0%   { transform: scale(1) rotate(0deg); }
+  35%  { transform: scale(1.025) rotate(-0.6deg); }
+  70%  { transform: scale(0.99) rotate(0.4deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+.boss-hero-glow {
+  position: absolute;
+  inset: -12px;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 50%, rgba(245,176,66,0.22) 0%, transparent 65%);
+  filter: blur(8px);
+  z-index: 0;
+  animation: bossHeroPulse 2.4s ease-in-out infinite alternate;
+}
+@keyframes bossHeroPulse {
+  from { opacity: 0.55; }
+  to   { opacity: 1.0; }
+}
+.boss-tap-hint.hero {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  background: rgba(0,0,0,0.65);
+  color: var(--accent-gold);
+  font-family: "Courier New", monospace;
+  font-weight: 900;
+  font-size: 11px;
+  letter-spacing: 3px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(245,176,66,0.4);
+  opacity: 1;
+  text-transform: uppercase;
+  animation: bossHeroHintPulse 1.8s ease-in-out infinite alternate;
+}
+@keyframes bossHeroHintPulse {
+  from { box-shadow: 0 0 0 rgba(245,176,66,0); }
+  to   { box-shadow: 0 0 12px rgba(245,176,66,0.55); }
+}
+.boss-tap-target.hero.cooldown { filter: grayscale(0.85) brightness(0.5); }
+.boss-tap-target.hero.cooldown .boss-hero-img { animation: none; }
+
+/* Tier picker — hero card variant */
+.boss-tier-card.hero {
+  border-color: rgba(245,176,66,0.7);
+  box-shadow: 0 0 16px rgba(245,176,66,0.35);
+}
+.boss-tier-card.hero .btc-tier {
+  color: var(--accent-gold);
+}
+.btc-hero-thumb {
+  width: 100%;
+  height: 56px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #000;
+  display: block;
+  position: relative;
+}
+.btc-hero-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* ===================================================================
+   BADGES — leaderboard inline + cinematic unlock overlay
+   =================================================================== */
+.lb-badges {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.lb-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  font-size: 14px;
+  background: rgba(245,176,66,0.12);
+  border: 1px solid rgba(245,176,66,0.4);
+  cursor: help;
+  filter: drop-shadow(0 0 4px rgba(245,176,66,0.5));
+}
+.lb-badge.rarity-mythic {
+  background: linear-gradient(135deg, rgba(245,176,66,0.30), rgba(235,75,75,0.20));
+  border-color: rgba(245,176,66,0.85);
+  box-shadow: 0 0 10px rgba(245,176,66,0.55);
+  animation: lbBadgeMythicGlow 2.4s ease-in-out infinite alternate;
+}
+@keyframes lbBadgeMythicGlow {
+  from { box-shadow: 0 0 6px rgba(245,176,66,0.4); }
+  to   { box-shadow: 0 0 16px rgba(245,176,66,0.85); }
+}
+.lb-name {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.lb-name-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Cinematic badge unlock overlay */
+.badge-unlock-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.78);
+  backdrop-filter: blur(6px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.32s ease;
+}
+.badge-unlock-overlay.shown {
+  opacity: 1;
+  pointer-events: auto;
+}
+.bu-modal {
+  position: relative;
+  width: min(92vw, 360px);
+  padding: 28px 22px 22px;
+  border-radius: 18px;
+  text-align: center;
+  background:
+    radial-gradient(ellipse at top, rgba(245,176,66,0.35) 0%, transparent 70%),
+    linear-gradient(180deg, #1d1208 0%, #0a0c14 100%);
+  border: 2px solid rgba(245,176,66,0.85);
+  box-shadow:
+    0 0 40px rgba(245,176,66,0.6),
+    inset 0 0 0 1px rgba(255,255,255,0.06);
+  animation: buModalIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  overflow: hidden;
+}
+@keyframes buModalIn {
+  0%   { opacity: 0; transform: scale(0.6) rotate(-3deg); }
+  60%  { opacity: 1; transform: scale(1.05) rotate(0); }
+  100% { transform: scale(1) rotate(0); }
+}
+.bu-burst {
+  position: absolute;
+  inset: -40%;
+  background:
+    conic-gradient(from 0deg,
+      rgba(245,176,66,0.12) 0deg,
+      transparent 18deg,
+      rgba(245,176,66,0.12) 30deg,
+      transparent 48deg,
+      rgba(245,176,66,0.12) 60deg,
+      transparent 78deg,
+      rgba(245,176,66,0.12) 90deg,
+      transparent 108deg,
+      rgba(245,176,66,0.12) 120deg);
+  pointer-events: none;
+  animation: buBurstSpin 8s linear infinite;
+}
+@keyframes buBurstSpin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+.bu-eyebrow {
+  position: relative;
+  font-family: "Courier New", monospace;
+  font-size: 10px;
+  letter-spacing: 4px;
+  color: var(--accent-gold);
+  font-weight: 900;
+  margin-bottom: 12px;
+  text-shadow: 0 0 10px rgba(245,176,66,0.7);
+}
+.bu-icon {
+  position: relative;
+  font-size: 88px;
+  line-height: 1;
+  filter: drop-shadow(0 0 22px rgba(245,176,66,0.85));
+  margin-bottom: 8px;
+  animation: buIconWobble 2.4s ease-in-out infinite;
+}
+@keyframes buIconWobble {
+  0%, 100% { transform: scale(1) rotate(0); }
+  50%      { transform: scale(1.04) rotate(2deg); }
+}
+.bu-name {
+  position: relative;
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 1.5px;
+  background: linear-gradient(135deg, #ffd984, #f5b042, #eb4b4b);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 8px;
+}
+.bu-desc {
+  position: relative;
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.4;
+  margin-bottom: 16px;
+}
+.bu-hint {
+  position: relative;
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: rgba(255,255,255,0.4);
+  text-transform: uppercase;
+}
+
 /* Tier picker — cooldown indicator */
 .boss-tier-card.cooldown {
   filter: grayscale(0.5) brightness(0.7);

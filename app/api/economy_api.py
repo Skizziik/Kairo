@@ -396,18 +396,29 @@ async def api_task_answer(req: TaskAnswerReq, user: dict = Depends(require_user)
 @router.get("/leaderboard")
 async def api_leaderboard(user: dict = Depends(require_user)) -> list[dict]:
     _ = user
+    import json as _json
+    from app.economy.boss import BADGES as _BADGES
     top = await eco.leaderboard_rich(limit=20)
-    return [
-        {
-            "tg_id": int(r["tg_id"]),
-            "username": r["username"],
-            "first_name": r["first_name"],
-            "balance": int(r["balance"]),
+    out = []
+    for r in top:
+        raw_badges = r.get("badges") or []
+        if isinstance(raw_badges, str):
+            try:
+                raw_badges = _json.loads(raw_badges)
+            except Exception:
+                raw_badges = []
+        # Resolve badge keys to display objects (icon + name + rarity)
+        badges = [_BADGES[k] for k in raw_badges if k in _BADGES]
+        out.append({
+            "tg_id":        int(r["tg_id"]),
+            "username":     r["username"],
+            "first_name":   r["first_name"],
+            "balance":      int(r["balance"]),
             "cases_opened": int(r["cases_opened"]),
-            "streak": int(r["current_streak"]),
-        }
-        for r in top
-    ]
+            "streak":       int(r["current_streak"]),
+            "badges":       badges,
+        })
+    return out
 
 
 # ================ retention: achievements / missions / wheel / pvp ================

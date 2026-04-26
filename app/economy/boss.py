@@ -36,7 +36,27 @@ BOSSES: list[dict] = [
     {"tier": 8,  "name": "Прокрастинатор",       "icon": "⏰", "hp": 250_000_000,   "coin_reward": 1_000_000, "lore": "Завтра точно начнёт качать прицел"},
     {"tier": 9,  "name": "Глобал-Эло",           "icon": "🏆", "hp": 1_000_000_000, "coin_reward": 3_000_000, "lore": "AWP в каждой руке, пулька в каждом таргете"},
     {"tier": 10, "name": "👑 Кайро-Финал",       "icon": "👑", "hp": 5_000_000_000, "coin_reward": 12_000_000, "lore": "Сам Кайро. Хохочет в твою тильт-сессию"},
+    {"tier": 11, "name": "Главный Босс RIP",     "icon": "👑", "hp": 10_000_000_000, "coin_reward": 25_000_000, "image_url": "/img/rip-boss.png", "is_hero": True, "badge_on_kill": "rip_crown", "lore": "Сам RIP. Корона, очки, керамбит, M9 — кликер CS2. Жми по картинке, пока не сдохнет."},
 ]
+
+
+# ============================================================
+# BADGES — permanent flair shown next to nickname in leaderboard
+# ============================================================
+
+BADGES: dict[str, dict] = {
+    "rip_crown": {
+        "key":    "rip_crown",
+        "name":   "Корона RIP",
+        "icon":   "👑",
+        "desc":   "Завалил Главного Босса (t11) — мифическая редкость",
+        "rarity": "mythic",
+    },
+}
+
+
+def badge_info(key: str) -> dict | None:
+    return BADGES.get(key)
 
 
 BOSS_REGEN_BASE_SEC = 30   # Base regen timeout (T1 = 30s without tap = HP resets)
@@ -61,8 +81,9 @@ BOSS_KILL_COOLDOWN: dict[int, int] = {
     8:  28_800,     # 8 hours
     9:  57_600,     # 16 hours
     10: 86_400,     # 24 hours
+    11: 172_800,    # 48 hours — final boss, slow respawn
 }
-BOSS_KILL_COOLDOWN_ENDLESS = 86_400  # 24h for any tier above 10
+BOSS_KILL_COOLDOWN_ENDLESS = 86_400  # 24h for any tier above 11
 
 
 def boss_kill_cooldown_seconds(tier: int) -> int:
@@ -70,12 +91,13 @@ def boss_kill_cooldown_seconds(tier: int) -> int:
 
 
 def boss_for_tier(tier: int) -> dict:
-    """Return boss config for any tier. Tiers 1-10 are story; >10 is endless mode."""
-    if 1 <= tier <= 10:
+    """Return boss config for any tier. Tiers 1-11 are story; >11 is endless mode.
+    Endless scaling references Кайро-Финал (BOSSES[9]), not RIP, so it doesn't
+    explode from the trillion-tier doubling."""
+    if 1 <= tier <= 11:
         return BOSSES[tier - 1]
-    # Endless: scale from boss 10 by 1.5× per tier above 10
-    base = BOSSES[9]
-    levels_above = tier - 10
+    base = BOSSES[9]   # scale from t10 = Кайро-Финал
+    levels_above = tier - 11
     hp = int(base["hp"] * (1.5 ** levels_above))
     coin = int(base["coin_reward"] * (1.4 ** levels_above))
     return {
@@ -84,7 +106,7 @@ def boss_for_tier(tier: int) -> dict:
         "icon": "♾",
         "hp": hp,
         "coin_reward": coin,
-        "lore": f"Бесконечный режим. Тир {levels_above} после Финала.",
+        "lore": f"Бесконечный режим. Тир {levels_above} после RIP.",
     }
 
 
@@ -296,6 +318,8 @@ async def get_state(tg_id: int) -> dict:
             "selected": t == sel_tier,
             "cooldown_left": p.get("cooldown_left", 0),
             "cooldown_total": boss_kill_cooldown_seconds(t),
+            "image_url": b.get("image_url"),
+            "is_hero": bool(b.get("is_hero", False)),
         })
 
     dmg_per_hit = _preview_damage(row)
@@ -307,6 +331,8 @@ async def get_state(tg_id: int) -> dict:
         "name": boss["name"],
         "icon": boss["icon"],
         "lore": boss["lore"],
+        "image_url": boss.get("image_url"),
+        "is_hero": bool(boss.get("is_hero", False)),
         "hp": cur_hp,
         "max_hp": max_hp,
         "coin_reward": int(boss["coin_reward"]),
@@ -516,7 +542,7 @@ async def attack(tg_id: int, taps: int = 1) -> dict:
                 )
 
             new_total_kills = int(row["boss_total_kills"]) + len(kills)
-            new_endless_kills = int(row["boss_endless_kills"]) + sum(1 for k in kills if k["tier"] > 10)
+            new_endless_kills = int(row["boss_endless_kills"]) + sum(1 for k in kills if k["tier"] > 11)
 
             await conn.execute(
                 "update forge_users set "
@@ -545,6 +571,33 @@ async def attack(tg_id: int, taps: int = 1) -> dict:
                     new_bal,
                 )
 
+            # Award permanent badge if any killed boss has `badge_on_kill` set.
+            # Idempotent: jsonb array, only added if absent. First kill grants it;
+            # subsequent kills are no-op.
+            new_badges_granted: list[str] = []
+            for k in kills:
+                cfg_b = boss_for_tier(int(k["tier"]))
+                badge_key = cfg_b.get("badge_on_kill")
+                if not badge_key:
+                    continue
+                # Check current badges and append only if missing
+                cur_badges_row = await conn.fetchrow(
+                    "select badges from economy_users where tg_id = $1", tg_id,
+                )
+                cur_list = []
+                if cur_badges_row and cur_badges_row["badges"]:
+                    raw = cur_badges_row["badges"]
+                    cur_list = raw if isinstance(raw, list) else json.loads(raw)
+                if badge_key in cur_list:
+                    continue
+                cur_list.append(badge_key)
+                await conn.execute(
+                    "update economy_users set badges = $2::jsonb where tg_id = $1",
+                    tg_id, json.dumps(cur_list),
+                )
+                new_badges_granted.append(badge_key)
+
+    badges_payload = [BADGES[k] for k in new_badges_granted if k in BADGES]
     return {
         "ok": True,
         "applied_taps": taps,
@@ -563,6 +616,7 @@ async def attack(tg_id: int, taps: int = 1) -> dict:
         "tier_unlocked": tier_unlocked,
         "coin_reward": coin_reward_total,
         "new_balance": new_bal,
+        "badges_unlocked": badges_payload,
         "regen_total_sec": boss_regen_seconds(current_tier),
         "cooldown_total_sec": boss_kill_cooldown_seconds(current_tier) if kills else 0,
         "cooldown_left_sec": int((kill_cd_until - now_ts).total_seconds()) if kill_cd_until else 0,

@@ -355,6 +355,7 @@ async def leaderboard_rich(limit: int = 10) -> list[dict]:
         rows = await conn.fetch(
             """
             select e.tg_id, e.balance, e.cases_opened, e.current_streak,
+                   coalesce(e.badges, '[]'::jsonb) as badges,
                    u.username, u.first_name
             from economy_users e
             left join users u on u.tg_id = e.tg_id

@@ -33,3 +33,9 @@ create index if not exists idx_boss_progress_tg on boss_progress (tg_id);
 -- driven by global forge clicks. Without this, hammering the forge would
 -- pre-rotate the megahit cycle on the boss tab.
 alter table forge_users add column if not exists boss_attack_count bigint not null default 0;
+
+-- Permanent badges (e.g. "rip_crown" granted for killing tier 11). Shown next
+-- to the nickname in the global leaderboard. Stored on economy_users so the
+-- leaderboard query (which already SELECTs from economy_users) can pick them
+-- up without an extra join.
+alter table economy_users add column if not exists badges jsonb not null default '[]'::jsonb;
