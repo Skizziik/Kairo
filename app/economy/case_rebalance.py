@@ -137,6 +137,31 @@ async def rebalance_all() -> None:
         await ensure_dragon_log()
     except Exception as e:
         log.warning("dragon_log seed failed: %s", e)
+    try:
+        await ensure_case_price("lera_golova", 1999)
+    except Exception as e:
+        log.warning("lera_golova price update failed: %s", e)
+
+
+# ============================================================
+# Generic price-fix helper: bring an existing case's price to a target.
+# Idempotent — only runs an UPDATE if current price differs.
+# ============================================================
+
+async def ensure_case_price(key: str, target_price: int) -> None:
+    async with pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "select id, price from economy_cases where key = $1", key,
+        )
+        if row is None:
+            return
+        if int(row["price"]) == int(target_price):
+            return
+        await conn.execute(
+            "update economy_cases set price = $2 where id = $1",
+            int(row["id"]), int(target_price),
+        )
+        log.info("case %s: price %s -> %s", key, row["price"], target_price)
 
 
 # ============================================================

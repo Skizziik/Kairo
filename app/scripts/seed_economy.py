@@ -199,7 +199,7 @@ CASE_DEFS = [
         "key": "lera_golova",
         "name": "Лера голова",
         "description": "Ничего лишнего — только AWP и SSG для тех кто целит в голову.",
-        "price": 750,
+        "price": 1999,
         "weapon_set": SNIPERS,
         "rarity_weights": {"mil-spec": 0.50, "restricted": 0.30, "classified": 0.13, "covert": 0.06, "exceedingly_rare": 0.01},
         "image_url": CASE_IMAGE_DREAMS,
