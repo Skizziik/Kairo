@@ -314,7 +314,7 @@
 
     // Initial speed (slow_start makes it slower)
     const slowStartLvl = Number(upgrades.slow_start || 0);
-    G.tickMs = 160 + slowStartLvl * 6;  // 160 → 220ms — faster default for snappier turns
+    G.tickMs = 130 + slowStartLvl * 5;  // 130 → 180ms — snappy without being berserk
 
     // Spawn obstacles
     const totalObs = mapCfg.obstacles + mapCfg.moving;
@@ -355,9 +355,10 @@
       snake.pendingDir = { x: dx, y: dy };
       const now = performance.now();
       const elapsed = now - G.lastMoveAt;
-      if (elapsed >= G.tickMs * 0.5) {
-        // past halfway — pretend tickMs has fully elapsed so the next loop
-        // iteration runs the move immediately
+      // Threshold lowered 0.5 → 0.3 so even a swipe arriving 40ms after
+      // a tick collapses the rest. Worst-case input lag ~40ms, which is
+      // below the human reaction floor for input-display sync.
+      if (elapsed >= G.tickMs * 0.30) {
         G.lastMoveAt = now - G.tickMs;
       }
     };

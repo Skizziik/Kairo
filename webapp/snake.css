@@ -32,11 +32,9 @@
 }
 
 #snake-app {
-  /* Fixed bottom-nav (.tabs) is ~80px tall plus iPhone home-indicator
-     safe-area. Without enough padding the START button + map strip
-     hide under it. We also need extra room because the START button
-     itself has 20px internal padding + glow shadow that spills below. */
-  padding-bottom: calc(140px + env(safe-area-inset-bottom, 0));
+  /* Bottom-nav (~80px) + safe-area + START btn glow shadow. Earlier 140px
+     wasn't enough on real iPhone — bumping to 200 covers all viewports. */
+  padding-bottom: calc(200px + env(safe-area-inset-bottom, 0));
   position: relative;
 }
 /* Subtle radial decoration sitting behind everything in the snake hub */
