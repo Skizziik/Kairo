@@ -1070,3 +1070,101 @@ async def api_cf_share(req: CFLobbyIdReq, user: dict = Depends(require_user)) ->
     if not mark.get("ok"):
         return mark
     return {"ok": True}
+
+
+# ================================================================
+# 🐍 SNAKE — full mini-game API
+# ================================================================
+from app.economy import snake as _snake
+
+
+class SnakeRunReq(BaseModel):
+    rarity_counts: dict[str, int] = Field(default_factory=dict)
+    duration_sec: int = Field(..., ge=0, le=7200)
+    length: int = Field(..., ge=0, le=2000)
+    mode: str
+    map_id: str
+    died_to: str = "self"
+
+
+class SnakeUpgradeReq(BaseModel):
+    key: str
+
+
+class SnakeBuyAfkReq(BaseModel):
+    snake_key: str
+
+
+class SnakeUpgradeAfkReq(BaseModel):
+    snake_key: str
+    copy_idx: int = Field(..., ge=0, le=200)
+
+
+class SnakeSkinReq(BaseModel):
+    skin_key: str
+
+
+class SnakeMapReq(BaseModel):
+    map_id: str
+
+
+@router.get("/snake/state")
+async def api_snake_state(user: dict = Depends(require_user)) -> dict:
+    return await _snake.get_state(int(user["id"]))
+
+
+@router.get("/snake/config")
+async def api_snake_config(user: dict = Depends(require_user)) -> dict:
+    _ = user
+    return await _snake.get_config()
+
+
+@router.post("/snake/run")
+async def api_snake_run(req: SnakeRunReq, user: dict = Depends(require_user)) -> dict:
+    return await _snake.record_run(
+        int(user["id"]),
+        rarity_counts=req.rarity_counts,
+        duration_sec=int(req.duration_sec),
+        length=int(req.length),
+        mode=req.mode,
+        map_id=req.map_id,
+        died_to=req.died_to,
+    )
+
+
+@router.post("/snake/upgrade")
+async def api_snake_upgrade(req: SnakeUpgradeReq, user: dict = Depends(require_user)) -> dict:
+    return await _snake.buy_upgrade(int(user["id"]), req.key)
+
+
+@router.post("/snake/afk/buy")
+async def api_snake_afk_buy(req: SnakeBuyAfkReq, user: dict = Depends(require_user)) -> dict:
+    return await _snake.buy_afk_snake(int(user["id"]), req.snake_key)
+
+
+@router.post("/snake/afk/upgrade")
+async def api_snake_afk_upgrade(req: SnakeUpgradeAfkReq, user: dict = Depends(require_user)) -> dict:
+    return await _snake.upgrade_afk_snake(int(user["id"]), req.snake_key, int(req.copy_idx))
+
+
+@router.post("/snake/skin/buy")
+async def api_snake_skin_buy(req: SnakeSkinReq, user: dict = Depends(require_user)) -> dict:
+    return await _snake.buy_skin(int(user["id"]), req.skin_key)
+
+
+@router.post("/snake/skin/equip")
+async def api_snake_skin_equip(req: SnakeSkinReq, user: dict = Depends(require_user)) -> dict:
+    return await _snake.equip_skin(int(user["id"]), req.skin_key)
+
+
+@router.post("/snake/map/select")
+async def api_snake_map_select(req: SnakeMapReq, user: dict = Depends(require_user)) -> dict:
+    return await _snake.select_map(int(user["id"]), req.map_id)
+
+
+@router.get("/snake/leaderboard")
+async def api_snake_leaderboard(period: str = "all", user: dict = Depends(require_user)) -> list[dict]:
+    _ = user
+    if period not in ("all", "week"):
+        period = "all"
+    return await _snake.leaderboard(period=period, limit=20)

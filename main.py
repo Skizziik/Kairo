@@ -17,6 +17,7 @@ from app.economy import audit as _audit
 from app.economy import boss as _boss
 from app.economy import case_rebalance as _case_rebalance
 from app.economy import coinflip_pvp as _cfpvp
+from app.economy import snake as _snake
 from app.economy import tiers as _tiers
 from app.economy import gear as _gear
 from app.economy import mines as _mines
@@ -71,6 +72,10 @@ async def lifespan(_: FastAPI):
         await _tiers.ensure_schema()
     except Exception as e:
         log.warning("tiers schema migration failed: %s", e)
+    try:
+        await _snake.ensure_schema()
+    except Exception as e:
+        log.warning("snake schema migration failed: %s", e)
     # Trim oversized case pools (idempotent — only changes if current count > cap)
     try:
         await _case_rebalance.rebalance_all()
@@ -106,6 +111,10 @@ async def lifespan(_: FastAPI):
     # Bet audit cleanup — drops rows older than RETENTION_DAYS, hourly
     scheduler_tasks.append(asyncio.create_task(_audit.cleanup_loop()))
     log.info("audit cleanup loop started (retention %dd)", _audit.RETENTION_DAYS)
+
+    # Snake AFK farm tick — accumulates passive coins for users who own AFK snakes
+    scheduler_tasks.append(asyncio.create_task(_snake.afk_loop()))
+    log.info("snake AFK loop started")
 
     try:
         yield

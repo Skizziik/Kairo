@@ -854,9 +854,22 @@ document.addEventListener('DOMContentLoaded', () => {
       openGameScreen(card.dataset.game);
     });
   });
+  // Snake view: back to Games
+  const sb = document.getElementById('snake-back');
+  if (sb) sb.addEventListener('click', () => {
+    if (typeof window.snakeLeave === 'function') window.snakeLeave();
+    showView('games');
+  });
 });
 
 function openGameScreen(gameKey) {
+  // Snake has its own dedicated view (with sub-tabs); short-circuit before
+  // hiding the games grid so the existing nav system handles it cleanly.
+  if (gameKey === 'snake') {
+    showView('snake');
+    if (typeof window.snakeEnter === 'function') window.snakeEnter();
+    return;
+  }
   const grid = document.querySelector('.game-grid');
   if (grid) grid.style.display = 'none';
   const area = document.getElementById('game-play-area');
@@ -941,6 +954,10 @@ function renderGamePlay(game, target) {
     renderTycoon(area);
   } else if (game === 'forge') {
     renderForge(area);
+  } else if (game === 'snake') {
+    // Snake has its own full view + sub-tabs; switch to dedicated section
+    showView('snake');
+    if (typeof window.snakeEnter === 'function') window.snakeEnter();
   }
 }
 

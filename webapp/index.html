@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>RIP Casino</title>
   <link rel="stylesheet" href="./styles.css?v=20260427v" />
+  <link rel="stylesheet" href="./snake.css?v=20260428a" />
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
@@ -244,9 +245,21 @@
             <div class="game-name">Кузница</div>
             <div class="game-desc">Разбирай скины на particles, качай молот, меняй на коины</div>
           </div>
+          <div class="game-card snake-card" data-game="snake">
+            <div class="game-icon">🐍</div>
+            <div class="game-name">Snake</div>
+            <div class="game-desc">Хавай скины, расти, прокачивай 42 апгрейда + AFK ферма змей</div>
+          </div>
         </div>
 
         <div id="game-play-area"></div>
+      </section>
+
+      <!-- view: snake (full mini-game) -->
+      <section class="view" data-view="snake">
+        <button class="back-btn" id="snake-back">← к играм</button>
+        <h2>🐍 Snake</h2>
+        <div id="snake-app"></div>
       </section>
 
       <!-- view: leaderboard -->
@@ -327,5 +340,6 @@
   </div>
 
   <script src="./app.js?v=20260427bb"></script>
+  <script src="./snake.js?v=20260428a"></script>
 </body>
 </html>
