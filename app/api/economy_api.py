@@ -831,6 +831,11 @@ async def api_tycoon_collect_all(user: dict = Depends(require_user)) -> dict:
     return await _tycoon.collect_all(int(user["id"]))
 
 
+@router.post("/tycoon/sell")
+async def api_tycoon_sell(req: TycoonCollectReq, user: dict = Depends(require_user)) -> dict:
+    return await _tycoon.sell_unit(int(user["id"]), req.unit_id)
+
+
 @router.post("/tycoon/convert/chips_to_cash")
 async def api_tycoon_conv_chips(req: TycoonConvertReq, user: dict = Depends(require_user)) -> dict:
     return await _tycoon.convert_chips_to_cash(int(user["id"]), req.amount)

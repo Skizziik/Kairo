@@ -4909,6 +4909,7 @@ function _tcUnitHtml(u, cols) {
   return `
     <div class="tc-unit kind-${u.kind} tier-${u.tier}" data-uid="${u.id}"
          style="left:${p.x + 2}px; top:${p.y - 8}px; width:${TC_CELL_W - 4}px; height:${TC_CELL_H + 18}px">
+      <button class="tc-unit-sell" data-sell-uid="${u.id}" title="Продать (70% возврат)">✕</button>
       ${_tcUnitSpriteSvg(u)}
       ${tray > 0 ? `<div class="tc-tray glow"><span class="tc-tray-icon">🎲</span><span class="tc-tray-val">${fmt(tray)}</span></div>` : ''}
       <div class="tc-occ-bar"><div class="tc-occ-fill" style="width:${u.occupancy_pct||0}%"></div></div>
@@ -4916,106 +4917,537 @@ function _tcUnitHtml(u, cols) {
   `;
 }
 
-// ---- SVG SPRITES (rich, NOT just emoji) ----
+// ---- SVG SPRITES (rich, unique per unit key — NOT just tier-colored) ----
 function _tcUnitSpriteSvg(u) {
-  if (u.kind === 'slot')   return _tcSlotSvg(u);
-  if (u.kind === 'table')  return _tcTableSvg(u);
-  if (u.kind === 'amenity') return _tcAmenitySvg(u);
+  if (u.kind === 'slot')    return _tcSlotSvgByKey(u);
+  if (u.kind === 'table')   return _tcTableSvgByKey(u);
+  if (u.kind === 'amenity') return _tcAmenitySvgByKey(u);
   return `<div style="font-size:32px">${u.icon}</div>`;
 }
 
-function _tcSlotSvg(u) {
-  // Tier-based color
-  const tierColors = {
-    1: ['#5a6075', '#2a2f3d', '#1a1d28'],
-    2: ['#eb4b4b', '#8c1818', '#440505'],
-    3: ['#b07028', '#5a3a08', '#2a1c04'],
-    4: ['#b667ff', '#3a0d63', '#220838'],
-    5: ['#f5b042', '#a85e08', '#5a3204'],
-  };
-  const [c1, c2, c3] = tierColors[u.tier] || tierColors[1];
-  return `
-    <svg class="tc-unit-svg" viewBox="0 0 56 70" preserveAspectRatio="xMidYMid meet">
-      <defs>
-        <linearGradient id="slotGrad${u.id}" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="${c1}"/>
-          <stop offset="60%" stop-color="${c2}"/>
-          <stop offset="100%" stop-color="${c3}"/>
-        </linearGradient>
-        <linearGradient id="slotScreen${u.id}" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#0a0c14"/>
-          <stop offset="100%" stop-color="#1a1f2c"/>
-        </linearGradient>
-      </defs>
-      <!-- Cabinet shadow -->
-      <ellipse cx="28" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
-      <!-- Cabinet body -->
-      <rect x="8" y="12" width="40" height="54" rx="4" fill="url(#slotGrad${u.id})" stroke="#0a0c14" stroke-width="1"/>
-      <!-- Top crown -->
-      <rect x="6" y="6" width="44" height="10" rx="3" fill="${c1}" stroke="#0a0c14" stroke-width="0.8"/>
-      <circle cx="13" cy="11" r="2" class="tc-slot-light" fill="#ffd984"/>
-      <circle cx="28" cy="11" r="2" class="tc-slot-light" fill="#ff6b6b" style="animation-delay:0.3s"/>
-      <circle cx="43" cy="11" r="2" class="tc-slot-light" fill="#5aa9ff" style="animation-delay:0.6s"/>
-      <!-- Screen with reels -->
-      <rect x="11" y="20" width="34" height="22" rx="2" fill="url(#slotScreen${u.id})" stroke="#0a0c14"/>
-      <rect x="13" y="22" width="9" height="18" fill="#1a1f2c" class="tc-reel"/>
-      <rect x="23.5" y="22" width="9" height="18" fill="#1a1f2c" class="tc-reel" style="animation-delay:0.15s"/>
-      <rect x="34" y="22" width="9" height="18" fill="#1a1f2c" class="tc-reel" style="animation-delay:0.3s"/>
-      <text x="17.5" y="34" text-anchor="middle" font-size="8" fill="#f5b042" font-weight="900">7</text>
-      <text x="28" y="34" text-anchor="middle" font-size="8" fill="#f5b042" font-weight="900">7</text>
-      <text x="38.5" y="34" text-anchor="middle" font-size="8" fill="#f5b042" font-weight="900">7</text>
-      <!-- Coin slot + button -->
-      <rect x="22" y="46" width="12" height="2" fill="#0a0c14"/>
-      <circle cx="28" cy="55" r="4" fill="#eb4b4b" stroke="#000" stroke-width="0.5"/>
-      <text x="28" y="57" text-anchor="middle" font-size="3" fill="#fff" font-weight="900">SPIN</text>
-      <!-- Lever on side -->
-      <rect x="48" y="22" width="2" height="18" fill="#888"/>
-      <circle cx="49" cy="20" r="3" fill="#eb4b4b" stroke="#000"/>
-    </svg>
-  `;
+// ===== SLOT MACHINES — every key has its OWN cabinet design =====
+function _tcSlotSvgByKey(u) {
+  const renderer = TC_SLOT_RENDERERS[u.key] || _tcSlotGeneric;
+  return renderer(u);
 }
 
-function _tcTableSvg(u) {
-  const tierColors = {
-    2: '#1f7a3a', 3: '#28a149', 4: '#0a5530', 5: '#7a1818',
-  };
-  const felt = tierColors[u.tier] || '#1f7a3a';
-  return `
-    <svg class="tc-unit-svg" viewBox="0 0 60 70" preserveAspectRatio="xMidYMid meet">
-      <defs>
-        <radialGradient id="tableFelt${u.id}" cx="0.5" cy="0.45" r="0.6">
-          <stop offset="0%" stop-color="${felt}" stop-opacity="1"/>
-          <stop offset="100%" stop-color="#0a0c14" stop-opacity="1"/>
-        </radialGradient>
-      </defs>
-      <ellipse cx="30" cy="68" rx="26" ry="3" fill="rgba(0,0,0,0.5)"/>
-      <!-- Table top (oval) -->
-      <ellipse cx="30" cy="40" rx="26" ry="20" fill="url(#tableFelt${u.id})" stroke="#3a2810" stroke-width="2"/>
-      <ellipse cx="30" cy="38" rx="22" ry="16" fill="${felt}" opacity="0.3"/>
-      <!-- Pattern on felt -->
-      <text x="30" y="42" text-anchor="middle" font-size="14" fill="#f5b042" font-weight="900" opacity="0.6">${u.icon}</text>
-      <!-- Chip stacks -->
-      <ellipse cx="14" cy="34" rx="3" ry="1.2" fill="#eb4b4b" stroke="#000" stroke-width="0.4"/>
-      <ellipse cx="14" cy="32" rx="3" ry="1.2" fill="#eb4b4b" stroke="#000" stroke-width="0.4"/>
-      <ellipse cx="46" cy="34" rx="3" ry="1.2" fill="#5aa9ff" stroke="#000" stroke-width="0.4"/>
-      <ellipse cx="46" cy="32" rx="3" ry="1.2" fill="#5aa9ff" stroke="#000" stroke-width="0.4"/>
-      <!-- Dealer position -->
-      <circle cx="30" cy="22" r="4" fill="#bcaa66" stroke="#000"/>
-      <rect x="27" y="24" width="6" height="4" fill="#1a1f2c"/>
-    </svg>
-  `;
+const TC_SLOT_RENDERERS = {};
+
+// Helper: shared shadow + base wrapper
+function _tcSvgBase(inner, height = 70) {
+  return `<svg class="tc-unit-svg" viewBox="0 0 60 ${height}" preserveAspectRatio="xMidYMid meet">${inner}</svg>`;
 }
 
-function _tcAmenitySvg(u) {
-  const palette = { amen_bar: '#ffd984', amen_atm: '#5aa9ff', amen_vip: '#b667ff' };
-  const c = palette[u.key] || '#888';
-  return `
-    <svg class="tc-unit-svg" viewBox="0 0 56 70" preserveAspectRatio="xMidYMid meet">
-      <ellipse cx="28" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
-      <rect x="10" y="20" width="36" height="44" rx="3" fill="${c}" opacity="0.3" stroke="${c}" stroke-width="2"/>
-      <text x="28" y="50" text-anchor="middle" font-size="22">${u.icon}</text>
-    </svg>
-  `;
+// 1. PENNY — small dingy copper-colored slot
+TC_SLOT_RENDERERS.slot_penny = (u) => _tcSvgBase(`
+  <ellipse cx="30" cy="68" rx="20" ry="2.5" fill="rgba(0,0,0,0.5)"/>
+  <rect x="14" y="20" width="32" height="44" rx="3" fill="#7a5a30" stroke="#3a2810" stroke-width="0.8"/>
+  <rect x="13" y="14" width="34" height="8" rx="2" fill="#a87440" stroke="#3a2810" stroke-width="0.6"/>
+  <text x="30" y="20" text-anchor="middle" font-size="5" fill="#fff5d8" font-weight="900">PENNY</text>
+  <rect x="17" y="26" width="26" height="20" rx="1" fill="#1a1003" stroke="#000"/>
+  <text x="30" y="40" text-anchor="middle" font-size="11" fill="#cda060" font-weight="900">¢</text>
+  <circle cx="30" cy="55" r="3" fill="#cda060" stroke="#000" stroke-width="0.5"/>
+`);
+
+// 2. BASIC — classic 3-reel arcade
+TC_SLOT_RENDERERS.slot_basic = (u) => _tcSvgBase(`
+  <defs>
+    <linearGradient id="sb${u.id}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#5a6075"/><stop offset="100%" stop-color="#1a1d28"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="30" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
+  <rect x="10" y="14" width="40" height="50" rx="4" fill="url(#sb${u.id})" stroke="#0a0c14"/>
+  <rect x="8" y="8" width="44" height="9" rx="3" fill="#5a6075"/>
+  <circle cx="14" cy="12.5" r="1.5" class="tc-slot-light" fill="#ffd984"/>
+  <circle cx="30" cy="12.5" r="1.5" class="tc-slot-light" fill="#ff6b6b" style="animation-delay:0.3s"/>
+  <circle cx="46" cy="12.5" r="1.5" class="tc-slot-light" fill="#5aa9ff" style="animation-delay:0.6s"/>
+  <rect x="13" y="22" width="34" height="22" rx="2" fill="#0a0c14"/>
+  <rect x="15" y="24" width="9" height="18" fill="#1a1f2c" class="tc-reel"/>
+  <rect x="25.5" y="24" width="9" height="18" fill="#1a1f2c" class="tc-reel" style="animation-delay:0.15s"/>
+  <rect x="36" y="24" width="9" height="18" fill="#1a1f2c" class="tc-reel" style="animation-delay:0.3s"/>
+  <text x="19.5" y="36" text-anchor="middle" font-size="7" fill="#f5b042" font-weight="900">7</text>
+  <text x="30" y="36" text-anchor="middle" font-size="7" fill="#f5b042" font-weight="900">7</text>
+  <text x="40.5" y="36" text-anchor="middle" font-size="7" fill="#f5b042" font-weight="900">7</text>
+  <circle cx="30" cy="54" r="4" fill="#eb4b4b" stroke="#000"/>
+`);
+
+// 3. LUCKY 7 — neon big "7" displays
+TC_SLOT_RENDERERS.slot_lucky7 = (u) => _tcSvgBase(`
+  <defs>
+    <radialGradient id="l7${u.id}" cx="0.5" cy="0.3" r="0.7">
+      <stop offset="0%" stop-color="#ff8a3a"/><stop offset="100%" stop-color="#8c1818"/>
+    </radialGradient>
+  </defs>
+  <ellipse cx="30" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
+  <rect x="10" y="12" width="40" height="52" rx="5" fill="url(#l7${u.id})" stroke="#440505" stroke-width="1.2"/>
+  <rect x="6" y="4" width="48" height="12" rx="6" fill="#ffd984" stroke="#8c1818"/>
+  <text x="30" y="13" text-anchor="middle" font-size="9" fill="#8c1818" font-weight="900" font-family="serif">LUCKY 7</text>
+  <rect x="13" y="22" width="34" height="24" rx="2" fill="#1a0303" stroke="#ffd984"/>
+  <text x="20" y="40" text-anchor="middle" font-size="18" fill="#ffd984" font-weight="900" font-family="serif">7</text>
+  <text x="30" y="40" text-anchor="middle" font-size="18" fill="#ffd984" font-weight="900" font-family="serif">7</text>
+  <text x="40" y="40" text-anchor="middle" font-size="18" fill="#ffd984" font-weight="900" font-family="serif">7</text>
+  <circle cx="30" cy="55" r="4" fill="#ffd984" stroke="#000"/>
+`);
+
+// 4. CHERRY BONANZA — fruit machine with cherries on top
+TC_SLOT_RENDERERS.slot_cherry = (u) => _tcSvgBase(`
+  <ellipse cx="30" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
+  <rect x="10" y="16" width="40" height="48" rx="4" fill="#d8385a" stroke="#7a1a30"/>
+  <!-- Big cherries on top -->
+  <circle cx="22" cy="10" r="4" fill="#eb4b4b" stroke="#000"/>
+  <circle cx="38" cy="10" r="4" fill="#eb4b4b" stroke="#000"/>
+  <path d="M22 6 Q26 2 30 4 Q34 2 38 6" stroke="#1a8c34" stroke-width="1.5" fill="none"/>
+  <rect x="13" y="22" width="34" height="22" rx="2" fill="#0a0c14"/>
+  <text x="20" y="38" text-anchor="middle" font-size="11">🍒</text>
+  <text x="30" y="38" text-anchor="middle" font-size="11">🍋</text>
+  <text x="40" y="38" text-anchor="middle" font-size="11">🍊</text>
+  <circle cx="30" cy="54" r="3.5" fill="#ffd984" stroke="#000"/>
+`);
+
+// 5. PIRATE — wooden cabinet, skull on top
+TC_SLOT_RENDERERS.slot_pirate = (u) => _tcSvgBase(`
+  <ellipse cx="30" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
+  <rect x="10" y="14" width="40" height="50" rx="3" fill="#5a3a08" stroke="#2a1c04"/>
+  <!-- Wood grain lines -->
+  <line x1="14" y1="14" x2="14" y2="64" stroke="#3a2810" stroke-width="0.5"/>
+  <line x1="20" y1="14" x2="20" y2="64" stroke="#3a2810" stroke-width="0.5"/>
+  <line x1="40" y1="14" x2="40" y2="64" stroke="#3a2810" stroke-width="0.5"/>
+  <line x1="46" y1="14" x2="46" y2="64" stroke="#3a2810" stroke-width="0.5"/>
+  <!-- Skull on top -->
+  <circle cx="30" cy="9" r="5" fill="#fff" stroke="#000"/>
+  <circle cx="28" cy="8" r="0.8" fill="#000"/>
+  <circle cx="32" cy="8" r="0.8" fill="#000"/>
+  <rect x="28.5" y="10" width="3" height="2" fill="#000"/>
+  <!-- Crossbones -->
+  <rect x="22" y="14" width="16" height="1.5" fill="#fff" transform="rotate(15 30 14.7)"/>
+  <rect x="22" y="14" width="16" height="1.5" fill="#fff" transform="rotate(-15 30 14.7)"/>
+  <rect x="13" y="22" width="34" height="22" rx="2" fill="#1a0c04" stroke="#5a3a08"/>
+  <text x="30" y="36" text-anchor="middle" font-size="13" fill="#ffd984">⚓</text>
+  <circle cx="30" cy="54" r="3.5" fill="#8c1818" stroke="#000"/>
+`);
+
+// 6. WILD WEST — wooden, cowboy hat top
+TC_SLOT_RENDERERS.slot_wildwest = (u) => _tcSvgBase(`
+  <ellipse cx="30" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
+  <rect x="10" y="16" width="40" height="48" rx="3" fill="#7a4500" stroke="#2a1404"/>
+  <!-- Cowboy hat -->
+  <ellipse cx="30" cy="14" rx="14" ry="2" fill="#3a2810"/>
+  <path d="M22 14 Q22 7 30 6 Q38 7 38 14 Z" fill="#5a3a08"/>
+  <ellipse cx="30" cy="11" rx="6" ry="1.5" fill="#8c1818"/>
+  <rect x="13" y="22" width="34" height="22" rx="2" fill="#0a0c14"/>
+  <text x="20" y="38" text-anchor="middle" font-size="11">⭐</text>
+  <text x="30" y="38" text-anchor="middle" font-size="11">🌵</text>
+  <text x="40" y="38" text-anchor="middle" font-size="11">🐎</text>
+  <!-- Revolver decoration -->
+  <rect x="11" y="50" width="6" height="2" fill="#888" rx="0.5"/>
+  <circle cx="14" cy="51" r="1.5" fill="#444"/>
+  <circle cx="30" cy="55" r="3.5" fill="#ffd984" stroke="#000"/>
+`);
+
+// 7. ROYAL FLUSH — gold trim, crown on top
+TC_SLOT_RENDERERS.slot_royale = (u) => _tcSvgBase(`
+  <defs>
+    <linearGradient id="rf${u.id}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#b667ff"/><stop offset="100%" stop-color="#3a0d63"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="30" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
+  <rect x="10" y="16" width="40" height="48" rx="4" fill="url(#rf${u.id})" stroke="#220838" stroke-width="1.2"/>
+  <!-- Crown on top -->
+  <path d="M16 14 L20 6 L24 12 L30 4 L36 12 L40 6 L44 14 L44 16 L16 16 Z" fill="#ffd984" stroke="#7a4500"/>
+  <circle cx="20" cy="9" r="1" fill="#eb4b4b"/>
+  <circle cx="30" cy="7" r="1.2" fill="#5aa9ff"/>
+  <circle cx="40" cy="9" r="1" fill="#eb4b4b"/>
+  <rect x="13" y="22" width="34" height="22" rx="2" fill="#0a0a14" stroke="#ffd984"/>
+  <text x="20" y="38" text-anchor="middle" font-size="11" fill="#fff" font-weight="900">A♠</text>
+  <text x="30" y="38" text-anchor="middle" font-size="11" fill="#fff" font-weight="900">K♠</text>
+  <text x="40" y="38" text-anchor="middle" font-size="11" fill="#fff" font-weight="900">Q♠</text>
+  <circle cx="30" cy="55" r="4" fill="#ffd984" stroke="#000"/>
+`);
+
+// 8. DIAMOND REELS — crystal cabinet
+TC_SLOT_RENDERERS.slot_diamond = (u) => _tcSvgBase(`
+  <defs>
+    <linearGradient id="dr${u.id}" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#aacaff"/><stop offset="100%" stop-color="#1f5396"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="30" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
+  <rect x="10" y="14" width="40" height="50" rx="4" fill="url(#dr${u.id})" stroke="#1f5396"/>
+  <!-- Big diamond on top -->
+  <polygon points="30,4 36,10 30,18 24,10" fill="#aacaff" stroke="#fff" stroke-width="0.5"/>
+  <line x1="24" y1="10" x2="36" y2="10" stroke="#1f5396" stroke-width="0.4"/>
+  <line x1="27" y1="10" x2="30" y2="18" stroke="#1f5396" stroke-width="0.4"/>
+  <line x1="33" y1="10" x2="30" y2="18" stroke="#1f5396" stroke-width="0.4"/>
+  <rect x="13" y="22" width="34" height="22" rx="2" fill="#0a0c14"/>
+  <text x="20" y="38" text-anchor="middle" font-size="11">💎</text>
+  <text x="30" y="38" text-anchor="middle" font-size="11">💎</text>
+  <text x="40" y="38" text-anchor="middle" font-size="11">💎</text>
+  <circle cx="30" cy="55" r="3.5" fill="#aacaff" stroke="#000"/>
+`);
+
+// 9. CS GATES — bomb / CS theme
+TC_SLOT_RENDERERS.slot_csgates = (u) => _tcSvgBase(`
+  <defs>
+    <linearGradient id="cs${u.id}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f5b042"/><stop offset="100%" stop-color="#5a3204"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="30" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
+  <rect x="10" y="14" width="40" height="50" rx="3" fill="url(#cs${u.id})" stroke="#5a3204"/>
+  <rect x="8" y="6" width="44" height="10" rx="3" fill="#1a1f2c"/>
+  <text x="30" y="13" text-anchor="middle" font-size="8" fill="#f5b042" font-weight="900">CS GATES</text>
+  <rect x="13" y="22" width="34" height="22" rx="2" fill="#0a0c14"/>
+  <text x="20" y="38" text-anchor="middle" font-size="11">💣</text>
+  <text x="30" y="38" text-anchor="middle" font-size="11">💣</text>
+  <text x="40" y="38" text-anchor="middle" font-size="11">💣</text>
+  <circle cx="30" cy="55" r="3.5" fill="#eb4b4b" stroke="#000"/>
+`);
+
+// 10. COSMIC SPIN — purple galaxy swirl
+TC_SLOT_RENDERERS.slot_cosmic = (u) => _tcSvgBase(`
+  <defs>
+    <radialGradient id="cm${u.id}" cx="0.5" cy="0.5" r="0.7">
+      <stop offset="0%" stop-color="#b667ff"/><stop offset="60%" stop-color="#3a0d63"/><stop offset="100%" stop-color="#04000c"/>
+    </radialGradient>
+  </defs>
+  <ellipse cx="30" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
+  <rect x="10" y="14" width="40" height="50" rx="4" fill="url(#cm${u.id})" stroke="#b667ff" stroke-width="1.2"/>
+  <!-- Stars on top + saturn -->
+  <circle cx="14" cy="10" r="0.8" fill="#fff"/>
+  <circle cx="20" cy="6" r="0.6" fill="#fff"/>
+  <circle cx="30" cy="8" r="3" fill="#ffd984"/>
+  <ellipse cx="30" cy="8" rx="5" ry="1.2" fill="none" stroke="#aacaff" stroke-width="0.6"/>
+  <circle cx="42" cy="10" r="0.8" fill="#fff"/>
+  <circle cx="48" cy="6" r="0.6" fill="#fff"/>
+  <rect x="13" y="22" width="34" height="22" rx="2" fill="#04000c" stroke="#b667ff"/>
+  <text x="20" y="38" text-anchor="middle" font-size="11">🌠</text>
+  <text x="30" y="38" text-anchor="middle" font-size="11">🪐</text>
+  <text x="40" y="38" text-anchor="middle" font-size="11">⭐</text>
+  <circle cx="30" cy="55" r="4" fill="#b667ff" stroke="#fff" stroke-width="0.5"/>
+`);
+
+// 11. BLACK DIAMOND — pure black with diamond glow
+TC_SLOT_RENDERERS.slot_blackdiamond = (u) => _tcSvgBase(`
+  <ellipse cx="30" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
+  <rect x="10" y="14" width="40" height="50" rx="4" fill="#0a0a0a" stroke="#aacaff" stroke-width="1.5"/>
+  <rect x="8" y="6" width="44" height="10" rx="3" fill="#000" stroke="#aacaff" stroke-width="0.6"/>
+  <text x="30" y="13" text-anchor="middle" font-size="6" fill="#aacaff" font-weight="900" letter-spacing="2">★ BLACK ★</text>
+  <!-- Big shimmering diamond -->
+  <polygon points="30,22 38,30 30,46 22,30" fill="#1a1f2c" stroke="#aacaff" stroke-width="1"/>
+  <polygon points="30,22 38,30 30,38 22,30" fill="#aacaff" opacity="0.3"/>
+  <line x1="22" y1="30" x2="38" y2="30" stroke="#aacaff" stroke-width="0.5"/>
+  <text x="30" y="33" text-anchor="middle" font-size="6" fill="#aacaff" font-weight="900">💎</text>
+  <circle cx="30" cy="55" r="4" fill="#aacaff" stroke="#000"/>
+`);
+
+// Fallback for any new slot key not yet drawn
+function _tcSlotGeneric(u) {
+  const tierColors = {
+    1: '#5a6075', 2: '#eb4b4b', 3: '#b07028', 4: '#b667ff', 5: '#f5b042', 6: '#b667ff', 7: '#aacaff',
+  };
+  const c = tierColors[u.tier] || '#5a6075';
+  return _tcSvgBase(`
+    <ellipse cx="30" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
+    <rect x="10" y="14" width="40" height="50" rx="4" fill="${c}" stroke="#000"/>
+    <rect x="13" y="22" width="34" height="22" rx="2" fill="#0a0c14"/>
+    <text x="30" y="38" text-anchor="middle" font-size="14">${u.icon}</text>
+    <circle cx="30" cy="55" r="3.5" fill="#fff" stroke="#000"/>
+  `);
+}
+
+// ===== TABLES — every key has its OWN felt + decoration =====
+function _tcTableSvgByKey(u) {
+  const r = TC_TABLE_RENDERERS[u.key] || _tcTableGeneric;
+  return r(u);
+}
+
+const TC_TABLE_RENDERERS = {};
+
+// Helper: draw an oval table with given felt color and decoration
+function _tcTableBase(feltColor, deco, shadowR = 26, oval = [26, 20]) {
+  return _tcSvgBase(`
+    <ellipse cx="30" cy="68" rx="${shadowR}" ry="3" fill="rgba(0,0,0,0.5)"/>
+    <ellipse cx="30" cy="40" rx="${oval[0]}" ry="${oval[1]}" fill="#3a2810" stroke="#1a0c04"/>
+    <ellipse cx="30" cy="40" rx="${oval[0]-2}" ry="${oval[1]-2}" fill="${feltColor}"/>
+    <ellipse cx="30" cy="38" rx="${oval[0]-4}" ry="${oval[1]-4}" fill="${feltColor}" opacity="0.3"/>
+    ${deco}
+  `);
+}
+
+// Coinflip — small round table, single coin
+TC_TABLE_RENDERERS.tbl_coinflip = (u) => _tcTableBase('#1f7a3a', `
+  <circle cx="30" cy="40" r="6" fill="#ffd984" stroke="#7a4500" stroke-width="0.8"/>
+  <text x="30" y="44" text-anchor="middle" font-size="9" fill="#7a4500" font-weight="900">$</text>
+`, 18, [16, 12]);
+
+// Craps — long rectangular green felt with two dice
+TC_TABLE_RENDERERS.tbl_craps = (u) => _tcSvgBase(`
+  <ellipse cx="30" cy="68" rx="26" ry="3" fill="rgba(0,0,0,0.5)"/>
+  <rect x="6" y="28" width="48" height="24" rx="3" fill="#3a2810" stroke="#1a0c04"/>
+  <rect x="8" y="30" width="44" height="20" rx="2" fill="#1f7a3a"/>
+  <line x1="30" y1="30" x2="30" y2="50" stroke="#fff" stroke-width="0.4"/>
+  <text x="18" y="42" text-anchor="middle" font-size="6" fill="#fff" font-weight="900">PASS</text>
+  <text x="42" y="42" text-anchor="middle" font-size="6" fill="#fff" font-weight="900">DON'T</text>
+  <!-- Two dice -->
+  <rect x="20" y="20" width="6" height="6" rx="1" fill="#fff" stroke="#000"/>
+  <circle cx="23" cy="23" r="0.7" fill="#000"/>
+  <rect x="34" y="22" width="6" height="6" rx="1" fill="#fff" stroke="#000"/>
+  <circle cx="35.5" cy="23.5" r="0.7" fill="#000"/>
+  <circle cx="38.5" cy="26.5" r="0.7" fill="#000"/>
+`);
+
+// Roulette — round wheel
+TC_TABLE_RENDERERS.tbl_roulette = (u) => _tcSvgBase(`
+  <ellipse cx="30" cy="68" rx="26" ry="3" fill="rgba(0,0,0,0.5)"/>
+  <circle cx="30" cy="40" r="22" fill="#3a2810" stroke="#1a0c04" stroke-width="1.5"/>
+  <circle cx="30" cy="40" r="20" fill="#28a149"/>
+  <circle cx="30" cy="40" r="14" fill="#0a0c14" stroke="#ffd984"/>
+  <!-- Wheel segments -->
+  <path d="M30 26 L30 40 L42 47 Z" fill="#eb4b4b"/>
+  <path d="M30 40 L42 47 L36 56 Z" fill="#0a0c14"/>
+  <path d="M30 40 L36 56 L24 56 Z" fill="#eb4b4b"/>
+  <path d="M30 40 L24 56 L18 47 Z" fill="#0a0c14"/>
+  <path d="M30 40 L18 47 L18 33 Z" fill="#eb4b4b"/>
+  <path d="M30 40 L18 33 L24 24 Z" fill="#0a0c14"/>
+  <path d="M30 40 L24 24 L36 24 Z" fill="#eb4b4b"/>
+  <path d="M30 40 L36 24 L42 33 Z" fill="#0a0c14"/>
+  <circle cx="30" cy="40" r="3" fill="#ffd984" stroke="#7a4500"/>
+`);
+
+// 3-Card Poker — semi-circle with 3 cards
+TC_TABLE_RENDERERS.tbl_3card = (u) => _tcTableBase('#28a149', `
+  <rect x="20" y="36" width="6" height="9" fill="#fff" stroke="#000" stroke-width="0.4" transform="rotate(-15 23 40)"/>
+  <text x="22" y="43" text-anchor="middle" font-size="5" fill="#eb4b4b" font-weight="900" transform="rotate(-15 23 40)">A♥</text>
+  <rect x="27" y="34" width="6" height="9" fill="#fff" stroke="#000" stroke-width="0.4"/>
+  <text x="30" y="40" text-anchor="middle" font-size="5" fill="#000" font-weight="900">K♣</text>
+  <rect x="34" y="36" width="6" height="9" fill="#fff" stroke="#000" stroke-width="0.4" transform="rotate(15 37 40)"/>
+  <text x="37" y="43" text-anchor="middle" font-size="5" fill="#eb4b4b" font-weight="900" transform="rotate(15 37 40)">Q♦</text>
+`);
+
+// Blackjack — crescent shape
+TC_TABLE_RENDERERS.tbl_blackjack = (u) => _tcSvgBase(`
+  <ellipse cx="30" cy="68" rx="26" ry="3" fill="rgba(0,0,0,0.5)"/>
+  <path d="M6 32 Q6 50 30 56 Q54 50 54 32 L54 38 Q30 32 6 38 Z" fill="#3a2810"/>
+  <path d="M8 32 Q8 48 30 54 Q52 48 52 32 L52 38 Q30 33 8 38 Z" fill="#0a5530"/>
+  <text x="30" y="48" text-anchor="middle" font-size="8" fill="#ffd984" font-weight="900">BLACKJACK</text>
+  <text x="30" y="32" text-anchor="middle" font-size="6" fill="#fff" opacity="0.5">21</text>
+  <!-- Dealer cards -->
+  <rect x="22" y="22" width="6" height="9" fill="#fff" stroke="#000" stroke-width="0.4"/>
+  <rect x="32" y="22" width="6" height="9" fill="#5aa9ff" stroke="#000" stroke-width="0.4"/>
+`);
+
+// Sic Bo — round with 3 dice cup
+TC_TABLE_RENDERERS.tbl_sicbo = (u) => _tcTableBase('#7a1818', `
+  <!-- Dice cup (cylinder) -->
+  <ellipse cx="30" cy="32" rx="6" ry="2" fill="#7a4500"/>
+  <rect x="24" y="32" width="12" height="14" fill="#5a3a08"/>
+  <ellipse cx="30" cy="46" rx="6" ry="2" fill="#3a2810"/>
+  <!-- Three small dice on top -->
+  <rect x="20" y="40" width="4" height="4" fill="#fff" stroke="#000" stroke-width="0.3"/>
+  <circle cx="22" cy="42" r="0.5" fill="#000"/>
+  <rect x="38" y="40" width="4" height="4" fill="#fff" stroke="#000" stroke-width="0.3"/>
+  <circle cx="40" cy="42" r="0.5" fill="#000"/>
+  <rect x="28" y="48" width="4" height="4" fill="#fff" stroke="#000" stroke-width="0.3"/>
+  <circle cx="30" cy="50" r="0.5" fill="#000"/>
+`);
+
+// Poker VIP — oval with chip stacks + cards
+TC_TABLE_RENDERERS.tbl_poker_vip = (u) => _tcTableBase('#0a5530', `
+  <text x="30" y="32" text-anchor="middle" font-size="6" fill="#ffd984" font-weight="900" opacity="0.7">VIP</text>
+  <!-- Chip stacks -->
+  <ellipse cx="14" cy="38" rx="3" ry="1" fill="#eb4b4b" stroke="#000" stroke-width="0.3"/>
+  <ellipse cx="14" cy="36" rx="3" ry="1" fill="#eb4b4b" stroke="#000" stroke-width="0.3"/>
+  <ellipse cx="14" cy="34" rx="3" ry="1" fill="#eb4b4b" stroke="#000" stroke-width="0.3"/>
+  <ellipse cx="46" cy="38" rx="3" ry="1" fill="#5aa9ff" stroke="#000" stroke-width="0.3"/>
+  <ellipse cx="46" cy="36" rx="3" ry="1" fill="#5aa9ff" stroke="#000" stroke-width="0.3"/>
+  <ellipse cx="46" cy="34" rx="3" ry="1" fill="#5aa9ff" stroke="#000" stroke-width="0.3"/>
+  <!-- Center cards -->
+  <rect x="24" y="36" width="5" height="7" fill="#fff" stroke="#000" stroke-width="0.3"/>
+  <text x="26.5" y="42" text-anchor="middle" font-size="4" fill="#000" font-weight="900">A♠</text>
+  <rect x="31" y="36" width="5" height="7" fill="#fff" stroke="#000" stroke-width="0.3"/>
+  <text x="33.5" y="42" text-anchor="middle" font-size="4" fill="#000" font-weight="900">K♠</text>
+`);
+
+// Texas Hold'em — long oval (8 seats)
+TC_TABLE_RENDERERS.tbl_texas = (u) => _tcTableBase('#1f5396', `
+  <text x="30" y="32" text-anchor="middle" font-size="5" fill="#ffd984" font-weight="900">TEXAS</text>
+  <!-- Community cards -->
+  <rect x="14" y="36" width="4" height="6" fill="#fff" stroke="#000" stroke-width="0.3"/>
+  <rect x="20" y="36" width="4" height="6" fill="#fff" stroke="#000" stroke-width="0.3"/>
+  <rect x="26" y="36" width="4" height="6" fill="#fff" stroke="#000" stroke-width="0.3"/>
+  <rect x="32" y="36" width="4" height="6" fill="#5aa9ff" stroke="#000" stroke-width="0.3"/>
+  <rect x="38" y="36" width="4" height="6" fill="#5aa9ff" stroke="#000" stroke-width="0.3"/>
+`, 28, [28, 14]);
+
+// Baccarat VIP — fancy oval, gold trim
+TC_TABLE_RENDERERS.tbl_baccarat = (u) => _tcSvgBase(`
+  <ellipse cx="30" cy="68" rx="26" ry="3" fill="rgba(0,0,0,0.5)"/>
+  <ellipse cx="30" cy="40" rx="26" ry="20" fill="#1a0303" stroke="#ffd984" stroke-width="2"/>
+  <ellipse cx="30" cy="40" rx="22" ry="16" fill="#7a1818"/>
+  <ellipse cx="30" cy="38" rx="18" ry="12" fill="#5a0a0a"/>
+  <text x="30" y="34" text-anchor="middle" font-size="5" fill="#ffd984" font-weight="900">BACCARAT</text>
+  <!-- Player vs banker positions -->
+  <text x="18" y="46" text-anchor="middle" font-size="5" fill="#fff" font-weight="900">P</text>
+  <text x="42" y="46" text-anchor="middle" font-size="5" fill="#fff" font-weight="900">B</text>
+  <text x="30" y="46" text-anchor="middle" font-size="5" fill="#ffd984" font-weight="900">T</text>
+`);
+
+function _tcTableGeneric(u) {
+  return _tcTableBase('#1f7a3a', `
+    <text x="30" y="42" text-anchor="middle" font-size="14" fill="#f5b042" font-weight="900" opacity="0.6">${u.icon}</text>
+  `);
+}
+
+// ===== AMENITIES — every key has its OWN look =====
+function _tcAmenitySvgByKey(u) {
+  const r = TC_AMENITY_RENDERERS[u.key] || _tcAmenityGeneric;
+  return r(u);
+}
+
+const TC_AMENITY_RENDERERS = {};
+
+TC_AMENITY_RENDERERS.amen_reception = (u) => _tcSvgBase(`
+  <ellipse cx="30" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
+  <rect x="10" y="32" width="40" height="32" rx="2" fill="#7a4500" stroke="#3a2810"/>
+  <rect x="10" y="28" width="40" height="6" fill="#a87440" stroke="#3a2810"/>
+  <!-- Bell -->
+  <ellipse cx="30" cy="22" rx="6" ry="4" fill="#ffd984" stroke="#7a4500"/>
+  <rect x="29" y="14" width="2" height="8" fill="#7a4500"/>
+  <circle cx="30" cy="14" r="1.5" fill="#ffd984"/>
+  <!-- Welcome sign -->
+  <rect x="14" y="38" width="32" height="6" fill="#fff" stroke="#000"/>
+  <text x="30" y="42" text-anchor="middle" font-size="4" fill="#000" font-weight="900">WELCOME</text>
+`);
+
+TC_AMENITY_RENDERERS.amen_bar = (u) => _tcSvgBase(`
+  <ellipse cx="30" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
+  <rect x="10" y="34" width="40" height="30" rx="2" fill="#5a3a08" stroke="#2a1c04"/>
+  <rect x="10" y="30" width="40" height="6" fill="#7a4500" stroke="#3a2810"/>
+  <!-- Bottles -->
+  <rect x="14" y="14" width="4" height="14" rx="0.5" fill="#1f7a3a" stroke="#000" stroke-width="0.4"/>
+  <rect x="14.5" y="11" width="3" height="3" fill="#5a3a08"/>
+  <rect x="22" y="12" width="4" height="16" rx="0.5" fill="#eb4b4b" stroke="#000" stroke-width="0.4"/>
+  <rect x="22.5" y="9" width="3" height="3" fill="#5a3a08"/>
+  <rect x="30" y="14" width="4" height="14" rx="0.5" fill="#aacaff" stroke="#000" stroke-width="0.4"/>
+  <rect x="30.5" y="11" width="3" height="3" fill="#5a3a08"/>
+  <rect x="38" y="13" width="4" height="15" rx="0.5" fill="#ffd984" stroke="#000" stroke-width="0.4"/>
+  <rect x="38.5" y="10" width="3" height="3" fill="#5a3a08"/>
+  <!-- Cocktail glass -->
+  <path d="M44 40 L52 40 L48 50 Z" fill="#aacaff" stroke="#000" stroke-width="0.4"/>
+  <line x1="48" y1="50" x2="48" y2="58" stroke="#000" stroke-width="0.4"/>
+`);
+
+TC_AMENITY_RENDERERS.amen_smoke = (u) => _tcSvgBase(`
+  <ellipse cx="30" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
+  <rect x="10" y="40" width="40" height="24" rx="2" fill="#3a3340" stroke="#1a151c"/>
+  <!-- Ashtray -->
+  <ellipse cx="30" cy="40" rx="14" ry="3" fill="#1a1a1a"/>
+  <ellipse cx="30" cy="40" rx="12" ry="2" fill="#2a2a2a"/>
+  <!-- Cigarette -->
+  <rect x="16" y="38" width="12" height="1.5" fill="#fff" stroke="#000" stroke-width="0.3"/>
+  <rect x="14" y="38" width="3" height="1.5" fill="#7a4500"/>
+  <circle cx="14" cy="39" r="1" fill="#eb4b4b"/>
+  <!-- Smoke wisps -->
+  <path d="M14 36 Q16 30 14 24 Q12 18 16 12" stroke="#aacaff" stroke-width="1" fill="none" opacity="0.6"/>
+  <path d="M22 36 Q24 28 20 22 Q18 16 22 10" stroke="#aacaff" stroke-width="0.8" fill="none" opacity="0.4"/>
+`);
+
+TC_AMENITY_RENDERERS.amen_atm = (u) => _tcSvgBase(`
+  <ellipse cx="30" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
+  <rect x="14" y="14" width="32" height="50" rx="2" fill="#1f5396" stroke="#0a1428" stroke-width="1.2"/>
+  <rect x="16" y="16" width="28" height="14" rx="1" fill="#0a0c14"/>
+  <text x="30" y="25" text-anchor="middle" font-size="6" fill="#5aa9ff" font-weight="900">ATM</text>
+  <text x="30" y="32" text-anchor="middle" font-size="3" fill="#5aa9ff">$ $ $ $</text>
+  <!-- Keypad -->
+  <rect x="20" y="34" width="20" height="14" fill="#0a0c14"/>
+  <circle cx="24" cy="38" r="1.2" fill="#888"/>
+  <circle cx="30" cy="38" r="1.2" fill="#888"/>
+  <circle cx="36" cy="38" r="1.2" fill="#888"/>
+  <circle cx="24" cy="42" r="1.2" fill="#888"/>
+  <circle cx="30" cy="42" r="1.2" fill="#888"/>
+  <circle cx="36" cy="42" r="1.2" fill="#888"/>
+  <!-- Card slot -->
+  <rect x="20" y="52" width="20" height="2" fill="#000"/>
+  <!-- Cash slot -->
+  <rect x="20" y="58" width="20" height="3" fill="#000"/>
+`);
+
+TC_AMENITY_RENDERERS.amen_cafe = (u) => _tcSvgBase(`
+  <ellipse cx="30" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
+  <rect x="10" y="38" width="40" height="26" rx="2" fill="#5a3a08" stroke="#2a1c04"/>
+  <!-- Cup -->
+  <rect x="16" y="22" width="22" height="16" rx="1" fill="#fff" stroke="#000" stroke-width="0.6"/>
+  <rect x="38" y="26" width="6" height="8" rx="3" fill="none" stroke="#fff" stroke-width="2"/>
+  <!-- Coffee in cup -->
+  <rect x="18" y="24" width="18" height="2" fill="#5a3a08"/>
+  <!-- Steam wisps -->
+  <path d="M22 22 Q24 18 22 14 Q20 10 24 6" stroke="#aacaff" stroke-width="0.8" fill="none" opacity="0.6"/>
+  <path d="M30 22 Q32 18 30 14" stroke="#aacaff" stroke-width="0.8" fill="none" opacity="0.6"/>
+  <!-- Saucer -->
+  <ellipse cx="27" cy="42" rx="14" ry="2" fill="#aaa" stroke="#000" stroke-width="0.4"/>
+  <!-- Croissant -->
+  <path d="M16 50 Q20 46 28 50 Q32 52 36 48" stroke="#cda060" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+`);
+
+TC_AMENITY_RENDERERS.amen_restaurant = (u) => _tcSvgBase(`
+  <ellipse cx="30" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
+  <rect x="8" y="40" width="44" height="24" rx="2" fill="#3a2810" stroke="#1a0c04"/>
+  <!-- Tablecloth -->
+  <rect x="10" y="38" width="40" height="6" fill="#fff" stroke="#888" stroke-width="0.3"/>
+  <!-- Plate -->
+  <ellipse cx="30" cy="30" rx="11" ry="3.5" fill="#fff" stroke="#888"/>
+  <ellipse cx="30" cy="29" rx="8" ry="2.5" fill="#cda060" opacity="0.6"/>
+  <!-- Fork + knife -->
+  <rect x="14" y="22" width="1" height="14" fill="#aaa"/>
+  <rect x="13.5" y="22" width="2" height="3" fill="#aaa"/>
+  <rect x="44" y="22" width="1" height="14" fill="#aaa"/>
+  <rect x="43" y="22" width="3" height="3" fill="#aaa"/>
+  <!-- Wine glass -->
+  <path d="M44 50 L48 50 L46 56 Z" fill="#7a1818" stroke="#000" stroke-width="0.4"/>
+  <line x1="46" y1="56" x2="46" y2="62" stroke="#000" stroke-width="0.4"/>
+`);
+
+TC_AMENITY_RENDERERS.amen_stage = (u) => _tcSvgBase(`
+  <ellipse cx="30" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
+  <!-- Stage floor -->
+  <rect x="6" y="50" width="48" height="14" rx="1" fill="#3a2810" stroke="#1a0c04"/>
+  <!-- Curtains -->
+  <path d="M6 12 L6 50 L12 50 L18 14 Z" fill="#7a1818" stroke="#3a0d0d"/>
+  <path d="M54 12 L54 50 L48 50 L42 14 Z" fill="#7a1818" stroke="#3a0d0d"/>
+  <line x1="14" y1="20" x2="14" y2="50" stroke="#3a0d0d" stroke-width="0.4"/>
+  <line x1="46" y1="20" x2="46" y2="50" stroke="#3a0d0d" stroke-width="0.4"/>
+  <!-- Microphone in center -->
+  <circle cx="30" cy="32" r="3" fill="#1a1f2c" stroke="#888"/>
+  <rect x="29.5" y="34" width="1" height="10" fill="#888"/>
+  <rect x="28" y="44" width="4" height="2" fill="#888"/>
+  <!-- Spotlight -->
+  <path d="M22 18 L38 18 L34 32 L26 32 Z" fill="#ffd984" opacity="0.18"/>
+`);
+
+TC_AMENITY_RENDERERS.amen_vip = (u) => _tcSvgBase(`
+  <ellipse cx="30" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
+  <!-- Door frame -->
+  <rect x="14" y="14" width="32" height="50" rx="1" fill="#3a0d63" stroke="#000"/>
+  <rect x="16" y="16" width="28" height="46" fill="#1a0428"/>
+  <!-- Gold rope on stanchions -->
+  <circle cx="10" cy="50" r="2" fill="#ffd984"/>
+  <circle cx="50" cy="50" r="2" fill="#ffd984"/>
+  <path d="M10 50 Q30 56 50 50" stroke="#ffd984" stroke-width="1.5" fill="none"/>
+  <!-- VIP sign -->
+  <rect x="20" y="22" width="20" height="10" fill="#ffd984" stroke="#7a4500"/>
+  <text x="30" y="30" text-anchor="middle" font-size="7" fill="#7a4500" font-weight="900">VIP</text>
+  <!-- Star above -->
+  <text x="30" y="48" text-anchor="middle" font-size="14">⭐</text>
+`);
+
+function _tcAmenityGeneric(u) {
+  return _tcSvgBase(`
+    <ellipse cx="30" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
+    <rect x="10" y="20" width="40" height="44" rx="3" fill="#5a3a08" opacity="0.5" stroke="#7a4500" stroke-width="2"/>
+    <text x="30" y="48" text-anchor="middle" font-size="22">${u.icon}</text>
+  `);
 }
 
 function _tcCashierSvg() {
@@ -5468,7 +5900,17 @@ function _tcWireEvents() {
     });
   });
   document.querySelectorAll('.tc-unit[data-uid]').forEach(el => {
-    el.addEventListener('click', () => _tcCollectUnit(parseInt(el.dataset.uid)));
+    el.addEventListener('click', (e) => {
+      // Sell-button clicks bubble to here; ignore if it was the sell button
+      if (e.target.closest('.tc-unit-sell')) return;
+      _tcCollectUnit(parseInt(el.dataset.uid));
+    });
+  });
+  document.querySelectorAll('[data-sell-uid]').forEach(b => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      _tcSellUnit(parseInt(b.dataset.sellUid));
+    });
   });
   // Buy from shop: click card to "select", then click empty cell to place
   document.querySelectorAll('.tc-shop-card[data-key]').forEach(c => {
@@ -5605,6 +6047,23 @@ async function _tcCollectUnit(uid) {
       const tray = el?.querySelector('.tc-tray');
       if (tray) tray.remove();
     }
+  } catch (e) { toast(e.message); }
+}
+
+async function _tcSellUnit(uid) {
+  // Look up the unit + its catalog cost to show the refund amount in the prompt
+  const u = (tycoonState.data?.units || []).find(x => x.id === uid);
+  if (!u) return;
+  const cat = (tycoonState.data?.catalog || []).find(c => c.key === u.key);
+  const refund = cat ? Math.round(cat.cost_cash * 0.70) : '~?';
+  if (!confirm(`Продать «${u.name}» за ${fmt(refund)} $? (70% от цены покупки)`)) return;
+  try {
+    const r = await api('/api/tycoon/sell', { method: 'POST', body: JSON.stringify({ unit_id: uid }) });
+    if (!r.ok) { toast(r.error || 'Не удалось'); return; }
+    tycoonState.data = r;
+    _tcPaintAll();
+    tg?.HapticFeedback?.notificationOccurred?.('success');
+    toast(`+${fmt(refund)} $`);
   } catch (e) { toast(e.message); }
 }
 

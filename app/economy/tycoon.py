@@ -1043,6 +1043,30 @@ async def fire_bot(user_id: int, bot_id: int) -> dict:
     return {"ok": True}
 
 
+async def sell_unit(user_id: int, unit_id: int) -> dict:
+    """Sell a placed unit back for 70% of its cash cost. Removes the unit and any
+    chips currently sitting in its tray are added to the player's wallet."""
+    SELL_FRACTION = 0.70
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "select u.id, u.unit_key, u.chips_in_tray, c.cost_cash, c.name "
+                "from tycoon_units u join tycoon_units_catalog c on c.key = u.unit_key "
+                "where u.id = $1 and u.user_id = $2 for update",
+                unit_id, user_id,
+            )
+            if row is None:
+                return {"ok": False, "error": "Юнит не найден"}
+            refund   = int(int(row["cost_cash"]) * SELL_FRACTION)
+            tray     = int(row["chips_in_tray"] or 0)
+            await conn.execute("delete from tycoon_units where id = $1", unit_id)
+            await conn.execute(
+                "update tycoon_state set cash = cash + $2, chips = chips + $3 where user_id = $1",
+                user_id, refund, tray,
+            )
+    return await get_state(user_id)
+
+
 async def buy_cell(user_id: int) -> dict:
     async with pool().acquire() as conn:
         async with conn.transaction():
