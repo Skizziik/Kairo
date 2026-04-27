@@ -843,6 +843,8 @@ function renderGamePlay(game, target) {
     renderPlinko(area);
   } else if (game === 'cfpvp') {
     renderCfPvp(area);
+  } else if (game === 'tycoon') {
+    renderTycoon(area);
   } else if (game === 'forge') {
     renderForge(area);
   }
@@ -4643,6 +4645,809 @@ async function playMegaslot(bonusBuy, bonusType) {
     if (spinBtn) spinBtn.disabled = (_megaslotState.autoCount > 0);
     if (buyBtn) buyBtn.disabled = false;
   }
+}
+
+// ============================================================
+// CASINO TYCOON — build-your-own-casino
+// ============================================================
+//
+// Architecture:
+//   Server is authoritative for state, chips/cash/coins, unit ownership,
+//   bot effects and AFK ticking. The frontend is a "live show" on top:
+//   it polls /tycoon/state every 5s, derives `chips_per_sec` per unit,
+//   spawns visual visitors, and animates chip particles on collect.
+//
+// Visitors are PURELY visual — the server doesn't simulate individual NPCs.
+// We use occupancy_pct per unit to decide visitor spawn frequency, so what
+// you see on screen reflects the real economy.
+//
+// DOM layout: each unit + visitor is its own absolutely-positioned div
+// inside the .tycoon-floor container. CSS transforms drive movement.
+// Cell positions are converted to pixel coords via _tcCellPixel().
+
+const tycoonState = {
+  area: null,
+  data: null,            // server response
+  pollTimer: null,
+  visitorTimer: null,
+  visitorSeq: 0,
+  liveVisitors: [],      // {el, kind, targetCell, busyUntil, despawnAt}
+  chipDriftRaf: null,
+  selectedShopKey: null, // when buying: which unit key is queued for placement
+  panelOpen: 'shop',     // shop | bots | bank | decor | null
+};
+
+const TC_GRID_W = 4;     // visual cols (we render up to 4×3 = 12 cells, 4×6=24 endgame)
+const TC_CELL_W = 86;    // base cell width in px (isometric base)
+const TC_CELL_H = 60;    // base cell height (isometric depth)
+
+// ---- VISITOR archetypes ----
+const TC_VISITOR_TYPES = [
+  // weight = relative spawn chance per reputation level
+  { key: 'homeless', color: '#7a7a7a', accent: '#444', size: 1.0, weights: [60, 40, 20, 5, 0]   },
+  { key: 'student',  color: '#5aa9ff', accent: '#1f5396', size: 1.0, weights: [25, 35, 30, 15, 5]  },
+  { key: 'office',   color: '#444',    accent: '#bcaa66', size: 1.05, weights: [10, 20, 30, 35, 25] },
+  { key: 'highroll', color: '#b667ff', accent: '#3a0d63', size: 1.1, weights: [3,  4,  15, 30, 35] },
+  { key: 'whale',    color: '#f5b042', accent: '#7a4500', size: 1.15, weights: [1,  1,  4,  12, 30] },
+  { key: 'celeb',    color: '#ffd984', accent: '#eb4b4b', size: 1.2, weights: [0,  0,  1,  3,  5]  },
+];
+
+// ---- ENTRY POINT ----
+async function renderTycoon(area) {
+  tycoonState.area = area;
+  area.innerHTML = `<div class="tycoon-wrap"><div class="loader">Загрузка казино…</div></div>`;
+  try {
+    tycoonState.data = await api('/api/tycoon/state');
+    _tcPaintAll();
+    _tcStartPolling();
+    _tcStartVisitorLoop();
+  } catch (e) {
+    area.innerHTML = `<div class="tycoon-wrap"><div class="loader">Ошибка: ${escape(e.message)}</div></div>`;
+  }
+}
+
+function _tcStopAll() {
+  if (tycoonState.pollTimer) { clearInterval(tycoonState.pollTimer); tycoonState.pollTimer = null; }
+  if (tycoonState.visitorTimer) { clearInterval(tycoonState.visitorTimer); tycoonState.visitorTimer = null; }
+  if (tycoonState.chipDriftRaf) { cancelAnimationFrame(tycoonState.chipDriftRaf); tycoonState.chipDriftRaf = null; }
+  tycoonState.liveVisitors.forEach(v => { try { v.el.remove(); } catch (_) {} });
+  tycoonState.liveVisitors = [];
+}
+
+function _tcStartPolling() {
+  if (tycoonState.pollTimer) clearInterval(tycoonState.pollTimer);
+  tycoonState.pollTimer = setInterval(async () => {
+    if (!document.querySelector('.tycoon-wrap')) { _tcStopAll(); return; }
+    try {
+      const fresh = await api('/api/tycoon/state');
+      tycoonState.data = fresh;
+      _tcRefreshHud();
+      _tcRefreshUnits();
+    } catch (_) {}
+  }, 5000);
+}
+
+function _tcStartVisitorLoop() {
+  if (tycoonState.visitorTimer) clearInterval(tycoonState.visitorTimer);
+  tycoonState.visitorTimer = setInterval(() => {
+    if (!document.querySelector('.tycoon-wrap')) { _tcStopAll(); return; }
+    _tcMaybeSpawnVisitor();
+    _tcCleanupDespawned();
+  }, 1500);
+}
+
+// ---- LAYOUT ----
+function _tcGridDims(capacity) {
+  // Layout: prefer wider over deeper, max 6 wide
+  let cols = Math.min(6, Math.max(3, Math.ceil(Math.sqrt(capacity * 1.5))));
+  let rows = Math.ceil(capacity / cols);
+  return { cols, rows };
+}
+
+function _tcCellPixel(cx, cy, cols) {
+  // Plain grid (not strict isometric) so units stay readable on mobile
+  const x = cx * TC_CELL_W + TC_CELL_W * 0.1;
+  const y = cy * (TC_CELL_H + 14) + TC_CELL_H * 0.2;
+  return { x, y };
+}
+
+// ---- MAIN PAINT ----
+function _tcPaintAll() {
+  const d = tycoonState.data;
+  const area = tycoonState.area;
+  if (!d || !area) return;
+  const { cols, rows } = _tcGridDims(d.floor_capacity);
+  const floorWidthPx = cols * TC_CELL_W + 16;
+  const floorHeightPx = rows * (TC_CELL_H + 14) + 40;
+
+  area.innerHTML = `
+    <div class="tycoon-wrap">
+      <div class="tc-hud" id="tc-hud">${_tcHudHtml(d)}</div>
+
+      <div class="tc-stage" id="tc-stage" style="height:${floorHeightPx + 70}px">
+        <div class="tc-bg-sky"></div>
+        <div class="tc-door" id="tc-door">
+          <div class="tc-door-frame"></div>
+          <div class="tc-door-light"></div>
+          <div class="tc-door-label">↘ ENTRY</div>
+        </div>
+        <div class="tc-floor" id="tc-floor" style="width:${floorWidthPx}px; height:${floorHeightPx}px">
+          ${_tcFloorTilesHtml(cols, rows, d.floor_capacity)}
+          ${(d.units || []).map(u => _tcUnitHtml(u, cols)).join('')}
+        </div>
+        <div class="tc-cashier" id="tc-cashier">${_tcCashierSvg()}<div class="tc-label-tag">КАССА</div></div>
+        ${d.floor_capacity < d.max_floor ? `
+          <button class="tc-buy-cell" id="tc-buy-cell">＋ ячейка <b>${fmt(d.next_cell_cost)} $</b></button>
+        ` : ''}
+      </div>
+
+      <div class="tc-toolbar">
+        <button class="tc-tool-btn ${tycoonState.panelOpen==='shop' ? 'active' : ''}" data-panel="shop">🛒 Магазин</button>
+        <button class="tc-tool-btn ${tycoonState.panelOpen==='bots' ? 'active' : ''}" data-panel="bots">🤖 Боты</button>
+        <button class="tc-tool-btn ${tycoonState.panelOpen==='bank' ? 'active' : ''}" data-panel="bank">🏦 Банк</button>
+        <button class="tc-tool-btn ${tycoonState.panelOpen==='decor' ? 'active' : ''}" data-panel="decor">💎 Декор</button>
+      </div>
+
+      <div class="tc-panel" id="tc-panel">${_tcPanelHtml(d, tycoonState.panelOpen)}</div>
+    </div>
+  `;
+
+  _tcWireEvents();
+}
+
+function _tcHudHtml(d) {
+  const stars = '⭐'.repeat(Math.floor(d.reputation)) + '☆'.repeat(5 - Math.floor(d.reputation));
+  return `
+    <div class="tc-hud-row">
+      <div class="tc-hud-cur">
+        <span class="tc-hud-icon">🎲</span>
+        <span class="tc-hud-val" id="tc-chips">${fmt(d.chips)}</span>
+        <span class="tc-hud-lbl">чипов</span>
+      </div>
+      <div class="tc-hud-cur">
+        <span class="tc-hud-icon">💵</span>
+        <span class="tc-hud-val" id="tc-cash">${fmt(d.cash)}</span>
+        <span class="tc-hud-lbl">$</span>
+      </div>
+      <div class="tc-hud-cur tc-hud-stars" title="Репутация">
+        <span>${stars}</span>
+        <span class="tc-hud-lbl">${d.reputation.toFixed(1)}</span>
+      </div>
+    </div>
+    ${d.vip_stars > 0 ? `<div class="tc-prestige-row">⭐ VIP Stars: <b>${d.vip_stars}</b> · престиж #${d.prestige_count}</div>` : ''}
+    <button class="tc-collect-all" id="tc-collect-all">⛁ собрать со всех</button>
+  `;
+}
+
+function _tcFloorTilesHtml(cols, rows, capacity) {
+  let h = '';
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const idx = r * cols + c;
+      const locked = idx >= capacity;
+      const p = _tcCellPixel(c, r, cols);
+      h += `<div class="tc-tile ${locked ? 'locked' : ''}" data-cx="${c}" data-cy="${r}"
+              style="left:${p.x}px; top:${p.y}px; width:${TC_CELL_W - 8}px; height:${TC_CELL_H}px"></div>`;
+    }
+  }
+  return h;
+}
+
+function _tcUnitHtml(u, cols) {
+  const p = _tcCellPixel(u.cell_x, u.cell_y, cols);
+  const tray = u.chips_in_tray;
+  return `
+    <div class="tc-unit kind-${u.kind} tier-${u.tier}" data-uid="${u.id}"
+         style="left:${p.x + 4}px; top:${p.y - 12}px; width:${TC_CELL_W - 16}px; height:${TC_CELL_H + 22}px">
+      ${_tcUnitSpriteSvg(u)}
+      ${tray > 0 ? `<div class="tc-tray glow"><span class="tc-tray-icon">🎲</span><span class="tc-tray-val">${fmt(tray)}</span></div>` : ''}
+      <div class="tc-occ-bar"><div class="tc-occ-fill" style="width:${u.occupancy_pct||0}%"></div></div>
+    </div>
+  `;
+}
+
+// ---- SVG SPRITES (rich, NOT just emoji) ----
+function _tcUnitSpriteSvg(u) {
+  if (u.kind === 'slot')   return _tcSlotSvg(u);
+  if (u.kind === 'table')  return _tcTableSvg(u);
+  if (u.kind === 'amenity') return _tcAmenitySvg(u);
+  return `<div style="font-size:32px">${u.icon}</div>`;
+}
+
+function _tcSlotSvg(u) {
+  // Tier-based color
+  const tierColors = {
+    1: ['#5a6075', '#2a2f3d', '#1a1d28'],
+    2: ['#eb4b4b', '#8c1818', '#440505'],
+    3: ['#b07028', '#5a3a08', '#2a1c04'],
+    4: ['#b667ff', '#3a0d63', '#220838'],
+    5: ['#f5b042', '#a85e08', '#5a3204'],
+  };
+  const [c1, c2, c3] = tierColors[u.tier] || tierColors[1];
+  return `
+    <svg class="tc-unit-svg" viewBox="0 0 56 70" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <linearGradient id="slotGrad${u.id}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${c1}"/>
+          <stop offset="60%" stop-color="${c2}"/>
+          <stop offset="100%" stop-color="${c3}"/>
+        </linearGradient>
+        <linearGradient id="slotScreen${u.id}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#0a0c14"/>
+          <stop offset="100%" stop-color="#1a1f2c"/>
+        </linearGradient>
+      </defs>
+      <!-- Cabinet shadow -->
+      <ellipse cx="28" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
+      <!-- Cabinet body -->
+      <rect x="8" y="12" width="40" height="54" rx="4" fill="url(#slotGrad${u.id})" stroke="#0a0c14" stroke-width="1"/>
+      <!-- Top crown -->
+      <rect x="6" y="6" width="44" height="10" rx="3" fill="${c1}" stroke="#0a0c14" stroke-width="0.8"/>
+      <circle cx="13" cy="11" r="2" class="tc-slot-light" fill="#ffd984"/>
+      <circle cx="28" cy="11" r="2" class="tc-slot-light" fill="#ff6b6b" style="animation-delay:0.3s"/>
+      <circle cx="43" cy="11" r="2" class="tc-slot-light" fill="#5aa9ff" style="animation-delay:0.6s"/>
+      <!-- Screen with reels -->
+      <rect x="11" y="20" width="34" height="22" rx="2" fill="url(#slotScreen${u.id})" stroke="#0a0c14"/>
+      <rect x="13" y="22" width="9" height="18" fill="#1a1f2c" class="tc-reel"/>
+      <rect x="23.5" y="22" width="9" height="18" fill="#1a1f2c" class="tc-reel" style="animation-delay:0.15s"/>
+      <rect x="34" y="22" width="9" height="18" fill="#1a1f2c" class="tc-reel" style="animation-delay:0.3s"/>
+      <text x="17.5" y="34" text-anchor="middle" font-size="8" fill="#f5b042" font-weight="900">7</text>
+      <text x="28" y="34" text-anchor="middle" font-size="8" fill="#f5b042" font-weight="900">7</text>
+      <text x="38.5" y="34" text-anchor="middle" font-size="8" fill="#f5b042" font-weight="900">7</text>
+      <!-- Coin slot + button -->
+      <rect x="22" y="46" width="12" height="2" fill="#0a0c14"/>
+      <circle cx="28" cy="55" r="4" fill="#eb4b4b" stroke="#000" stroke-width="0.5"/>
+      <text x="28" y="57" text-anchor="middle" font-size="3" fill="#fff" font-weight="900">SPIN</text>
+      <!-- Lever on side -->
+      <rect x="48" y="22" width="2" height="18" fill="#888"/>
+      <circle cx="49" cy="20" r="3" fill="#eb4b4b" stroke="#000"/>
+    </svg>
+  `;
+}
+
+function _tcTableSvg(u) {
+  const tierColors = {
+    2: '#1f7a3a', 3: '#28a149', 4: '#0a5530', 5: '#7a1818',
+  };
+  const felt = tierColors[u.tier] || '#1f7a3a';
+  return `
+    <svg class="tc-unit-svg" viewBox="0 0 60 70" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <radialGradient id="tableFelt${u.id}" cx="0.5" cy="0.45" r="0.6">
+          <stop offset="0%" stop-color="${felt}" stop-opacity="1"/>
+          <stop offset="100%" stop-color="#0a0c14" stop-opacity="1"/>
+        </radialGradient>
+      </defs>
+      <ellipse cx="30" cy="68" rx="26" ry="3" fill="rgba(0,0,0,0.5)"/>
+      <!-- Table top (oval) -->
+      <ellipse cx="30" cy="40" rx="26" ry="20" fill="url(#tableFelt${u.id})" stroke="#3a2810" stroke-width="2"/>
+      <ellipse cx="30" cy="38" rx="22" ry="16" fill="${felt}" opacity="0.3"/>
+      <!-- Pattern on felt -->
+      <text x="30" y="42" text-anchor="middle" font-size="14" fill="#f5b042" font-weight="900" opacity="0.6">${u.icon}</text>
+      <!-- Chip stacks -->
+      <ellipse cx="14" cy="34" rx="3" ry="1.2" fill="#eb4b4b" stroke="#000" stroke-width="0.4"/>
+      <ellipse cx="14" cy="32" rx="3" ry="1.2" fill="#eb4b4b" stroke="#000" stroke-width="0.4"/>
+      <ellipse cx="46" cy="34" rx="3" ry="1.2" fill="#5aa9ff" stroke="#000" stroke-width="0.4"/>
+      <ellipse cx="46" cy="32" rx="3" ry="1.2" fill="#5aa9ff" stroke="#000" stroke-width="0.4"/>
+      <!-- Dealer position -->
+      <circle cx="30" cy="22" r="4" fill="#bcaa66" stroke="#000"/>
+      <rect x="27" y="24" width="6" height="4" fill="#1a1f2c"/>
+    </svg>
+  `;
+}
+
+function _tcAmenitySvg(u) {
+  const palette = { amen_bar: '#ffd984', amen_atm: '#5aa9ff', amen_vip: '#b667ff' };
+  const c = palette[u.key] || '#888';
+  return `
+    <svg class="tc-unit-svg" viewBox="0 0 56 70" preserveAspectRatio="xMidYMid meet">
+      <ellipse cx="28" cy="68" rx="22" ry="3" fill="rgba(0,0,0,0.5)"/>
+      <rect x="10" y="20" width="36" height="44" rx="3" fill="${c}" opacity="0.3" stroke="${c}" stroke-width="2"/>
+      <text x="28" y="50" text-anchor="middle" font-size="22">${u.icon}</text>
+    </svg>
+  `;
+}
+
+function _tcCashierSvg() {
+  return `
+    <svg viewBox="0 0 100 100" width="60" height="60">
+      <defs>
+        <linearGradient id="cashierGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#f5b042"/>
+          <stop offset="100%" stop-color="#5a3a08"/>
+        </linearGradient>
+      </defs>
+      <rect x="15" y="20" width="70" height="60" rx="4" fill="url(#cashierGrad)" stroke="#0a0c14" stroke-width="2"/>
+      <rect x="25" y="30" width="50" height="20" rx="2" fill="#0a0c14" stroke="#fff" stroke-width="0.5"/>
+      <text x="50" y="44" text-anchor="middle" font-size="12" fill="#58e070" font-weight="900">$ $ $</text>
+      <rect x="30" y="58" width="12" height="14" fill="#1a1f2c"/>
+      <rect x="58" y="58" width="12" height="14" fill="#1a1f2c"/>
+      <text x="36" y="68" text-anchor="middle" font-size="9" fill="#fff" font-weight="900">$</text>
+      <text x="64" y="68" text-anchor="middle" font-size="9" fill="#fff" font-weight="900">€</text>
+    </svg>
+  `;
+}
+
+function _tcVisitorSvg(type) {
+  const t = TC_VISITOR_TYPES.find(x => x.key === type) || TC_VISITOR_TYPES[0];
+  return `
+    <svg viewBox="0 0 24 36" width="22" height="34" class="tc-visitor-svg">
+      <ellipse cx="12" cy="34" rx="6" ry="1.5" fill="rgba(0,0,0,0.4)"/>
+      <!-- Body -->
+      <rect x="6" y="14" width="12" height="14" rx="2" fill="${t.color}" stroke="#0a0c14" stroke-width="0.6"/>
+      <!-- Arms -->
+      <rect x="3" y="15" width="3" height="10" rx="1" fill="${t.color}"/>
+      <rect x="18" y="15" width="3" height="10" rx="1" fill="${t.color}"/>
+      <!-- Head -->
+      <circle cx="12" cy="9" r="5" fill="#fbd5b5" stroke="#0a0c14" stroke-width="0.6"/>
+      <!-- Hair / hat -->
+      ${t.key === 'celeb' ? '<rect x="6" y="3" width="12" height="3" fill="#ffd984"/>' :
+        t.key === 'whale' ? '<path d="M6 6 Q12 1 18 6 L18 9 L6 9 Z" fill="#222"/>' :
+        '<path d="M7 5 Q12 2 17 5 L17 8 L7 8 Z" fill="' + t.accent + '"/>'}
+      <!-- Legs -->
+      <rect x="8" y="27" width="3" height="8" rx="0.8" fill="#1a1f2c"/>
+      <rect x="13" y="27" width="3" height="8" rx="0.8" fill="#1a1f2c"/>
+      ${t.key === 'whale' || t.key === 'celeb' ? '<text x="12" y="22" text-anchor="middle" font-size="3" fill="#ffd984" font-weight="900">$</text>' : ''}
+    </svg>
+  `;
+}
+
+// ---- VISITORS LOOP ----
+function _tcMaybeSpawnVisitor() {
+  const d = tycoonState.data;
+  if (!d) return;
+  // Spawn rate scales with reputation
+  const baseRate = 0.6 + d.reputation * 0.35;  // chance per tick
+  if (Math.random() > baseRate) return;
+  // Cap simultaneous visitors so the floor doesn't get too busy
+  if (tycoonState.liveVisitors.length >= 10) return;
+  // Pick a unit (slot/table) that's not "full" with visitors
+  const candidates = (d.units || []).filter(u => u.kind === 'slot' || u.kind === 'table');
+  if (candidates.length === 0) return;
+  // Filter out units already visited by max capacity visitors
+  const target = candidates[Math.floor(Math.random() * candidates.length)];
+  // Pick visitor type based on reputation (5 weight buckets)
+  const repBucket = Math.min(4, Math.max(0, Math.floor(d.reputation - 1)));
+  const vtypes = TC_VISITOR_TYPES.filter(t => (t.weights[repBucket] || 0) > 0);
+  if (vtypes.length === 0) return;
+  const w = vtypes.map(t => t.weights[repBucket]);
+  const sum = w.reduce((a, b) => a + b, 0);
+  let r = Math.random() * sum;
+  let pick = vtypes[0];
+  for (let i = 0; i < vtypes.length; i++) { r -= w[i]; if (r <= 0) { pick = vtypes[i]; break; } }
+  _tcSpawnVisitor(pick.key, target);
+}
+
+function _tcSpawnVisitor(typeKey, target) {
+  const floor = document.getElementById('tc-floor');
+  const door = document.getElementById('tc-door');
+  if (!floor || !door) return;
+  const { cols } = _tcGridDims(tycoonState.data.floor_capacity);
+
+  // Spawn position = right edge of stage (door)
+  const startX = floor.offsetWidth + 30;
+  const startY = floor.offsetHeight - 40 + Math.random() * 20;
+  const target_p = _tcCellPixel(target.cell_x, target.cell_y, cols);
+  const targetX = target_p.x + (TC_CELL_W - 16) / 2;
+  const targetY = target_p.y + 20;
+
+  const id = ++tycoonState.visitorSeq;
+  const wrap = document.createElement('div');
+  wrap.className = 'tc-visitor';
+  wrap.dataset.id = String(id);
+  wrap.style.left = startX + 'px';
+  wrap.style.top  = startY + 'px';
+  wrap.innerHTML = _tcVisitorSvg(typeKey);
+  floor.appendChild(wrap);
+
+  // Animate in: walk to target via two-phase translation (horizontal then to cell)
+  requestAnimationFrame(() => {
+    wrap.style.transition = 'transform 2.2s cubic-bezier(0.4, 0.0, 0.2, 1)';
+    wrap.style.transform = `translate(${targetX - startX}px, ${targetY - startY}px)`;
+  });
+
+  const v = {
+    id, el: wrap, kind: typeKey, target,
+    arrivedAt: null,
+    despawnAt: Date.now() + 2500 + (5000 + Math.random() * 8000) + 2200,  // walk+play+walk
+  };
+  tycoonState.liveVisitors.push(v);
+
+  // Mark as arrived after walk-in completes; play short bobble + chip pop
+  setTimeout(() => {
+    if (!wrap.parentNode) return;
+    v.arrivedAt = Date.now();
+    wrap.classList.add('playing');
+    // Trigger a chip particle as visual feedback (server-side actual gen handled by tick)
+    _tcChipParticle(targetX, targetY);
+  }, 2300);
+
+  // Walk back out before despawn
+  const playMs = v.despawnAt - Date.now() - 2200;
+  setTimeout(() => {
+    if (!wrap.parentNode) return;
+    wrap.classList.remove('playing');
+    wrap.classList.add('leaving');
+    wrap.style.transition = 'transform 2.0s cubic-bezier(0.4, 0.0, 0.2, 1), opacity 0.4s ease 1.6s';
+    wrap.style.transform = `translate(${startX - targetX + 20}px, ${startY - targetY}px)`;
+    wrap.style.opacity = '0';
+  }, playMs);
+}
+
+function _tcCleanupDespawned() {
+  const now = Date.now();
+  tycoonState.liveVisitors = tycoonState.liveVisitors.filter(v => {
+    if (now > v.despawnAt) {
+      try { v.el.remove(); } catch (_) {}
+      return false;
+    }
+    return true;
+  });
+}
+
+// Floating chip particle that drifts from a slot toward the chip counter
+function _tcChipParticle(x, y) {
+  const floor = document.getElementById('tc-floor');
+  if (!floor) return;
+  const p = document.createElement('div');
+  p.className = 'tc-chip-pop';
+  p.textContent = '🎲';
+  p.style.left = x + 'px';
+  p.style.top  = (y - 20) + 'px';
+  floor.appendChild(p);
+  setTimeout(() => p.remove(), 1100);
+}
+
+// ---- HUD refresh (without full repaint) ----
+function _tcRefreshHud() {
+  const d = tycoonState.data;
+  if (!d) return;
+  const ce = document.getElementById('tc-chips');
+  const ca = document.getElementById('tc-cash');
+  if (ce) ce.textContent = fmt(d.chips);
+  if (ca) ca.textContent = fmt(d.cash);
+}
+
+function _tcRefreshUnits() {
+  const d = tycoonState.data;
+  if (!d) return;
+  // Update tray + occupancy bars (no full re-paint to avoid flicker on visitors)
+  for (const u of (d.units || [])) {
+    const el = document.querySelector(`.tc-unit[data-uid="${u.id}"]`);
+    if (!el) continue;
+    let tray = el.querySelector('.tc-tray');
+    if (u.chips_in_tray > 0) {
+      if (!tray) {
+        tray = document.createElement('div');
+        tray.className = 'tc-tray glow';
+        tray.innerHTML = `<span class="tc-tray-icon">🎲</span><span class="tc-tray-val"></span>`;
+        el.appendChild(tray);
+      }
+      tray.querySelector('.tc-tray-val').textContent = fmt(u.chips_in_tray);
+    } else if (tray) {
+      tray.remove();
+    }
+    const fill = el.querySelector('.tc-occ-fill');
+    if (fill) fill.style.width = (u.occupancy_pct || 0) + '%';
+  }
+}
+
+// ---- PANELS (shop / bots / bank / decor) ----
+function _tcPanelHtml(d, panel) {
+  if (panel === 'shop') return _tcShopHtml(d);
+  if (panel === 'bots') return _tcBotsHtml(d);
+  if (panel === 'bank') return _tcBankHtml(d);
+  if (panel === 'decor') return _tcDecorHtml(d);
+  return '';
+}
+
+function _tcShopHtml(d) {
+  const items = (d.catalog || []).map(c => {
+    const canBuy = c.unlocked && d.cash >= c.cost_cash;
+    return `
+      <div class="tc-shop-card ${canBuy ? '' : 'locked'} kind-${c.kind} tier-${c.tier}" data-key="${c.key}">
+        <div class="tc-shop-icon">${c.icon}</div>
+        <div class="tc-shop-name">${escape(c.name)}</div>
+        <div class="tc-shop-desc">${escape(c.description || '')}</div>
+        <div class="tc-shop-stats">
+          ${c.base_chips_per_sec > 0 ? `<span>+${c.base_chips_per_sec} 🎲/сек</span>` : ''}
+          ${c.capacity > 1 ? `<span>${c.capacity} мест</span>` : ''}
+          ${c.unlock_reputation > 0 ? `<span class="tc-rep-req ${c.unlocked ? '' : 'locked'}">⭐${c.unlock_reputation.toFixed(1)}</span>` : ''}
+        </div>
+        <button class="tc-buy-btn ${canBuy ? '' : 'disabled'}" data-buy="${c.key}" ${canBuy ? '' : 'disabled'}>
+          ${c.unlocked ? `${fmt(c.cost_cash)} $` : '🔒 заблок'}
+        </button>
+      </div>
+    `;
+  }).join('');
+  return `<div class="tc-panel-title">МАГАЗИН</div><div class="tc-shop-grid">${items}</div>
+    <div class="tc-panel-hint">Тапни на свободную ячейку чтобы поставить выбранный юнит</div>`;
+}
+
+function _tcBotsHtml(d) {
+  const items = (d.bot_kinds || []).map(b => {
+    const canHire = d.cash >= b.hire_cost && b.owned < b.max_count;
+    return `
+      <div class="tc-bot-card ${canHire ? '' : 'locked'}">
+        <div class="tc-bot-icon">${b.icon}</div>
+        <div class="tc-bot-name">${escape(b.name)}</div>
+        <div class="tc-bot-desc">${escape(b.description)}</div>
+        <div class="tc-bot-stats">
+          <span>💼 ${fmt(b.hire_cost)} $</span>
+          <span>💸 ${b.salary_per_hr}/ч</span>
+          <span>${b.owned} / ${b.max_count}</span>
+        </div>
+        <button class="tc-hire-btn ${canHire ? '' : 'disabled'}" data-hire="${b.key}" ${canHire ? '' : 'disabled'}>
+          ${b.owned >= b.max_count ? 'максимум' : 'нанять'}
+        </button>
+      </div>
+    `;
+  }).join('');
+  return `<div class="tc-panel-title">ПЕРСОНАЛ</div><div class="tc-bots-grid">${items}</div>`;
+}
+
+function _tcBankHtml(d) {
+  const cap = d.bank_cap_total;
+  const left = d.bank_cap_left;
+  const usedPct = ((cap - left) / cap) * 100;
+  return `
+    <div class="tc-panel-title">КОНВЕРТЕР</div>
+    <div class="tc-conv-block">
+      <div class="tc-conv-label">🎲 Чипы → 💵 $ (касса)</div>
+      <div class="tc-conv-rate">${d.chips_to_cash_rate} чипов = 1 $</div>
+      <div class="tc-conv-row">
+        <input type="text" inputmode="numeric" pattern="[0-9]*" id="tc-conv-chips" placeholder="${d.chips_to_cash_rate}" />
+        <button class="tc-conv-btn" id="tc-conv-chips-btn">→</button>
+        <button class="tc-conv-max" data-max-chips>МАКС</button>
+      </div>
+    </div>
+    <div class="tc-conv-block">
+      <div class="tc-conv-label">💵 $ → 🪙 coins (банк)</div>
+      <div class="tc-conv-rate">${fmt(d.cash_to_coins_rate)} $ = 1 🪙 · лимит сегодня <b>${fmt(left)} / ${fmt(cap)}</b></div>
+      <div class="tc-conv-cap-bar"><div class="tc-conv-cap-fill" style="width:${usedPct}%"></div></div>
+      <div class="tc-conv-row">
+        <input type="text" inputmode="numeric" pattern="[0-9]*" id="tc-conv-cash" placeholder="${d.cash_to_coins_rate}" />
+        <button class="tc-conv-btn" id="tc-conv-cash-btn">→</button>
+        <button class="tc-conv-max" data-max-cash>МАКС</button>
+      </div>
+    </div>
+    ${d.lifetime_cash >= 1_000_000_000 ? `
+      <button class="tc-prestige-btn" id="tc-prestige">⭐ ПРЕСТИЖ (сброс с VIP-звёздами)</button>
+    ` : `
+      <div class="tc-prestige-locked">До престижа: ${fmt(1_000_000_000 - d.lifetime_cash)} $ суммарных доходов</div>
+    `}
+  `;
+}
+
+function _tcDecorHtml(d) {
+  const placed = (d.decor || []).map(dc => `
+    <div class="tc-decor-card placed">
+      <img src="${dc.image_url}" alt="" />
+      <div class="tc-decor-name">${escape(dc.name || '')}</div>
+      <div class="tc-decor-rep">+${dc.rep_bonus.toFixed(2)}⭐</div>
+      <button class="tc-decor-remove" data-decor-remove="${dc.id}">снять</button>
+    </div>
+  `).join('');
+  const inv = (state.inventory && state.inventory.items) || [];
+  const placedIds = new Set((d.decor || []).map(dc => dc.inv_id));
+  const placeable = inv
+    .filter(i => !i.locked && !i.coinflip_lobby_id && !placedIds.has(i.id))
+    .filter(i => ['mil-spec','restricted','classified','covert','exceedingly_rare'].includes(i.rarity))
+    .sort((a,b) => b.price - a.price)
+    .slice(0, 16);
+  const offer = placeable.map(it => {
+    const rarBonus = ({ 'mil-spec': 0.05, restricted: 0.1, classified: 0.2, covert: 0.4, exceedingly_rare: 0.8 })[it.rarity] || 0;
+    return `
+      <div class="tc-decor-card rarity-${it.rarity}">
+        <img src="${it.image_url}" alt="" />
+        <div class="tc-decor-name">${escape(it.weapon || '')}</div>
+        <div class="tc-decor-rep">+${rarBonus.toFixed(2)}⭐</div>
+        <button class="tc-decor-place" data-decor-place="${it.id}">повесить</button>
+      </div>
+    `;
+  }).join('');
+  return `
+    <div class="tc-panel-title">ДЕКОР</div>
+    <div class="tc-panel-hint">Скины из инвентаря дают бонус к репутации казино</div>
+    ${placed ? `<div class="tc-decor-section-label">Повешено</div><div class="tc-decor-grid">${placed}</div>` : ''}
+    ${offer ? `<div class="tc-decor-section-label">Можно повесить</div><div class="tc-decor-grid">${offer}</div>` : '<div class="tc-empty">Нет подходящих скинов (нужны mil-spec и выше)</div>'}
+  `;
+}
+
+// ---- EVENT WIRING ----
+function _tcWireEvents() {
+  document.getElementById('tc-collect-all')?.addEventListener('click', _tcCollectAll);
+  document.querySelectorAll('.tc-tool-btn[data-panel]').forEach(b => {
+    b.addEventListener('click', () => {
+      tycoonState.panelOpen = b.dataset.panel;
+      _tcPaintAll();
+    });
+  });
+  document.querySelectorAll('.tc-unit[data-uid]').forEach(el => {
+    el.addEventListener('click', () => _tcCollectUnit(parseInt(el.dataset.uid)));
+  });
+  // Buy from shop: click card to "select", then click empty cell to place
+  document.querySelectorAll('.tc-shop-card[data-key]').forEach(c => {
+    c.addEventListener('click', (e) => {
+      // Don't select if user clicked the explicit buy button — that path handles itself
+      if (e.target.closest('.tc-buy-btn')) return;
+      tycoonState.selectedShopKey = c.dataset.key;
+      document.querySelectorAll('.tc-shop-card.selected').forEach(x => x.classList.remove('selected'));
+      c.classList.add('selected');
+      toast('Кликни свободную ячейку 🟢');
+    });
+  });
+  document.querySelectorAll('.tc-buy-btn[data-buy]').forEach(b => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      tycoonState.selectedShopKey = b.dataset.buy;
+      document.querySelectorAll('.tc-shop-card.selected').forEach(x => x.classList.remove('selected'));
+      b.closest('.tc-shop-card')?.classList.add('selected');
+      toast('Кликни свободную ячейку 🟢');
+    });
+  });
+  document.querySelectorAll('.tc-tile[data-cx]').forEach(t => {
+    t.addEventListener('click', () => _tcPlaceUnit(parseInt(t.dataset.cx), parseInt(t.dataset.cy)));
+  });
+  document.querySelectorAll('.tc-hire-btn[data-hire]').forEach(b => {
+    b.addEventListener('click', (e) => { e.stopPropagation(); _tcHire(b.dataset.hire); });
+  });
+  document.getElementById('tc-buy-cell')?.addEventListener('click', _tcBuyCell);
+  document.getElementById('tc-conv-chips-btn')?.addEventListener('click', () => {
+    const v = parseInt(document.getElementById('tc-conv-chips').value || '0');
+    if (v > 0) _tcConvertChips(v);
+  });
+  document.getElementById('tc-conv-cash-btn')?.addEventListener('click', () => {
+    const v = parseInt(document.getElementById('tc-conv-cash').value || '0');
+    if (v > 0) _tcConvertCash(v);
+  });
+  document.querySelector('[data-max-chips]')?.addEventListener('click', () => {
+    const inp = document.getElementById('tc-conv-chips');
+    if (inp) inp.value = tycoonState.data.chips;
+  });
+  document.querySelector('[data-max-cash]')?.addEventListener('click', () => {
+    const inp = document.getElementById('tc-conv-cash');
+    if (inp) inp.value = tycoonState.data.cash;
+  });
+  document.getElementById('tc-prestige')?.addEventListener('click', _tcDoPrestige);
+  document.querySelectorAll('[data-decor-place]').forEach(b => {
+    b.addEventListener('click', () => _tcDecorPlace(parseInt(b.dataset.decorPlace)));
+  });
+  document.querySelectorAll('[data-decor-remove]').forEach(b => {
+    b.addEventListener('click', () => _tcDecorRemove(parseInt(b.dataset.decorRemove)));
+  });
+}
+
+// ---- ACTIONS ----
+async function _tcCollectUnit(uid) {
+  const el = document.querySelector(`.tc-unit[data-uid="${uid}"]`);
+  if (el) {
+    const rect = el.getBoundingClientRect();
+    const fr = document.getElementById('tc-floor').getBoundingClientRect();
+    const cx = rect.left - fr.left + rect.width / 2;
+    const cy = rect.top - fr.top + rect.height / 2;
+    for (let i = 0; i < 6; i++) {
+      _tcChipParticle(cx + (Math.random() - 0.5) * 30, cy + (Math.random() - 0.5) * 20);
+    }
+  }
+  try {
+    const r = await api('/api/tycoon/collect', { method: 'POST', body: JSON.stringify({ unit_id: uid }) });
+    if (r.ok && r.collected > 0) {
+      tg?.HapticFeedback?.impactOccurred?.('light');
+      tycoonState.data.chips = (tycoonState.data.chips || 0) + r.collected;
+      _tcRefreshHud();
+      // Clear local tray immediately
+      const tray = el?.querySelector('.tc-tray');
+      if (tray) tray.remove();
+    }
+  } catch (e) { toast(e.message); }
+}
+
+async function _tcCollectAll() {
+  try {
+    const r = await api('/api/tycoon/collect_all', { method: 'POST' });
+    if (r.ok && r.collected > 0) {
+      tg?.HapticFeedback?.notificationOccurred?.('success');
+      toast(`+${fmt(r.collected)} 🎲`);
+      tycoonState.data.chips = (tycoonState.data.chips || 0) + r.collected;
+      _tcRefreshHud();
+      document.querySelectorAll('.tc-tray').forEach(el => el.remove());
+    }
+  } catch (e) { toast(e.message); }
+}
+
+async function _tcPlaceUnit(cx, cy) {
+  if (!tycoonState.selectedShopKey) return;
+  try {
+    const r = await api('/api/tycoon/buy', {
+      method: 'POST',
+      body: JSON.stringify({ unit_key: tycoonState.selectedShopKey, cell_x: cx, cell_y: cy }),
+    });
+    if (!r.ok) { toast(r.error || 'Ошибка'); return; }
+    tycoonState.selectedShopKey = null;
+    tycoonState.data = r;
+    tg?.HapticFeedback?.notificationOccurred?.('success');
+    _tcPaintAll();
+  } catch (e) { toast(e.message); }
+}
+
+async function _tcHire(kind) {
+  try {
+    const r = await api('/api/tycoon/hire', { method: 'POST', body: JSON.stringify({ kind }) });
+    if (!r.ok) { toast(r.error || 'Ошибка'); return; }
+    tycoonState.data = r;
+    _tcPaintAll();
+    toast('Нанят');
+  } catch (e) { toast(e.message); }
+}
+
+async function _tcBuyCell() {
+  try {
+    const r = await api('/api/tycoon/buy_cell', { method: 'POST' });
+    if (!r.ok) { toast(r.error || 'Ошибка'); return; }
+    tycoonState.data = r;
+    _tcPaintAll();
+    toast('+1 ячейка');
+  } catch (e) { toast(e.message); }
+}
+
+async function _tcConvertChips(amount) {
+  try {
+    const r = await api('/api/tycoon/convert/chips_to_cash', { method: 'POST', body: JSON.stringify({ amount }) });
+    if (!r.ok) { toast(r.error || 'Ошибка'); return; }
+    toast(`+${fmt(r.cash_gained)} $`);
+    tycoonState.data.chips -= r.spent_chips;
+    tycoonState.data.cash  += r.cash_gained;
+    _tcRefreshHud();
+    _tcPaintAll();
+  } catch (e) { toast(e.message); }
+}
+
+async function _tcConvertCash(amount) {
+  try {
+    const r = await api('/api/tycoon/convert/cash_to_coins', { method: 'POST', body: JSON.stringify({ amount }) });
+    if (!r.ok) { toast(r.error || 'Ошибка'); return; }
+    toast(`+${fmt(r.coins_gained)} 🪙`);
+    if (typeof r.new_balance === 'number') {
+      state.me.balance = r.new_balance;
+      const bel = document.getElementById('balance-display');
+      if (bel) bel.textContent = fmt(state.me.balance);
+    }
+    tycoonState.data.cash -= r.spent_cash;
+    _tcRefreshHud();
+    _tcPaintAll();
+  } catch (e) { toast(e.message); }
+}
+
+async function _tcDoPrestige() {
+  if (!confirm('Сбросить казино и получить VIP-звёзды? Все юниты/боты исчезнут, но конверсия станет лучше.')) return;
+  try {
+    const r = await api('/api/tycoon/prestige', { method: 'POST' });
+    if (!r.ok) { toast(r.error || 'Ошибка'); return; }
+    tycoonState.data = r;
+    _tcPaintAll();
+    toast('⭐ Престиж активирован!');
+  } catch (e) { toast(e.message); }
+}
+
+async function _tcDecorPlace(invId) {
+  try {
+    if (!state.inventory) await loadInventory();
+    const r = await api('/api/tycoon/decor/place', { method: 'POST', body: JSON.stringify({ inv_id: invId }) });
+    if (!r.ok) { toast(r.error || 'Ошибка'); return; }
+    tycoonState.data = r;
+    _tcPaintAll();
+    toast('Декор повешен');
+  } catch (e) { toast(e.message); }
+}
+
+async function _tcDecorRemove(decorId) {
+  try {
+    const r = await api('/api/tycoon/decor/remove', { method: 'POST', body: JSON.stringify({ decor_id: decorId }) });
+    if (!r.ok) { toast(r.error || 'Ошибка'); return; }
+    tycoonState.data = r;
+    _tcPaintAll();
+  } catch (e) { toast(e.message); }
 }
 
 // ================= init =================

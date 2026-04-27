@@ -769,6 +769,101 @@ async def api_plinko_play(req: PlinkoPlayReq, user: dict = Depends(require_user)
     return await _plinko.play_drop(int(user["id"]), req.bet, req.mode)
 
 
+# ================ CASINO TYCOON ================
+from app.economy import tycoon as _tycoon
+
+
+class TycoonBuyReq(BaseModel):
+    unit_key: str
+    cell_x: int = Field(..., ge=0, le=10)
+    cell_y: int = Field(..., ge=0, le=10)
+
+
+class TycoonCollectReq(BaseModel):
+    unit_id: int = Field(..., ge=1)
+
+
+class TycoonConvertReq(BaseModel):
+    amount: int = Field(..., ge=1)
+
+
+class TycoonHireReq(BaseModel):
+    kind: str
+
+
+class TycoonFireReq(BaseModel):
+    bot_id: int = Field(..., ge=1)
+
+
+class TycoonDecorReq(BaseModel):
+    inv_id: int = Field(..., ge=1)
+    slot_index: int = Field(default=0, ge=0, le=20)
+
+
+class TycoonDecorRemoveReq(BaseModel):
+    decor_id: int = Field(..., ge=1)
+
+
+@router.get("/tycoon/state")
+async def api_tycoon_state(user: dict = Depends(require_user)) -> dict:
+    return await _tycoon.get_state(int(user["id"]))
+
+
+@router.post("/tycoon/buy")
+async def api_tycoon_buy(req: TycoonBuyReq, user: dict = Depends(require_user)) -> dict:
+    return await _tycoon.buy_unit(int(user["id"]), req.unit_key, req.cell_x, req.cell_y)
+
+
+@router.post("/tycoon/collect")
+async def api_tycoon_collect(req: TycoonCollectReq, user: dict = Depends(require_user)) -> dict:
+    return await _tycoon.collect_unit(int(user["id"]), req.unit_id)
+
+
+@router.post("/tycoon/collect_all")
+async def api_tycoon_collect_all(user: dict = Depends(require_user)) -> dict:
+    return await _tycoon.collect_all(int(user["id"]))
+
+
+@router.post("/tycoon/convert/chips_to_cash")
+async def api_tycoon_conv_chips(req: TycoonConvertReq, user: dict = Depends(require_user)) -> dict:
+    return await _tycoon.convert_chips_to_cash(int(user["id"]), req.amount)
+
+
+@router.post("/tycoon/convert/cash_to_coins")
+async def api_tycoon_conv_cash(req: TycoonConvertReq, user: dict = Depends(require_user)) -> dict:
+    return await _tycoon.convert_cash_to_coins(int(user["id"]), req.amount)
+
+
+@router.post("/tycoon/hire")
+async def api_tycoon_hire(req: TycoonHireReq, user: dict = Depends(require_user)) -> dict:
+    return await _tycoon.hire_bot(int(user["id"]), req.kind)
+
+
+@router.post("/tycoon/fire")
+async def api_tycoon_fire(req: TycoonFireReq, user: dict = Depends(require_user)) -> dict:
+    return await _tycoon.fire_bot(int(user["id"]), req.bot_id)
+
+
+@router.post("/tycoon/buy_cell")
+async def api_tycoon_buy_cell(user: dict = Depends(require_user)) -> dict:
+    return await _tycoon.buy_cell(int(user["id"]))
+
+
+@router.post("/tycoon/decor/place")
+async def api_tycoon_decor_place(req: TycoonDecorReq, user: dict = Depends(require_user)) -> dict:
+    return await _tycoon.place_decor(int(user["id"]), req.inv_id, req.slot_index)
+
+
+@router.post("/tycoon/decor/remove")
+async def api_tycoon_decor_remove(req: TycoonDecorRemoveReq, user: dict = Depends(require_user)) -> dict:
+    return await _tycoon.remove_decor(int(user["id"]), req.decor_id)
+
+
+@router.post("/tycoon/prestige")
+async def api_tycoon_prestige(user: dict = Depends(require_user)) -> dict:
+    return await _tycoon.prestige(int(user["id"]))
+
+
 # ================ PVP COINFLIP (skin duels) ================
 from app.economy import coinflip_pvp as _cfpvp
 

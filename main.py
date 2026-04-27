@@ -19,6 +19,7 @@ from app.economy import coinflip_pvp as _cfpvp
 from app.economy import gear as _gear
 from app.economy import mines as _mines
 from app.economy import prestige as _prestige
+from app.economy import tycoon as _tycoon
 from app.economy.chat_events import happy_hour_loop, mystery_drop_loop
 from app.scheduler import daily_summary_loop, weekly_memory_compact_loop
 
@@ -56,6 +57,10 @@ async def lifespan(_: FastAPI):
         await _cfpvp.ensure_schema()
     except Exception as e:
         log.warning("coinflip-pvp schema migration failed: %s", e)
+    try:
+        await _tycoon.ensure_schema()
+    except Exception as e:
+        log.warning("tycoon schema migration failed: %s", e)
     # Trim oversized case pools (idempotent — only changes if current count > cap)
     try:
         await _case_rebalance.rebalance_all()
