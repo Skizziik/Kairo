@@ -4844,19 +4844,25 @@ async function _animateSpin(spinData, spinMs = 900, colDelay = 160) {
   if (turbo) { spinMs = Math.max(280, Math.round(spinMs * 0.35)); colDelay = Math.max(35, Math.round(colDelay * 0.35)); }
 
   const tumbles = spinData.tumbles || [];
-  // Use the actual server-provided final_grid if available; fall back to first
-  // tumble's grid only if final_grid isn't there (legacy/edge cases).
-  let finalGrid = spinData.final_grid || (tumbles.length > 0 ? tumbles[0].grid : null);
-  // Last-resort: render a random preview so we never silently skip animation
-  if (!finalGrid) finalGrid = _randomGrid();
+  // CRITICAL: the reel must stop on the STARTING grid (tumbles[0].grid) because
+  // that's what the cascade animation begins from. Stopping on spinData.final_grid
+  // (the grid AFTER all tumbles) caused a visible "symbols changed!" jump as the
+  // tumble loop immediately repainted the cells back to the starting state.
+  // final_grid is still useful as a fallback when there are zero tumbles.
+  let stopGrid;
+  if (tumbles.length > 0) {
+    stopGrid = tumbles[0].grid;
+  } else {
+    stopGrid = spinData.final_grid || _randomGrid();
+  }
 
   // Always run the spin reel animation (even on pure loss — no symbol matches)
-  await _spinAnimation(finalGrid, spinMs, colDelay);
+  await _spinAnimation(stopGrid, spinMs, colDelay);
 
   // No tumbles at all → result was determined on first roll without wins.
   // Stopped grid is already rendered by _spinAnimation; small "no win" pulse for feedback.
   if (tumbles.length === 0) {
-    _renderMegaslotGrid(finalGrid);
+    _renderMegaslotGrid(stopGrid);
     const gridEl = document.getElementById('ms-grid');
     if (gridEl) {
       gridEl.classList.add('no-win-flash');
@@ -4924,12 +4930,20 @@ async function playMegaslot(bonusBuy, bonusType) {
       return;
     }
 
-    // Apply balance IMMEDIATELY — the server has already committed the spin
-    // (cost deducted + winnings credited atomically). If we defer, user can
-    // navigate away mid-animation and exploit by seeing 'no deduction'.
-    if (typeof r.new_balance === 'number') {
+    // Balance display strategy:
+    // - Regular spin: snap to authoritative server value immediately (animation
+    //   is short, no surprise factor).
+    // - Bonus buy: defer the WINNINGS until FS sequence ends so the bar doesn't
+    //   spoil the result before the spinner does. We DO show the deduction
+    //   immediately (player paid → balance drops by `cost`). Final sync to
+    //   authoritative happens after the FS animation.
+    const bel = document.getElementById('balance-display');
+    if (bonusBuy) {
+      // Show only the deduction now; credit winnings at the end.
+      state.me.balance = Math.max(0, state.me.balance - cost);
+      if (bel) bel.textContent = fmt(state.me.balance);
+    } else if (typeof r.new_balance === 'number') {
       state.me.balance = r.new_balance;
-      const bel = document.getElementById('balance-display');
       if (bel) bel.textContent = fmt(state.me.balance);
     }
 
@@ -4995,6 +5009,14 @@ async function playMegaslot(bonusBuy, bonusType) {
       tg?.HapticFeedback?.notificationOccurred?.('success');
 
       fsBar.style.display = 'none';
+    }
+
+    // For bonus buy: only NOW credit the winnings (we deferred the +total_win
+    // earlier so the balance bar didn't reveal the result before the FS spinner).
+    // Sync to authoritative server value (handles edge cases like rounding).
+    if (bonusBuy && typeof r.new_balance === 'number') {
+      state.me.balance = r.new_balance;
+      if (bel) bel.textContent = fmt(state.me.balance);
     }
 
     // Final summary

@@ -62,14 +62,16 @@ assert sum(WEIGHTS.values()) == 100, f"weights must sum to 100, got {sum(WEIGHTS
 # (paytable scaled ×1.85 from old 47% values, 2026-04-27 retune).
 # Knife/AWP jackpots still chunky, but every paying threshold now feels meaningful.
 PAYOUTS: dict[str, list[tuple[int, float]]] = {
-    "milspec":    [(8, 0.05),  (10, 0.13),  (12, 0.45)],
-    "classified": [(8, 0.09),  (10, 0.22),  (12, 0.92)],
-    "covert":     [(8, 0.15),  (10, 0.37),  (12, 1.85)],
-    "m4":         [(8, 0.24),  (10, 0.46),  (12, 2.4)],
-    "gloves":     [(8, 0.33),  (10, 0.74),  (12, 3.3)],
-    "ak":         [(8, 0.46),  (10, 1.4),   (12, 4.6)],
-    "awp":        [(8, 0.93),  (10, 2.8),   (12, 7.4)],
-    "knife":      [(8, 2.8),   (10, 5.55),  (12, 13)],
+    # +3% across the board on top of the 1.85× retune (sim shows 96.4% → 97.4%
+    # base RTP, 83.5% → 84.4% BBR, 95.2% → 96.3% BBP — all still house-positive).
+    "milspec":    [(8, 0.05),  (10, 0.13),  (12, 0.46)],
+    "classified": [(8, 0.09),  (10, 0.23),  (12, 0.95)],
+    "covert":     [(8, 0.15),  (10, 0.38),  (12, 1.9)],
+    "m4":         [(8, 0.25),  (10, 0.47),  (12, 2.47)],
+    "gloves":     [(8, 0.34),  (10, 0.76),  (12, 3.4)],
+    "ak":         [(8, 0.47),  (10, 1.44),  (12, 4.74)],
+    "awp":        [(8, 0.96),  (10, 2.88),  (12, 7.62)],
+    "knife":      [(8, 2.88),  (10, 5.72),  (12, 13.4)],
 }
 
 # Scatter payouts (also triggers FS at 4+)
