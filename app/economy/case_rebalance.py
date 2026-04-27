@@ -137,10 +137,19 @@ async def rebalance_all() -> None:
         await ensure_dragon_log()
     except Exception as e:
         log.warning("dragon_log seed failed: %s", e)
-    try:
-        await ensure_case_price("lera_golova", 1999)
-    except Exception as e:
-        log.warning("lera_golova price update failed: %s", e)
+    # Custom prices set by the operator (idempotent — only updates when DB differs)
+    for key, price in [
+        ("masha_yu_know",   199),
+        ("melkiy",          299),
+        ("knife_or_nothing", 399),
+        ("igor_king_of_mid", 399),
+        ("lera_golova",     1299),
+        ("rip",             3999),
+    ]:
+        try:
+            await ensure_case_price(key, price)
+        except Exception as e:
+            log.warning("price update %s failed: %s", key, e)
 
 
 # ============================================================
@@ -169,7 +178,7 @@ async def ensure_case_price(key: str, target_price: int) -> None:
 # ============================================================
 
 KNIFE_OR_NOTHING_KEY = "knife_or_nothing"
-KNIFE_OR_NOTHING_PRICE = 299
+KNIFE_OR_NOTHING_PRICE = 399
 KNIFE_OR_NOTHING_IMAGE = (
     "https://community.akamai.steamstatic.com/economy/image/"
     "i0CoZ81Ui0m-9KwlBY1L_18myuGuq1wfhWSaZgMttyVfPaERSR0Wqmu7LAocGJKz2lu_XsnXwtmkJjSU"
