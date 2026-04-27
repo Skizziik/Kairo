@@ -228,10 +228,13 @@
     const skinKey = SS.state.current_skin_id || 'default';
     const skinCfg = SS.cfg.skins.find(s => s.key === skinKey) || SS.cfg.skins[0];
 
-    // Field expansion upgrade
+    // Field expansion upgrade — actually grow the play field. The upgrade tier
+    // formula yields {15,17,19,...,35} at lvl 0..10; combine with the map's
+    // base size by taking the larger so high-level upgrades don't shrink Endgame.
     const fieldLvl = Number(upgrades.field_expansion || 0);
     const baseSize = mapCfg.size;
-    const size = baseSize + Math.min(fieldLvl, 10) * 0;  // map dictates size; expansion is a future hook
+    const upgradeSize = 15 + Math.min(fieldLvl, 10) * 2;
+    const size = Math.max(baseSize, upgradeSize);
 
     // Build overlay
     const overlay = document.createElement('div');
@@ -294,11 +297,24 @@
       skinsEaten: 0,
       rarityCounts: {},   // {key: count}
       length: snake.cells.length,
-      foods: [],          // [{x, y, rarity}]
-      obstacles: [],      // [{x, y, dx?, dy?}]  (moving obstacles have dx/dy)
+      foods: [],          // [{x, y, rarity, spawnedAt}]
+      obstacles: [],      // [{x, y, dx?, dy?}]
       shieldsLeft: Number(upgrades.iron_shield || 0),
       bouncesLeft: Number(upgrades.wall_bounce || 0),
-      ghostMs: 0,
+      // Ghost mode — granted at start of run, ticks down. Lvl × 1000ms.
+      ghostMs: Number(upgrades.ghost_mode || 0) * 1000,
+      // Extra lives (separate from shields — full reset on use)
+      livesLeft: Number(upgrades.extra_life || 0),
+      // Treasure pulse — every 30s the next eat is x2, up to N times per run
+      treasurePulsesLeft: Number(upgrades.treasure_pulse || 0),
+      lastTreasurePulseAt: 0,           // performance.now() of last pulse use
+      treasurePulseReady: false,        // true while next eat will be doubled
+      // Combo / streak — consecutive eats counter
+      consecutiveEats: 0,
+      // Time-slow buff state
+      timeSlowUntil: 0,
+      // Layout memory: cells the snake has touched (for fading obstacles)
+      visited: new Set(),
       tickMs: 200,
       lastMoveAt: performance.now(),
       startedAt: performance.now(),
@@ -310,11 +326,25 @@
       survivalScale: 1,
       pendingFoodTimer: 0,
       lastObstacleMoveAt: performance.now(),
+      // Active-ability charges (movement upgrades — used by HUD buttons)
+      throttleSec:    Number(upgrades.throttle      || 0),
+      burstLeft:      Number(upgrades.speed_burst   || 0),
+      brakeLeft:      Number(upgrades.perfect_brake || 0),
+      pauseLeft:      Number(upgrades.pause_token   || 0),
+      leapLeft:       Number(upgrades.quantum_leap  || 0),
+      throttleActiveUntil: 0,
+      burstActiveUntil:    0,
+      brakeActiveUntil:    0,
+      pauseActiveUntil:    0,
     };
 
     // Initial speed (slow_start makes it slower)
     const slowStartLvl = Number(upgrades.slow_start || 0);
-    G.tickMs = 130 + slowStartLvl * 5;  // 130 → 180ms — snappy without being berserk
+    // 90ms tick = ~11 cells/sec. Worst-case input lag = 90ms (one tick), which
+    // is short enough that grid-lag stops being noticeable. Earlier attempts
+    // at fast-forward broke interpolation (visual snake "jumped"), pure-tick
+    // wins for stability.
+    G.tickMs = 90 + slowStartLvl * 5;
 
     // Spawn obstacles
     const totalObs = mapCfg.obstacles + mapCfg.moving;
@@ -340,27 +370,13 @@
     }
 
     // ----- input -----
-    // Fast-forward: when player turns and we're past the halfway point of the
-    // current tick, we collapse the rest of the tick so the turn happens
-    // ~immediately. Cuts felt input lag from up-to-200ms to ≤80ms without
-    // breaking physics (player still moves the same cells, just earlier).
+    // Plain queued input: turn applies at the next tick (cell boundary).
+    // Earlier we tried "fast-forward" tricks to fire the tick early, but they
+    // caused visual jumps (snake nearly at next cell, snap back to boundary,
+    // then turn). With tickMs=90 the natural wait is ≤90ms so this is fine.
     const setDir = (dx, dy) => {
-      // Prevent 180° flip
-      if (dx === -snake.dir.x && dy === -snake.dir.y) return;
-      // Same direction = no-op (don't fast-forward, player just held)
-      if (dx === snake.dir.x && dy === snake.dir.y) {
-        snake.pendingDir = { x: dx, y: dy };
-        return;
-      }
+      if (dx === -snake.dir.x && dy === -snake.dir.y) return;  // no 180° flip
       snake.pendingDir = { x: dx, y: dy };
-      const now = performance.now();
-      const elapsed = now - G.lastMoveAt;
-      // Threshold lowered 0.5 → 0.3 so even a swipe arriving 40ms after
-      // a tick collapses the rest. Worst-case input lag ~40ms, which is
-      // below the human reaction floor for input-display sync.
-      if (elapsed >= G.tickMs * 0.30) {
-        G.lastMoveAt = now - G.tickMs;
-      }
     };
 
     const keyHandler = (e) => {
