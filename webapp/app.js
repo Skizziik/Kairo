@@ -246,20 +246,9 @@ function renderCases() {
         </div>
         <div class="case-tile-body">
           <div class="case-tile-name">${escape(c.name)}</div>
-          <div class="case-tile-desc">${escape(c.description || '')}</div>
-          <div class="case-tile-preview-strip">
-            ${preview.map(it => `
-              <div class="preview-thumb rarity-${it.rarity}">
-                <img src="${it.image_url}" alt="" />
-              </div>
-            `).join('')}
-          </div>
-        </div>
-        <div class="case-tile-footer">
           <div class="case-tile-price ${locked ? 'locked' : ''}">
             ${locked ? '🔒' : '🪙'} ${fmt(c.price)}
           </div>
-          <div class="case-tile-open">открыть →</div>
         </div>
       </div>
     `;
