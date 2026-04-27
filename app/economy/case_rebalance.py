@@ -145,7 +145,7 @@ async def rebalance_all() -> None:
         ("knife_or_nothing", 1399),
         ("igor_king_of_mid",  949),
         ("lera_golova",      1599),
-        ("rip",              6999),
+        ("rip",              4999),
     ]:
         try:
             await ensure_case_price(key, price)

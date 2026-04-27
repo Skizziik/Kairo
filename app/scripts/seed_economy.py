@@ -226,7 +226,7 @@ CASE_DEFS = [
         "key": "rip",
         "name": "RIP",
         "description": "Высокие ставки. Можешь сорвать банк с ножом или обосраться на фиолетовом — чистая лотерея.",
-        "price": 6999,
+        "price": 4999,
         "weapon_set": None,  # all weapons allowed
         # Classic gambling spread — restricted is the "lose" bucket, exc_rare is jackpot.
         "rarity_weights": {"restricted": 0.25, "classified": 0.35, "covert": 0.30, "exceedingly_rare": 0.10},
