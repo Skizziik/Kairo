@@ -57,10 +57,10 @@
     }
     // Hub stat: AFK rate (lives in the .snake-hub-top grid)
     const afkStatEl = document.querySelector('[data-snake-stat="afk-rate"]');
-    if (afkStatEl) afkStatEl.textContent = fmt(s.afk_rate_per_min || 0);
+    if (afkStatEl) afkStatEl.textContent = fmtCompact(s.afk_rate_per_min || 0);
     // Hub stat: lifetime coins
     const lifeEl = document.querySelector('[data-snake-stat="lifetime"]');
-    if (lifeEl) lifeEl.textContent = fmt(s.coins_lifetime) + ' 🪙';
+    if (lifeEl) lifeEl.textContent = fmtCompact(s.coins_lifetime);
     // Terrarium banner — AFK rate, daily cap progress
     if (SS.activeTab === 'terrarium') {
       const rateEl = document.querySelector('.snake-afk-rate-value');
@@ -100,21 +100,25 @@
             <div class="snake-level-bar"><div class="snake-level-bar-fill" style="width:${pct}%"></div></div>
           </div>
           <div class="snake-hub-top">
-            <div class="snake-stat-card">
+            <div class="snake-stat-card gold">
+              <div class="snake-stat-icon" style="color:#ffd700">💰</div>
+              <div class="snake-stat-value" data-snake-stat="lifetime">${fmtCompact(s.coins_lifetime)}</div>
               <div class="snake-stat-label">Lifetime</div>
-              <div class="snake-stat-value" data-snake-stat="lifetime">${fmt(s.coins_lifetime)} 🪙</div>
             </div>
-            <div class="snake-stat-card">
+            <div class="snake-stat-card red">
+              <div class="snake-stat-icon" style="color:#eb4b4b">🏆</div>
+              <div class="snake-stat-value">${fmtCompact(s.best_run_coins)}</div>
               <div class="snake-stat-label">Best run</div>
-              <div class="snake-stat-value">${fmt(s.best_run_coins)} 🪙</div>
             </div>
-            <div class="snake-stat-card">
-              <div class="snake-stat-label">Runs</div>
+            <div class="snake-stat-card blue">
+              <div class="snake-stat-icon" style="color:#5aa9ff">▶</div>
               <div class="snake-stat-value">${fmt(s.runs_count)}</div>
+              <div class="snake-stat-label">Ранов</div>
             </div>
-            <div class="snake-stat-card">
-              <div class="snake-stat-label">AFK / мин</div>
-              <div class="snake-stat-value" data-snake-stat="afk-rate">${fmt(s.afk_rate_per_min || 0)}</div>
+            <div class="snake-stat-card green">
+              <div class="snake-stat-icon" style="color:#5cc15c">🤖</div>
+              <div class="snake-stat-value" data-snake-stat="afk-rate">${fmtCompact(s.afk_rate_per_min || 0)}</div>
+              <div class="snake-stat-label">AFK/мин</div>
             </div>
           </div>
           <div class="snake-tabs">
@@ -179,11 +183,11 @@
     c.innerHTML = `
       <div class="snake-play-block">
         <div>
-          <div class="snake-stat-label" style="margin-bottom:6px">Режим</div>
+          <div class="snake-section-label">⚔ Режим</div>
           <div class="snake-mode-strip">${modeChips}</div>
         </div>
         <div>
-          <div class="snake-stat-label" style="margin-bottom:6px">Карта</div>
+          <div class="snake-section-label">🗺 Карта</div>
           <div class="snake-map-strip">${mapChips}</div>
         </div>
         <button class="snake-start-btn" id="snake-start">▶ СТАРТ ИГРЫ</button>
