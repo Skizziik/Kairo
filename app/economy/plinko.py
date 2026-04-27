@@ -136,6 +136,15 @@ async def play_drop(user_id: int, bet: int, mode: str) -> dict:
         log.debug("plinko retention hooks failed: %s", e)
 
     win = delta > 0
+    try:
+        from app.economy import audit as _audit
+        await _audit.log_bet(
+            user_id, "plinko", bet=bet, win=payout, net=delta,
+            details={"mode": mode, "bucket": bucket, "multiplier": multiplier, "rows": rows},
+            balance_after=new_bal,
+        )
+    except Exception:
+        pass
     return {
         "ok": True,
         "win": win,

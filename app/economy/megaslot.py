@@ -415,6 +415,24 @@ async def spin(user_id: int, bet: int, bonus_buy: bool = False, bonus_type: str 
                 user_id, net_delta, reason, new_bal,
             )
 
+    try:
+        from app.economy import audit as _audit
+        await _audit.log_bet(
+            user_id, "megaslot", bet=cost, win=total_win, net=net_delta,
+            details={
+                "bonus_buy": bonus_buy,
+                "bonus_type": bonus_type if bonus_buy else None,
+                "fs_triggered": fs_triggered,
+                "fs_total_base": (fs_data or {}).get("total_base") if fs_data else None,
+                "fs_mult": (fs_data or {}).get("applied_mult") if fs_data else None,
+                "scatter_payout": scatter_payout,
+                "capped": capped,
+                "mult": (total_win // bet) if bet > 0 else 0,
+            },
+            balance_after=new_bal,
+        )
+    except Exception:
+        pass
     return {
         "ok": True,
         "bet": bet,

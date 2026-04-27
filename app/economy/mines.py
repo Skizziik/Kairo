@@ -318,6 +318,27 @@ async def reveal(user_id: int, cell: int) -> dict:
     except Exception as e:
         log.debug("mines retention hooks failed: %s", e)
 
+    # Audit log only on game-end (one row per round, not per cell-reveal)
+    if _post_payload.get("game_over"):
+        try:
+            from app.economy import audit as _audit
+            await _audit.log_bet(
+                user_id, "mines",
+                bet=bet,
+                win=int(_post_payload.get("payout") or 0),
+                net=int(_post_payload.get("delta") or 0),
+                details={
+                    "bombs": _post_payload.get("bombs_count"),
+                    "revealed_count": len(_post_payload.get("safe_revealed") or []),
+                    "multiplier": _post_payload.get("multiplier"),
+                    "win": bool(_post_payload.get("win")),
+                    "perfect": bool(_post_payload.get("perfect", False)),
+                },
+                balance_after=_post_payload.get("new_balance"),
+            )
+        except Exception:
+            pass
+
     return _post_payload
 
 

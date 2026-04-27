@@ -345,6 +345,38 @@ async def join_lobby(opponent_id: int, lobby_id: int, inv_ids: list[int]) -> dic
     except Exception as e:
         log.debug("coinflip retention hooks failed: %s", e)
 
+    # Audit (outside tx, best-effort)
+    try:
+        from app.economy import audit as _audit
+        creator_name  = enriched.get("creator_name")
+        opponent_name = enriched.get("opponent_name")
+        # Winner row: bet = their stake, win = pot, net = opponent's stake
+        # Loser row:  bet = their stake, win = 0,   net = -their stake
+        if creator_wins:
+            winner_stake, loser_stake = cv, opp_value
+            winner_opp_name, loser_opp_name = opponent_name, creator_name
+        else:
+            winner_stake, loser_stake = opp_value, cv
+            winner_opp_name, loser_opp_name = creator_name, opponent_name
+        await _audit.log_bet(
+            winner_id, "cf_pvp", bet=int(winner_stake), win=int(pot_value), net=int(loser_stake),
+            details={
+                "lobby_id": int(lobby_id), "pot_value": int(pot_value),
+                "opponent_name": winner_opp_name, "result": "win",
+                "creator_won": bool(creator_wins), "roll": float(roll),
+            },
+        )
+        await _audit.log_bet(
+            loser_id, "cf_pvp", bet=int(loser_stake), win=0, net=-int(loser_stake),
+            details={
+                "lobby_id": int(lobby_id), "pot_value": int(pot_value),
+                "opponent_name": loser_opp_name, "result": "loss",
+                "creator_won": bool(creator_wins), "roll": float(roll),
+            },
+        )
+    except Exception:
+        pass
+
     return {
         "ok": True,
         "lobby": enriched,

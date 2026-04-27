@@ -640,6 +640,17 @@ async def play_coinflip(user_id: int, bet: int, side: str) -> dict:
         achievements = await rt.check_achievements_after_action(user_id, "balance")
     if leveled.get("leveled_up"):
         achievements += await rt.check_achievements_after_action(user_id, "level_up")
+    try:
+        from app.economy import audit as _audit
+        await _audit.log_bet(
+            user_id, "coinflip", bet=bet,
+            win=(bet + delta) if win else 0,
+            net=delta,
+            details={"side": side, "result": actual},
+            balance_after=new_bal,
+        )
+    except Exception:
+        pass
     return {"ok": True, "win": win, "result": actual, "delta": delta, "new_balance": new_bal,
             "level": leveled, "achievements": achievements}
 
@@ -707,6 +718,15 @@ async def play_slots(user_id: int, bet: int) -> dict:
         achievements += await rt.check_achievements_after_action(user_id, "balance")
     if leveled.get("leveled_up"):
         achievements += await rt.check_achievements_after_action(user_id, "level_up")
+    try:
+        from app.economy import audit as _audit
+        await _audit.log_bet(
+            user_id, "slots", bet=bet, win=payout, net=delta,
+            details={"reels": reels, "outcome": outcome},
+            balance_after=new_bal,
+        )
+    except Exception:
+        pass
     return {
         "ok": True,
         "reels": reels,
@@ -777,6 +797,15 @@ async def play_crash(user_id: int, bet: int, target_mult: float) -> dict:
         achievements = await rt.check_achievements_after_action(user_id, "balance")
     if leveled and leveled.get("leveled_up"):
         achievements += await rt.check_achievements_after_action(user_id, "level_up")
+    try:
+        from app.economy import audit as _audit
+        await _audit.log_bet(
+            user_id, "crash", bet=bet, win=payout, net=delta,
+            details={"target": target_mult, "crash_point": crash_point, "win": win},
+            balance_after=new_bal,
+        )
+    except Exception:
+        pass
     return {
         "ok": True,
         "win": win,
