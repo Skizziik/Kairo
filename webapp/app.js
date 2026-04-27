@@ -1569,20 +1569,54 @@ async function _plinkoStartAuto(count) {
   plinkoState.autoTotal = count;
   plinkoState.autoStopRequested = false;
   _plinkoUpdateAutoUi();
+  // Backpressure tracking — if we hit busy/queue-full repeatedly, back off
+  // briefly instead of hammering and producing silent failures.
+  let busyStreak = 0;
+  let errorStreak = 0;
   try {
     while (plinkoState.autoCount > 0 && !plinkoState.autoStopRequested) {
-      // Bail conditions
+      if (!document.querySelector('.plinko-play')) break;  // user navigated away
       if (!state.me || state.me.balance < plinkoState.bet) {
         toast('Не хватает на следующий дроп');
         break;
       }
-      if (!document.querySelector('.plinko-play')) break;  // user navigated away
-      plinkoState.autoCount -= 1;
-      _plinkoUpdateAutoUi();
-      // Fire-and-forget the drop so the auto loop's pacing is decoupled from
-      // server latency — animation continues async, multiple balls can stack.
-      // Catch any rejection silently so one bad fetch doesn't kill the loop.
-      _plinkoDrop().catch(() => {});
+
+      // AWAIT the drop so we know its outcome — otherwise auto can decrement
+      // even when the ball never spawned (rate limit / queue full / API error),
+      // and the user sees fewer balls than the counter promised.
+      const result = await _plinkoDrop();
+
+      if (result && result.ok) {
+        // Real ball spawned — count it, reset backoff.
+        plinkoState.autoCount -= 1;
+        busyStreak = 0;
+        errorStreak = 0;
+        _plinkoUpdateAutoUi();
+      } else if (result && result.reason === 'busy') {
+        // Rate-limit OR ball queue saturated — wait for queue to drain a bit.
+        busyStreak += 1;
+        // Soft drain wait: scales with how stuck we are (60 → 360ms).
+        const drainWait = Math.min(360, 60 + busyStreak * 30);
+        await new Promise(r => setTimeout(r, drainWait));
+        continue;  // retry SAME drop without consuming the slot
+      } else if (result && result.reason === 'low-balance') {
+        toast('Не хватает на следующий дроп');
+        break;
+      } else {
+        // 'error' / 'spawn-failed' — count it (server already processed the bet)
+        // but back off so we don't tight-loop on a server hiccup.
+        errorStreak += 1;
+        plinkoState.autoCount -= 1;
+        _plinkoUpdateAutoUi();
+        if (errorStreak >= 3) {
+          toast('Серия ошибок — авто остановлен');
+          break;
+        }
+        await new Promise(r => setTimeout(r, 400));
+        continue;
+      }
+
+      // Pace next iteration by wall clock (interruptable by stop-request)
       if (plinkoState.autoCount > 0 && !plinkoState.autoStopRequested) {
         await new Promise(r => setTimeout(r, PLINKO_AUTO_DELAY_MS));
       }
@@ -1723,21 +1757,40 @@ function _plinkoBuildBoardSvg(rows, pays) {
 
 // Drop a ball. Multi-click safe: each call → independent API + ball animation.
 // Frontend pre-validates balance; server is final authority.
+// Return a STATUS object so callers (especially the auto loop) can distinguish
+// transient back-pressure ('busy') from real failures ('error') and from
+// silent caller errors (low balance, etc.) — auto-drop only counts a true 'ok'
+// against its planned drop count, otherwise the counter desyncs from reality.
+//
+// Statuses:
+//   {ok: true}                              — ball was spawned in the SVG
+//   {ok: false, reason: 'busy'}             — rate-limit OR queue full; retry ok
+//   {ok: false, reason: 'low-balance'}      — terminal for auto loop
+//   {ok: false, reason: 'mode-switched'}    — server response stale; refund handled
+//   {ok: false, reason: 'spawn-failed'}     — SVG missing / config mismatch
+//   {ok: false, reason: 'error', error}     — API or network error, balance refunded
 async function _plinkoDrop() {
   // Anti-double click rate-limit (allows ~11 drops/sec)
   const now = Date.now();
-  if (now - plinkoState.lastClickAt < PLINKO_MIN_CLICK_GAP_MS) return;
+  if (now - plinkoState.lastClickAt < PLINKO_MIN_CLICK_GAP_MS) {
+    return {ok: false, reason: 'busy'};
+  }
   plinkoState.lastClickAt = now;
 
   // Cap simultaneous balls (prevents DoS on slow phones). DOM-based — never stale.
   if (_plinkoBallsInFlight() >= PLINKO_MAX_ACTIVE_BALLS) {
-    return toast('Слишком много шариков в воздухе');
+    return {ok: false, reason: 'busy'};
   }
 
   const bet = plinkoState.bet;
   const mode = plinkoState.mode;
-  if (bet < 10) return toast('Минимум 10 🪙');
-  if (!state.me || state.me.balance < bet) return toast('Не хватает монет');
+  if (bet < 10) {
+    toast('Минимум 10 🪙');
+    return {ok: false, reason: 'low-balance'};
+  }
+  if (!state.me || state.me.balance < bet) {
+    return {ok: false, reason: 'low-balance'};
+  }
 
   // Bet is deducted from the visible balance NOW. Payout (if any) is credited
   // only when the ball physically lands in its bucket (see _plinkoBallLanded).
@@ -1755,20 +1808,26 @@ async function _plinkoDrop() {
     state.me.balance += bet;
     if (balEl) balEl.textContent = fmt(state.me.balance);
     toast(`Ошибка: ${e.message}`);
-    return;
+    return {ok: false, reason: 'error', error: e.message};
   }
   if (!resp || !resp.ok) {
     state.me.balance += bet;
     if (balEl) balEl.textContent = fmt(state.me.balance);
     toast((resp && resp.error) || 'Ошибка');
-    return;
+    return {ok: false, reason: 'error', error: (resp && resp.error) || 'unknown'};
   }
 
   // DO NOT sync new_balance here — that would credit the win before the ball lands.
   // The payout is added to the visible balance in _plinkoBallLanded.
 
   tg?.HapticFeedback?.impactOccurred?.('light');
-  _plinkoSpawnBall(resp);
+  const spawned = _plinkoSpawnBall(resp);
+  if (!spawned) {
+    // Spawn validator already toasted + synced balance from new_balance, so we
+    // don't refund here — the server already accounted for the bet (and payout).
+    return {ok: false, reason: 'spawn-failed'};
+  }
+  return {ok: true};
 }
 
 // ==================== ANIMATION ENGINE ====================
@@ -1871,16 +1930,29 @@ function _plinkoTick(now) {
 
 // Spawn an animated ball. Validates inputs, registers it with the global loop.
 // Returns true on success, false if input was malformed.
+//
+// CRITICAL: any early return MUST sync balance from resp.new_balance — the
+// server already settled the bet+payout, so without sync the visible balance
+// drifts ~bet per failed spawn. _plinkoSyncFromResp handles this and lets
+// each early-return be a one-liner.
+function _plinkoSyncFromResp(resp) {
+  if (resp && typeof resp.new_balance === 'number' && state.me) {
+    state.me.balance = resp.new_balance;
+    const balEl = document.getElementById('balance-display');
+    if (balEl) balEl.textContent = fmt(state.me.balance);
+  }
+}
+
 function _plinkoSpawnBall(resp) {
   // ---- Validate config + mode ----
   const cfg = plinkoState.config;
   const mode = cfg && cfg.modes && cfg.modes[plinkoState.mode];
-  if (!mode) return false;
+  if (!mode) { _plinkoSyncFromResp(resp); return false; }
   const rows = mode.rows;
-  if (!Number.isFinite(rows) || rows < 1) return false;
+  if (!Number.isFinite(rows) || rows < 1) { _plinkoSyncFromResp(resp); return false; }
 
   const svg = document.querySelector('.pl-svg');
-  if (!svg) return false;
+  if (!svg) { _plinkoSyncFromResp(resp); return false; }
 
   // ---- Validate server response ----
   const path = Array.isArray(resp && resp.path) ? resp.path : null;
@@ -1888,20 +1960,18 @@ function _plinkoSpawnBall(resp) {
     // Mode/path mismatch — happens if user switched modes after click but before
     // the API resolved. Sync the visible balance to server-authoritative value
     // (which already includes the payout) so we're not desynced. No animation.
-    if (resp && typeof resp.new_balance === 'number') {
-      state.me.balance = resp.new_balance;
-      const balEl = document.getElementById('balance-display');
-      if (balEl) balEl.textContent = fmt(state.me.balance);
-    }
+    _plinkoSyncFromResp(resp);
     toast('Режим сменился во время дропа');
     return false;
   }
   // path entries must be 'L' or 'R'
   for (let i = 0; i < path.length; i++) {
-    if (path[i] !== 'L' && path[i] !== 'R') return false;
+    if (path[i] !== 'L' && path[i] !== 'R') { _plinkoSyncFromResp(resp); return false; }
   }
   const bucket = Number(resp.bucket);
-  if (!Number.isInteger(bucket) || bucket < 0 || bucket > rows) return false;
+  if (!Number.isInteger(bucket) || bucket < 0 || bucket > rows) {
+    _plinkoSyncFromResp(resp); return false;
+  }
 
   // ---- Build waypoints (drop point → pegs → bucket) ----
   const lay = _plinkoLayout(rows);
@@ -1917,7 +1987,9 @@ function _plinkoSpawnBall(resp) {
   waypoints[rows + 1] = { x: fin.x, y: fin.y };
   // Sanity: every waypoint must be a finite number
   for (let i = 0; i < waypoints.length; i++) {
-    if (!Number.isFinite(waypoints[i].x) || !Number.isFinite(waypoints[i].y)) return false;
+    if (!Number.isFinite(waypoints[i].x) || !Number.isFinite(waypoints[i].y)) {
+      _plinkoSyncFromResp(resp); return false;
+    }
   }
 
   // ---- Create the SVG element ----
