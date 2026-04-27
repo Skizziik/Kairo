@@ -3443,6 +3443,11 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (target === 'missions') loadMissions();
     if (target === 'achievements') loadAchievements();
     if (target === 'wheel') loadWheel();
+    // Reset Games tab to the grid every time it's visited so old result
+    // panels (e.g. just-finished coinflip) don't linger.
+    if (target === 'games') {
+      try { closeGameScreen(); } catch (_) {}
+    }
   });
 });
 
