@@ -517,7 +517,7 @@ async def _get_state_inner(user_id: int) -> dict:
             )
             decor_rows = await conn.fetch(
                 "select d.id, d.inv_id, d.slot_index, "
-                "       i.id as inv_exists, i.skin_id, i.price, i.rarity, "
+                "       i.id as inv_exists, i.skin_id, i.price, "
                 "       s.full_name, s.image_url, s.rarity as cat_rarity "
                 "from tycoon_decor d "
                 "left join economy_inventory i on i.id = d.inv_id "
