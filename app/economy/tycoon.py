@@ -193,7 +193,7 @@ BOT_KINDS: dict[str, dict] = {
 
 CHIPS_TO_CASH_RATE   = 100              # 100 chips → 1 $ (player click conversion)
 CASH_TO_COINS_RATE   = 1_000            # 1000 $ → 1 coin (bank conversion)
-COINS_DAILY_CAP_BASE = 5_000            # base daily coin-conversion cap
+COINS_DAILY_CAP_BASE = 5_000_000        # base daily coin-conversion cap (5M coins/day)
 PRESTIGE_THRESHOLD   = 1_000_000_000    # $1B lifetime cash to unlock prestige
 
 START_FLOOR_CAPACITY = 6                # 3x2 grid at start
