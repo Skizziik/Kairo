@@ -699,8 +699,12 @@ async def _get_state_inner(user_id: int) -> dict:
     news_raw = state.get("news") or []
     news_items = news_raw if isinstance(news_raw, list) else json.loads(news_raw or "[]")
 
-    # Daily missions
-    daily_missions = await _get_or_create_daily_missions(user_id)
+    # Daily missions (failure shouldn't kill the whole state response)
+    try:
+        daily_missions = await _get_or_create_daily_missions(user_id)
+    except Exception as _e:
+        log.warning("tycoon: daily missions fetch failed: %s", _e)
+        daily_missions = []
 
     return {
         "ok":             True,

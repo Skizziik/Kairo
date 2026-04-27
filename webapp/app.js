@@ -57,8 +57,17 @@ async function api(path, options = {}) {
       const resp = await fetch(url, { ...opts, signal: ctrl.signal });
       clearTimeout(timeoutId);
       if (!resp.ok) {
-        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
-        throw new Error(err.detail || `HTTP ${resp.status}`);
+        // Try to surface the real error: JSON detail first, then plain text body,
+        // finally just the status. This lets us see "ForeignKeyViolationError ..."
+        // instead of an opaque "Load failed".
+        let detail;
+        try {
+          const j = await resp.json();
+          detail = j.detail || (typeof j === 'string' ? j : JSON.stringify(j));
+        } catch (_) {
+          try { detail = (await resp.text()).slice(0, 300); } catch (__) { detail = resp.statusText; }
+        }
+        throw new Error(`HTTP ${resp.status}${detail ? ': ' + detail : ''}`);
       }
       return resp.json();
     } catch (e) {

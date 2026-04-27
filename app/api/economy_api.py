@@ -806,7 +806,14 @@ class TycoonDecorRemoveReq(BaseModel):
 
 @router.get("/tycoon/state")
 async def api_tycoon_state(user: dict = Depends(require_user)) -> dict:
-    return await _tycoon.get_state(int(user["id"]))
+    try:
+        return await _tycoon.get_state(int(user["id"]))
+    except Exception as e:
+        # Surface the real error to the client (string + type) so frontend can show
+        # something useful instead of a generic 500.
+        import traceback
+        log.exception("tycoon state failed for user %s", user.get("id"))
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)[:300]}")
 
 
 @router.post("/tycoon/buy")
