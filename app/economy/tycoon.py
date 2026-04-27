@@ -258,34 +258,131 @@ TYCOON_DAILY_TEMPLATES = [
 # ============================================================
 
 async def ensure_schema() -> None:
-    sql_path = Path(__file__).parent.parent / "db" / "migration_tycoon.sql"
-    if not sql_path.exists():
-        log.warning("tycoon migration SQL missing")
-        return
-    sql = sql_path.read_text(encoding="utf-8")
+    """Apply schema in granular steps so a single failing statement can't
+    leave the DB half-initialised. Each CREATE/ALTER runs in its own
+    transaction; failures are logged but don't abort the rest.
+    """
+    statements: list[tuple[str, str]] = [
+        ("tycoon_state", """
+            create table if not exists tycoon_state (
+                user_id              bigint primary key references users(tg_id) on delete cascade,
+                chips                bigint  not null default 0,
+                cash                 bigint  not null default 1000,
+                vip_stars            int     not null default 0,
+                floor_capacity       int     not null default 6,
+                reputation_stars     real    not null default 1.0,
+                theme                text    not null default 'vegas',
+                last_tick_at         timestamptz not null default now(),
+                last_bank_conv_day   date,
+                bank_conv_today      bigint  not null default 0,
+                total_lifetime_cash  bigint  not null default 0,
+                prestige_count       int     not null default 0,
+                created_at           timestamptz not null default now(),
+                updated_at           timestamptz not null default now()
+            )
+        """),
+        ("tycoon_units_catalog", """
+            create table if not exists tycoon_units_catalog (
+                key                  text primary key,
+                name                 text  not null,
+                kind                 text  not null,
+                tier                 int   not null default 1,
+                cost_cash            bigint not null default 0,
+                cost_chips           bigint not null default 0,
+                base_chips_per_sec   real  not null default 0,
+                capacity             int   not null default 1,
+                unlock_reputation    real  not null default 0,
+                icon                 text,
+                description          text
+            )
+        """),
+        ("tycoon_units", """
+            create table if not exists tycoon_units (
+                id              bigserial primary key,
+                user_id         bigint not null references users(tg_id) on delete cascade,
+                unit_key        text   not null references tycoon_units_catalog(key) on delete cascade,
+                cell_x          int    not null,
+                cell_y          int    not null,
+                level           int    not null default 1,
+                chips_in_tray   bigint not null default 0,
+                occupancy_pct   real   not null default 0,
+                last_collected_at timestamptz not null default now(),
+                placed_at       timestamptz not null default now()
+            )
+        """),
+        ("idx_tycoon_units_user", "create index if not exists idx_tycoon_units_user on tycoon_units (user_id)"),
+        ("tycoon_bots", """
+            create table if not exists tycoon_bots (
+                id              bigserial primary key,
+                user_id         bigint not null references users(tg_id) on delete cascade,
+                kind            text   not null,
+                level           int    not null default 1,
+                hired_at        timestamptz not null default now()
+            )
+        """),
+        ("idx_tycoon_bots_user", "create index if not exists idx_tycoon_bots_user on tycoon_bots (user_id)"),
+        ("tycoon_decor", """
+            create table if not exists tycoon_decor (
+                id              bigserial primary key,
+                user_id         bigint not null references users(tg_id) on delete cascade,
+                inv_id          bigint not null,
+                slot_index      int    not null,
+                placed_at       timestamptz not null default now()
+            )
+        """),
+        ("idx_tycoon_decor_user", "create index if not exists idx_tycoon_decor_user on tycoon_decor (user_id)"),
+
+        # Phase 2 columns
+        ("themes_owned",       "alter table tycoon_state add column if not exists themes_owned jsonb not null default '[\"vegas\"]'::jsonb"),
+        ("streak_kind",        "alter table tycoon_state add column if not exists streak_kind text not null default 'neutral'"),
+        ("streak_until",       "alter table tycoon_state add column if not exists streak_until timestamptz"),
+        ("celeb_until",        "alter table tycoon_state add column if not exists celeb_until timestamptz"),
+        ("celeb_name",         "alter table tycoon_state add column if not exists celeb_name text"),
+        ("last_raid_at",       "alter table tycoon_state add column if not exists last_raid_at timestamptz"),
+        ("last_raided_at",     "alter table tycoon_state add column if not exists last_raided_at timestamptz"),
+        ("news",               "alter table tycoon_state add column if not exists news jsonb not null default '[]'::jsonb"),
+
+        ("tycoon_daily_missions", """
+            create table if not exists tycoon_daily_missions (
+                user_id     bigint not null references users(tg_id) on delete cascade,
+                day         date   not null,
+                missions    jsonb  not null,
+                primary key (user_id, day)
+            )
+        """),
+        ("idx_tycoon_dm_user", "create index if not exists idx_tycoon_dm_user on tycoon_daily_missions (user_id, day)"),
+    ]
+
     async with pool().acquire() as conn:
-        await conn.execute(sql)
+        for label, stmt in statements:
+            try:
+                await conn.execute(stmt)
+            except Exception as e:
+                log.warning("tycoon schema: %s failed: %s", label, e)
         # Seed catalog rows (idempotent: ON CONFLICT updates)
         for u in UNIT_CATALOG:
-            await conn.execute(
-                """
-                insert into tycoon_units_catalog
-                  (key, name, kind, tier, cost_cash, cost_chips, base_chips_per_sec,
-                   capacity, unlock_reputation, icon, description)
-                values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-                on conflict (key) do update set
-                  name = excluded.name, kind = excluded.kind, tier = excluded.tier,
-                  cost_cash = excluded.cost_cash, cost_chips = excluded.cost_chips,
-                  base_chips_per_sec = excluded.base_chips_per_sec,
-                  capacity = excluded.capacity,
-                  unlock_reputation = excluded.unlock_reputation,
-                  icon = excluded.icon, description = excluded.description
-                """,
-                u["key"], u["name"], u["kind"], u["tier"],
-                u["cost_cash"], u["cost_chips"], u["base_chips_per_sec"],
-                u["capacity"], u["unlock_rep"], u["icon"], u["description"],
-            )
-    log.info("tycoon schema + catalog seeded (%d units)", len(UNIT_CATALOG))
+            try:
+                await conn.execute(
+                    """
+                    insert into tycoon_units_catalog
+                      (key, name, kind, tier, cost_cash, cost_chips, base_chips_per_sec,
+                       capacity, unlock_reputation, icon, description)
+                    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                    on conflict (key) do update set
+                      name = excluded.name, kind = excluded.kind, tier = excluded.tier,
+                      cost_cash = excluded.cost_cash, cost_chips = excluded.cost_chips,
+                      base_chips_per_sec = excluded.base_chips_per_sec,
+                      capacity = excluded.capacity,
+                      unlock_reputation = excluded.unlock_reputation,
+                      icon = excluded.icon, description = excluded.description
+                    """,
+                    u["key"], u["name"], u["kind"], u["tier"],
+                    u["cost_cash"], u["cost_chips"], u["base_chips_per_sec"],
+                    u["capacity"], u["unlock_rep"], u["icon"], u["description"],
+                )
+            except Exception as e:
+                log.warning("tycoon catalog seed %s failed: %s", u.get("key"), e)
+    log.info("tycoon schema + catalog (%d units) ensured", len(UNIT_CATALOG))
 
 
 # ============================================================
