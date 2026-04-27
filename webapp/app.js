@@ -1309,6 +1309,10 @@ const plinkoState = {
   history: [],         // last ~12 multipliers, recent on right
   lastClickAt: 0,      // anti-double-click rate limit
   ballSeq: 0,          // monotonic ball id
+  // Auto-drop state
+  autoCount: 0,        // remaining drops in current auto session
+  autoTotal: 0,        // total drops requested (for "X / Y" display)
+  autoStopRequested: false,
 };
 
 // Source of truth for "balls currently in flight" — live DOM, never desynced.
@@ -1406,10 +1410,17 @@ function _plinkoPaint() {
           <input type="text" inputmode="numeric" pattern="[0-9]*" id="pl-bet-input" value="${plinkoState.bet}" autocomplete="off" />
         </div>
         <div class="pl-bet-chips" id="pl-bet-chips">${betChips}</div>
-        <button class="btn big-btn pl-drop-btn" id="pl-drop-btn">
-          <span class="pl-drop-icon">${_plinkoGrenadeSvg()}</span>
-          <span>DROP · ${fmt(plinkoState.bet)} 🪙</span>
-        </button>
+        <div class="pl-action-row">
+          <button class="btn big-btn pl-drop-btn" id="pl-drop-btn">
+            <span class="pl-drop-icon">${_plinkoGrenadeSvg()}</span>
+            <span>DROP · ${fmt(plinkoState.bet)} 🪙</span>
+          </button>
+          <button class="pl-auto-btn" id="pl-auto-btn" title="Авто-дропы подряд">🔁 АВТО</button>
+        </div>
+        <div class="pl-auto-counter" id="pl-auto-counter" style="display:none">
+          <span id="pl-auto-progress">0 / 0</span>
+          <button class="pl-auto-stop" id="pl-auto-stop">✕ STOP</button>
+        </div>
         <div class="pl-rtp-note">RTP <b>${(mode.rtp * 100).toFixed(0)}%</b> · ${mode.rows} рядов · макс ставка <b>${fmt(maxBet)}</b></div>
       </div>
 
@@ -1446,6 +1457,105 @@ function _plinkoPaint() {
     _plinkoUpdateDropBtn();
   });
   document.getElementById('pl-drop-btn')?.addEventListener('click', _plinkoDrop);
+  document.getElementById('pl-auto-btn')?.addEventListener('click', _plinkoOpenAutoModal);
+  document.getElementById('pl-auto-stop')?.addEventListener('click', () => {
+    plinkoState.autoStopRequested = true;
+    toast('Останавливаем после текущего дропа');
+  });
+  // If auto is running and we just re-painted (e.g. mode switch), reflect state
+  _plinkoUpdateAutoUi();
+}
+
+function _plinkoOpenAutoModal() {
+  if (plinkoState.autoCount > 0) {
+    plinkoState.autoStopRequested = true;
+    toast('Останавливаем после текущего дропа');
+    return;
+  }
+  const el = document.createElement('div');
+  el.className = 'ms-bonus-modal';   // reuse megaslot modal styles
+  el.innerHTML = `
+    <div class="ms-bonus-backdrop"></div>
+    <div class="ms-bonus-card">
+      <div class="ms-bonus-title">🔁 Авто-дропы</div>
+      <div class="ms-auto-grid">
+        <button class="ms-auto-opt" data-n="10">10</button>
+        <button class="ms-auto-opt" data-n="25">25</button>
+        <button class="ms-auto-opt" data-n="50">50</button>
+        <button class="ms-auto-opt" data-n="100">100</button>
+        <button class="ms-auto-opt" data-n="250">250</button>
+        <button class="ms-auto-opt" data-n="9999">∞ (до баланса)</button>
+      </div>
+      <div class="ms-auto-hint">Дропы пойдут по текущей ставке и режиму. STOP остановит после текущего.</div>
+      <button class="ms-bonus-cancel">Отмена</button>
+    </div>
+  `;
+  document.body.appendChild(el);
+  const close = () => el.remove();
+  el.querySelector('.ms-bonus-backdrop').addEventListener('click', close);
+  el.querySelector('.ms-bonus-cancel').addEventListener('click', close);
+  el.querySelectorAll('.ms-auto-opt').forEach(b => {
+    b.addEventListener('click', () => {
+      const n = parseInt(b.dataset.n);
+      close();
+      _plinkoStartAuto(n);
+    });
+  });
+}
+
+async function _plinkoStartAuto(count) {
+  if (plinkoState.autoCount > 0) return;
+  plinkoState.autoCount = count;
+  plinkoState.autoTotal = count;
+  plinkoState.autoStopRequested = false;
+  _plinkoUpdateAutoUi();
+  try {
+    while (plinkoState.autoCount > 0 && !plinkoState.autoStopRequested) {
+      // Bail conditions
+      if (!state.me || state.me.balance < plinkoState.bet) {
+        toast('Не хватает на следующий дроп');
+        break;
+      }
+      if (!document.querySelector('.plinko-play')) break;  // user navigated away
+      plinkoState.autoCount -= 1;
+      _plinkoUpdateAutoUi();
+      // _plinkoDrop is fire-and-forget at the network layer (await fetches the
+      // server response, then the ball animates async). 600ms between drops
+      // gives a comfortable cadence without overwhelming the floor.
+      await _plinkoDrop();
+      if (plinkoState.autoCount > 0 && !plinkoState.autoStopRequested) {
+        await new Promise(r => setTimeout(r, 600));
+      }
+    }
+  } finally {
+    plinkoState.autoCount = 0;
+    plinkoState.autoTotal = 0;
+    plinkoState.autoStopRequested = false;
+    _plinkoUpdateAutoUi();
+  }
+}
+
+function _plinkoUpdateAutoUi() {
+  const counter  = document.getElementById('pl-auto-counter');
+  const progress = document.getElementById('pl-auto-progress');
+  const autoBtn  = document.getElementById('pl-auto-btn');
+  const dropBtn  = document.getElementById('pl-drop-btn');
+  if (!autoBtn) return;
+  if (plinkoState.autoCount > 0) {
+    if (counter) counter.style.display = 'flex';
+    if (progress) {
+      const done = plinkoState.autoTotal - plinkoState.autoCount;
+      progress.textContent = `${done} / ${plinkoState.autoTotal === 9999 ? '∞' : plinkoState.autoTotal}`;
+    }
+    autoBtn.classList.add('active');
+    autoBtn.textContent = '⏸ ОСТАН';
+    if (dropBtn) dropBtn.disabled = true;
+  } else {
+    if (counter) counter.style.display = 'none';
+    autoBtn.classList.remove('active');
+    autoBtn.textContent = '🔁 АВТО';
+    if (dropBtn) dropBtn.disabled = false;
+  }
 }
 
 function pays_max(arr) {
