@@ -438,7 +438,7 @@ async def ensure_dragon_log() -> None:
 # Each skin gets its own rarity tier so colors stay visually distinct.
 
 NATIO_KEY    = "nationality"
-NATIO_PRICE  = 9999
+NATIO_PRICE  = 7499
 NATIO_IMAGE  = "/img/case_natio.png"
 
 NATIO_SKINS: list[dict] = [
