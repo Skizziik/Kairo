@@ -597,6 +597,12 @@ async def get_state(tg_id: int) -> dict:
         row = await conn.fetchrow(
             "select * from snake_users where tg_id = $1", tg_id,
         )
+        # Also pull current casino balance so the client can render a live balance
+        # display (AFK farm credits this in _tick_afk above; without it the UI
+        # would have to make a second /api/me call to learn what changed).
+        bal_row = await conn.fetchrow(
+            "select balance from economy_users where tg_id = $1", tg_id,
+        )
     if row is None:
         return {}
 
@@ -634,6 +640,7 @@ async def get_state(tg_id: int) -> dict:
         "xp":                cur_xp,
         "current_level_xp":  cur_level_xp,
         "next_level_xp":     next_level_xp,
+        "balance":           int(bal_row["balance"]) if bal_row else 0,
         "coins_lifetime":    int(row["coins_lifetime"]),
         "runs_count":        int(row["runs_count"]),
         "total_skins_eaten": int(row["total_skins_eaten"]),

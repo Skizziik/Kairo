@@ -32,17 +32,54 @@
       if (SS.afkRefreshTimer) clearInterval(SS.afkRefreshTimer);
       SS.afkRefreshTimer = setInterval(async () => {
         if (!document.querySelector('.snake-hub')) return;  // user navigated away
+        if (document.querySelector('.snake-game-overlay')) return; // mid-run, don't poke
         try {
-          SS.state = await api('/api/snake/state');
-          if (SS.activeTab === 'play' || SS.activeTab === 'terrarium') {
-            paintHub(true);  // soft refresh
-          }
+          const fresh = await api('/api/snake/state');
+          SS.state = fresh;
+          softRefresh();
         } catch (e) {}
-      }, 30000);
+      }, 5000);
     } catch (e) {
       root.innerHTML = '<div class="loader">Ошибка: ' + escape(e.message) + '</div>';
     }
   };
+
+  // In-place update of "live" numbers without re-rendering tab content.
+  // Lets the AFK farm visibly accumulate every poll without scroll-jump.
+  function softRefresh() {
+    const s = SS.state;
+    if (!s) return;
+    // Top casino balance
+    if (typeof s.balance === 'number' && window.state && window.state.me) {
+      window.state.me.balance = s.balance;
+      const balEl = document.getElementById('balance-display');
+      if (balEl) balEl.textContent = fmt(s.balance);
+    }
+    // Hub stat: AFK rate (lives in the .snake-hub-top grid)
+    const afkStatEl = document.querySelector('[data-snake-stat="afk-rate"]');
+    if (afkStatEl) afkStatEl.textContent = fmt(s.afk_rate_per_min || 0);
+    // Hub stat: lifetime coins
+    const lifeEl = document.querySelector('[data-snake-stat="lifetime"]');
+    if (lifeEl) lifeEl.textContent = fmt(s.coins_lifetime) + ' 🪙';
+    // Terrarium banner — AFK rate, daily cap progress
+    if (SS.activeTab === 'terrarium') {
+      const rateEl = document.querySelector('.snake-afk-rate-value');
+      if (rateEl) rateEl.textContent = fmt((s.afk_rate_per_min || 0).toFixed(1)) + ' / мин';
+      const earnedEl = document.querySelector('.snake-afk-cap-text');
+      const cap = s.afk_cap_today || 1;
+      const earned = s.daily_afk_earned || 0;
+      if (earnedEl) earnedEl.textContent = fmt(earned) + ' / ' + fmt(cap) + ' (дневной кап)';
+      const fillEl = document.querySelector('.snake-afk-cap-fill');
+      if (fillEl) fillEl.style.width = Math.min(100, (earned / cap) * 100) + '%';
+    }
+    // Level XP bar
+    const span = Math.max(1, s.next_level_xp - s.current_level_xp);
+    const cur = Math.max(0, s.xp - s.current_level_xp);
+    const barFill = document.querySelector('.snake-level-bar-fill');
+    if (barFill) barFill.style.width = Math.min(100, (cur / span) * 100) + '%';
+    const xpTxt = document.querySelector('.snake-level-xp');
+    if (xpTxt) xpTxt.textContent = fmt(cur) + ' / ' + fmt(span) + ' XP';
+  }
 
   function paintHub(soft) {
     const root = document.getElementById('snake-app');
@@ -65,7 +102,7 @@
           <div class="snake-hub-top">
             <div class="snake-stat-card">
               <div class="snake-stat-label">Lifetime</div>
-              <div class="snake-stat-value">${fmt(s.coins_lifetime)} 🪙</div>
+              <div class="snake-stat-value" data-snake-stat="lifetime">${fmt(s.coins_lifetime)} 🪙</div>
             </div>
             <div class="snake-stat-card">
               <div class="snake-stat-label">Best run</div>
@@ -77,7 +114,7 @@
             </div>
             <div class="snake-stat-card">
               <div class="snake-stat-label">AFK / мин</div>
-              <div class="snake-stat-value">${fmt(s.afk_rate_per_min || 0)}</div>
+              <div class="snake-stat-value" data-snake-stat="afk-rate">${fmt(s.afk_rate_per_min || 0)}</div>
             </div>
           </div>
           <div class="snake-tabs">
