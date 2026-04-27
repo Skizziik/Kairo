@@ -155,6 +155,7 @@ async def rebalance_all() -> None:
     for key, image_url in [
         ("igor_king_of_mid", "/img/case_igor.png"),
         ("rip",              "/img/case_rip.png"),
+        ("lera_golova",      "/img/case_lera.png"),
     ]:
         try:
             await ensure_case_image(key, image_url)
