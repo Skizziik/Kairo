@@ -348,9 +348,13 @@ h2 {
 }
 
 /* per-rarity border glow */
-.case-tile.rarity-border-covert { box-shadow: 0 0 0 1px var(--r-covert) inset, 0 6px 20px rgba(235,75,75,0.15); }
+.case-tile.rarity-border-consumer         { box-shadow: 0 0 0 1px var(--r-consumer) inset, 0 6px 20px rgba(176,195,217,0.10); }
+.case-tile.rarity-border-industrial       { box-shadow: 0 0 0 1px var(--r-industrial) inset, 0 6px 20px rgba(94,152,217,0.12); }
+.case-tile.rarity-border-mil-spec         { box-shadow: 0 0 0 1px var(--r-milspec) inset, 0 6px 20px rgba(75,105,255,0.15); }
+.case-tile.rarity-border-restricted       { box-shadow: 0 0 0 1px var(--r-restricted) inset, 0 6px 20px rgba(136,71,255,0.18); }
+.case-tile.rarity-border-classified       { box-shadow: 0 0 0 1px var(--r-classified) inset, 0 6px 20px rgba(211,44,230,0.15); }
+.case-tile.rarity-border-covert           { box-shadow: 0 0 0 1px var(--r-covert) inset, 0 6px 20px rgba(235,75,75,0.15); }
 .case-tile.rarity-border-exceedingly_rare { box-shadow: 0 0 0 1px var(--r-exceedingly) inset, 0 6px 24px rgba(228,174,57,0.25); }
-.case-tile.rarity-border-classified { box-shadow: 0 0 0 1px var(--r-classified) inset, 0 6px 20px rgba(211,44,230,0.15); }
 
 /* ===== case preview ===== */
 .back-btn {

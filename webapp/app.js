@@ -231,12 +231,21 @@ function renderCases() {
   }
   const canAfford = c => !!state.me && state.me.balance >= c.price;
 
+  const RARITY_RANK = {
+    consumer: 0, industrial: 1, 'mil-spec': 2, restricted: 3,
+    classified: 4, covert: 5, exceedingly_rare: 6,
+  };
   grid.innerHTML = state.cases.map(c => {
     const preview = (c.preview_items || []).slice(0, 4);
     // Prefer the official CS2 case PNG if seeded; fall back to top-rarity weapon.
     const hero = c.image_url || (preview[0] && preview[0].image_url) || '';
     const isOfficialCase = Boolean(c.image_url);
-    const topRarity = (preview[0] && preview[0].rarity) || 'mil-spec';
+    // Top rarity = highest-ranked rarity present in the preview list (not just preview[0],
+    // which the API sorts by category=weapon first — so knife-only cases would lose
+    // their gold glow because the cheap weapon shows up first).
+    const topRarity = preview.reduce((top, it) =>
+      (RARITY_RANK[it.rarity] ?? -1) > (RARITY_RANK[top] ?? -1) ? it.rarity : top
+    , 'mil-spec');
     const locked = !canAfford(c);
     return `
       <div class="case-tile rarity-border-${topRarity} ${locked ? 'locked' : ''}" data-case-id="${c.id}">
