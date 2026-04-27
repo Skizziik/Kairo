@@ -1321,8 +1321,9 @@ function _plinkoBallsInFlight() {
 }
 
 const PLINKO_BET_PRESETS = [50, 100, 200, 500, 1000];
-const PLINKO_MIN_CLICK_GAP_MS = 90;     // 11 drops/sec max
-const PLINKO_MAX_ACTIVE_BALLS  = 25;    // safety cap to prevent rendering catastrophe
+const PLINKO_MIN_CLICK_GAP_MS = 60;     // ~16 drops/sec hard ceiling
+const PLINKO_MAX_ACTIVE_BALLS  = 40;    // safety cap to prevent rendering catastrophe
+const PLINKO_AUTO_DELAY_MS     = 110;   // ~7-9 drops/sec in auto-mode (incl. API latency)
 
 // Bucket color tier by multiplier value
 function _plinkoBucketTier(m) {
@@ -1519,12 +1520,12 @@ async function _plinkoStartAuto(count) {
       if (!document.querySelector('.plinko-play')) break;  // user navigated away
       plinkoState.autoCount -= 1;
       _plinkoUpdateAutoUi();
-      // _plinkoDrop is fire-and-forget at the network layer (await fetches the
-      // server response, then the ball animates async). 600ms between drops
-      // gives a comfortable cadence without overwhelming the floor.
-      await _plinkoDrop();
+      // Fire-and-forget the drop so the auto loop's pacing is decoupled from
+      // server latency — animation continues async, multiple balls can stack.
+      // Catch any rejection silently so one bad fetch doesn't kill the loop.
+      _plinkoDrop().catch(() => {});
       if (plinkoState.autoCount > 0 && !plinkoState.autoStopRequested) {
-        await new Promise(r => setTimeout(r, 600));
+        await new Promise(r => setTimeout(r, PLINKO_AUTO_DELAY_MS));
       }
     }
   } finally {
