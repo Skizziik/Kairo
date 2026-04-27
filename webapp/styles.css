@@ -5383,8 +5383,30 @@ h2 {
 .tc-tile.locked { background: rgba(0,0,0,0.55); border-color: rgba(255,255,255,0.05); cursor: not-allowed; }
 .tc-tile.locked::after {
   content: "🔒"; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
-  font-size: 18px; opacity: 0.5;
+  font-size: 16px; opacity: 0.5;
 }
+/* Zones — visually suggest which unit fits where */
+.tc-tile.zone-slots {
+  background:
+    repeating-linear-gradient(90deg, rgba(235,75,75,0.06) 0 4px, transparent 4px 8px),
+    rgba(0,0,0,0.18);
+  border-color: rgba(235,75,75,0.15);
+}
+.tc-tile.zone-slots:hover { background: rgba(235,75,75,0.12); border-color: rgba(235,75,75,0.7); border-style: solid; }
+.tc-tile.zone-tables {
+  background:
+    radial-gradient(circle at 50% 50%, rgba(31,122,58,0.18), transparent 70%),
+    rgba(0,0,0,0.10);
+  border-color: rgba(88,224,112,0.2);
+}
+.tc-tile.zone-tables:hover { background: rgba(88,224,112,0.10); border-color: rgba(88,224,112,0.7); border-style: solid; }
+.tc-tile.zone-amenities {
+  background:
+    repeating-linear-gradient(45deg, rgba(90,169,255,0.05) 0 6px, transparent 6px 12px),
+    rgba(0,0,0,0.10);
+  border-color: rgba(90,169,255,0.18);
+}
+.tc-tile.zone-amenities:hover { background: rgba(90,169,255,0.12); border-color: rgba(90,169,255,0.7); border-style: solid; }
 
 /* Door --------------------------------------------------------------- */
 .tc-door {

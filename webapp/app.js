@@ -4700,9 +4700,9 @@ const tycoonState = {
   panelOpen: 'shop',     // shop | bots | bank | decor | null
 };
 
-const TC_GRID_W = 4;     // visual cols (we render up to 4×3 = 12 cells, 4×6=24 endgame)
-const TC_CELL_W = 86;    // base cell width in px (isometric base)
-const TC_CELL_H = 60;    // base cell height (isometric depth)
+const TC_GRID_W = 6;     // ALWAYS 6 cols — wide casino layout. 6 rows max (24 cells).
+const TC_CELL_W = 64;    // narrower cell for 6 cols on phone screens
+const TC_CELL_H = 64;    // square-ish cell for clarity
 
 // ---- VISITOR archetypes ----
 const TC_VISITOR_TYPES = [
@@ -4788,17 +4788,27 @@ function _tcStartVisitorLoop() {
 }
 
 // ---- LAYOUT ----
+// Always 6-wide casino layout. Rows grow vertically as capacity unlocks.
+// Row 0 is the "slot wall" (top), middle rows hold tables, bottom row gets
+// amenities (bar/atm/etc). Capacity = total cells available; rows = ceil(cap/6).
 function _tcGridDims(capacity) {
-  // Layout: prefer wider over deeper, max 6 wide
-  let cols = Math.min(6, Math.max(3, Math.ceil(Math.sqrt(capacity * 1.5))));
-  let rows = Math.ceil(capacity / cols);
+  const cols = TC_GRID_W;
+  const rows = Math.max(1, Math.ceil(capacity / cols));
   return { cols, rows };
 }
 
+// Determine the suggested zone for a given row index. Used for visual styling
+// and the visitor-AI to send NPCs through different paths per zone.
+function _tcZoneForRow(row, totalRows) {
+  if (row === 0) return 'slots';            // top row — slot wall
+  if (row === totalRows - 1 && totalRows > 1) return 'amenities';
+  return 'tables';
+}
+
 function _tcCellPixel(cx, cy, cols) {
-  // Plain grid (not strict isometric) so units stay readable on mobile
-  const x = cx * TC_CELL_W + TC_CELL_W * 0.1;
-  const y = cy * (TC_CELL_H + 14) + TC_CELL_H * 0.2;
+  const gap = 6;
+  const x = cx * (TC_CELL_W + gap);
+  const y = cy * (TC_CELL_H + 18);
   return { x, y };
 }
 
@@ -4880,12 +4890,14 @@ function _tcHudHtml(d) {
 function _tcFloorTilesHtml(cols, rows, capacity) {
   let h = '';
   for (let r = 0; r < rows; r++) {
+    const zone = _tcZoneForRow(r, rows);
     for (let c = 0; c < cols; c++) {
       const idx = r * cols + c;
       const locked = idx >= capacity;
       const p = _tcCellPixel(c, r, cols);
-      h += `<div class="tc-tile ${locked ? 'locked' : ''}" data-cx="${c}" data-cy="${r}"
-              style="left:${p.x}px; top:${p.y}px; width:${TC_CELL_W - 8}px; height:${TC_CELL_H}px"></div>`;
+      h += `<div class="tc-tile zone-${zone} ${locked ? 'locked' : ''}" data-cx="${c}" data-cy="${r}"
+              style="left:${p.x}px; top:${p.y}px; width:${TC_CELL_W}px; height:${TC_CELL_H}px"
+              title="${zone === 'slots' ? 'Слот-зона' : zone === 'tables' ? 'Зал столов' : 'Зона удобств'}"></div>`;
     }
   }
   return h;
@@ -4896,7 +4908,7 @@ function _tcUnitHtml(u, cols) {
   const tray = u.chips_in_tray;
   return `
     <div class="tc-unit kind-${u.kind} tier-${u.tier}" data-uid="${u.id}"
-         style="left:${p.x + 4}px; top:${p.y - 12}px; width:${TC_CELL_W - 16}px; height:${TC_CELL_H + 22}px">
+         style="left:${p.x + 2}px; top:${p.y - 8}px; width:${TC_CELL_W - 4}px; height:${TC_CELL_H + 18}px">
       ${_tcUnitSpriteSvg(u)}
       ${tray > 0 ? `<div class="tc-tray glow"><span class="tc-tray-icon">🎲</span><span class="tc-tray-val">${fmt(tray)}</span></div>` : ''}
       <div class="tc-occ-bar"><div class="tc-occ-fill" style="width:${u.occupancy_pct||0}%"></div></div>
@@ -5058,21 +5070,40 @@ function _tcMaybeSpawnVisitor() {
   const baseRate = 0.6 + d.reputation * 0.35;  // chance per tick
   if (Math.random() > baseRate) return;
   // Cap simultaneous visitors so the floor doesn't get too busy
-  if (tycoonState.liveVisitors.length >= 10) return;
-  // Pick a unit (slot/table) that's not "full" with visitors
-  const candidates = (d.units || []).filter(u => u.kind === 'slot' || u.kind === 'table');
+  if (tycoonState.liveVisitors.length >= 12) return;
+
+  // Count how many visitors are currently engaged with each unit so we can
+  // enforce capacity: slots = 1 visitor max, tables = u.capacity (2..8).
+  const occupancyById = new Map();
+  for (const v of tycoonState.liveVisitors) {
+    if (!v.target) continue;
+    occupancyById.set(v.target.id, (occupancyById.get(v.target.id) || 0) + 1);
+  }
+  const candidates = (d.units || []).filter(u => {
+    if (u.kind !== 'slot' && u.kind !== 'table') return false;
+    const cur = occupancyById.get(u.id) || 0;
+    const cap = (u.kind === 'slot') ? 1 : Math.max(1, u.capacity || 1);
+    return cur < cap;
+  });
   if (candidates.length === 0) return;
-  // Filter out units already visited by max capacity visitors
-  const target = candidates[Math.floor(Math.random() * candidates.length)];
+  // Bias toward higher-tier units a little (better visuals on premium)
+  const weights = candidates.map(u => 1 + (u.tier || 1) * 0.3);
+  const sum = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * sum;
+  let target = candidates[0];
+  for (let i = 0; i < candidates.length; i++) {
+    r -= weights[i];
+    if (r <= 0) { target = candidates[i]; break; }
+  }
   // Pick visitor type based on reputation (5 weight buckets)
   const repBucket = Math.min(4, Math.max(0, Math.floor(d.reputation - 1)));
   const vtypes = TC_VISITOR_TYPES.filter(t => (t.weights[repBucket] || 0) > 0);
   if (vtypes.length === 0) return;
-  const w = vtypes.map(t => t.weights[repBucket]);
-  const sum = w.reduce((a, b) => a + b, 0);
-  let r = Math.random() * sum;
+  const vw = vtypes.map(t => t.weights[repBucket]);
+  const vsum = vw.reduce((a, b) => a + b, 0);
+  let vr = Math.random() * vsum;
   let pick = vtypes[0];
-  for (let i = 0; i < vtypes.length; i++) { r -= w[i]; if (r <= 0) { pick = vtypes[i]; break; } }
+  for (let i = 0; i < vtypes.length; i++) { vr -= vw[i]; if (vr <= 0) { pick = vtypes[i]; break; } }
   _tcSpawnVisitor(pick.key, target);
 }
 

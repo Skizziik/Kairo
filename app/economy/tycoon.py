@@ -37,45 +37,94 @@ log = logging.getLogger(__name__)
 # ============================================================
 
 # (key, name, kind, tier, cost_cash, cost_chips, base_chips_per_sec, capacity, unlock_rep, icon, desc)
+# Capacity = 1 enforces single-visitor at slots; tables hold multiple by spec.
 UNIT_CATALOG: list[dict] = [
-    # ----- SLOTS (stack vertically across tiers) -----
+    # ----- SLOTS (single-visitor each, stacked across tiers) -----
+    {"key": "slot_penny",    "name": "Penny Slot",    "kind": "slot", "tier": 1,
+     "cost_cash": 200,    "cost_chips": 0,     "base_chips_per_sec": 2,    "capacity": 1, "unlock_rep": 0,
+     "icon": "🪙", "description": "Самый дешёвый — для бомжей. 1¢ за вращение."},
     {"key": "slot_basic",    "name": "Slot Basic",    "kind": "slot", "tier": 1,
      "cost_cash": 500,    "cost_chips": 0,     "base_chips_per_sec": 5,    "capacity": 1, "unlock_rep": 0,
      "icon": "🎰", "description": "Старушка-однорукий, копейки но капают всегда"},
     {"key": "slot_lucky7",   "name": "Lucky 7",       "kind": "slot", "tier": 2,
      "cost_cash": 2_500,  "cost_chips": 0,     "base_chips_per_sec": 18,   "capacity": 1, "unlock_rep": 1.0,
      "icon": "7️⃣", "description": "Красные семёрки, любимая бабушек на пенсии"},
+    {"key": "slot_cherry",   "name": "Cherry Bonanza","kind": "slot", "tier": 2,
+     "cost_cash": 3_500,  "cost_chips": 0,     "base_chips_per_sec": 25,   "capacity": 1, "unlock_rep": 1.0,
+     "icon": "🍒", "description": "Вишенки, лимончики — фруктовый рай"},
     {"key": "slot_pirate",   "name": "Pirate Booty",  "kind": "slot", "tier": 3,
      "cost_cash": 8_000,  "cost_chips": 0,     "base_chips_per_sec": 50,   "capacity": 1, "unlock_rep": 1.5,
      "icon": "🏴‍☠️", "description": "Сундук, попугай, x100 на трёх якорях"},
+    {"key": "slot_wildwest", "name": "Wild West",     "kind": "slot", "tier": 3,
+     "cost_cash": 12_000, "cost_chips": 0,     "base_chips_per_sec": 70,   "capacity": 1, "unlock_rep": 1.8,
+     "icon": "🤠", "description": "Шериф, бандиты, кактус — ставка-перестрелка"},
     {"key": "slot_royale",   "name": "Royal Flush",   "kind": "slot", "tier": 4,
      "cost_cash": 25_000, "cost_chips": 0,     "base_chips_per_sec": 150,  "capacity": 1, "unlock_rep": 2.5,
      "icon": "👑", "description": "Премиум для среднего класса"},
+    {"key": "slot_diamond",  "name": "Diamond Reels", "kind": "slot", "tier": 4,
+     "cost_cash": 40_000, "cost_chips": 0,     "base_chips_per_sec": 240,  "capacity": 1, "unlock_rep": 2.8,
+     "icon": "💎", "description": "Сверкающие катушки, премиум-сегмент"},
     {"key": "slot_csgates",  "name": "CS Gates",      "kind": "slot", "tier": 5,
      "cost_cash": 80_000, "cost_chips": 0,     "base_chips_per_sec": 400,  "capacity": 1, "unlock_rep": 3.5,
      "icon": "💣", "description": "Тематический под наш main-game CS Gates"},
+    {"key": "slot_cosmic",   "name": "Cosmic Spin",   "kind": "slot", "tier": 6,
+     "cost_cash": 250_000,"cost_chips": 0,     "base_chips_per_sec": 1100, "capacity": 1, "unlock_rep": 4.0,
+     "icon": "🌌", "description": "Вселенский множитель — ×∞ кошелёк"},
+    {"key": "slot_blackdiamond", "name": "Black Diamond", "kind": "slot", "tier": 7,
+     "cost_cash": 800_000,"cost_chips": 0,     "base_chips_per_sec": 3200, "capacity": 1, "unlock_rep": 4.5,
+     "icon": "🖤", "description": "Только для китов. Минимальная ставка — твой бывший автомобиль"},
 
-    # ----- TABLES (multi-seat) -----
+    # ----- TABLES (multi-seat: capacity = simultaneous players) -----
     {"key": "tbl_coinflip",  "name": "Стол Coinflip", "kind": "table", "tier": 2,
      "cost_cash": 5_000,  "cost_chips": 0,     "base_chips_per_sec": 25,   "capacity": 2, "unlock_rep": 1.0,
      "icon": "🪙", "description": "Простейшая дуэль 1v1"},
+    {"key": "tbl_craps",     "name": "Craps",         "kind": "table", "tier": 2,
+     "cost_cash": 12_000, "cost_chips": 0,     "base_chips_per_sec": 80,   "capacity": 4, "unlock_rep": 1.5,
+     "icon": "🎲", "description": "Зелёный стол с двумя костями. Орущие игроки в комплекте"},
     {"key": "tbl_roulette",  "name": "Рулетка",       "kind": "table", "tier": 3,
      "cost_cash": 30_000, "cost_chips": 0,     "base_chips_per_sec": 200,  "capacity": 6, "unlock_rep": 2.0,
      "icon": "🎡", "description": "Классика, 6 мест, красное-чёрное-зелёное"},
+    {"key": "tbl_3card",     "name": "Three-Card Poker", "kind": "table", "tier": 3,
+     "cost_cash": 35_000, "cost_chips": 0,     "base_chips_per_sec": 250,  "capacity": 4, "unlock_rep": 2.2,
+     "icon": "🃏", "description": "3 карты в руке, дилер vs игрок. Быстро и дёшево."},
     {"key": "tbl_blackjack", "name": "Блэкджек",      "kind": "table", "tier": 4,
      "cost_cash": 50_000, "cost_chips": 0,     "base_chips_per_sec": 320,  "capacity": 4, "unlock_rep": 2.5,
      "icon": "🃏", "description": "21, дилер раздаёт без устали"},
+    {"key": "tbl_sicbo",     "name": "Sic Bo",        "kind": "table", "tier": 4,
+     "cost_cash": 65_000, "cost_chips": 0,     "base_chips_per_sec": 420,  "capacity": 5, "unlock_rep": 2.8,
+     "icon": "🎯", "description": "Три кости в стакане. Азиатская классика"},
     {"key": "tbl_poker_vip", "name": "Покер VIP",     "kind": "table", "tier": 5,
      "cost_cash": 200_000,"cost_chips": 0,     "base_chips_per_sec": 1500, "capacity": 6, "unlock_rep": 3.5,
      "icon": "♠", "description": "Высокие ставки, заходят только хайроллеры"},
+    {"key": "tbl_texas",     "name": "Texas Hold'em", "kind": "table", "tier": 5,
+     "cost_cash": 280_000,"cost_chips": 0,     "base_chips_per_sec": 2000, "capacity": 8, "unlock_rep": 3.7,
+     "icon": "♥", "description": "Турнирный покер. По 8 человек на столе"},
+    {"key": "tbl_baccarat",  "name": "Baccarat VIP",  "kind": "table", "tier": 6,
+     "cost_cash": 600_000,"cost_chips": 0,     "base_chips_per_sec": 4500, "capacity": 8, "unlock_rep": 4.2,
+     "icon": "♦", "description": "Любимая Джеймса Бонда. Только смокинг и галстук"},
 
-    # ----- AMENITIES (don't generate chips directly, boost others) -----
+    # ----- AMENITIES (boost reputation / visitor wallets, no direct chips) -----
+    {"key": "amen_reception","name": "Ресепшн",       "kind": "amenity", "tier": 1,
+     "cost_cash": 5_000,  "cost_chips": 0,     "base_chips_per_sec": 0,    "capacity": 2, "unlock_rep": 0.5,
+     "icon": "🛎",  "description": "Встречает гостей. Базовая репутация"},
     {"key": "amen_bar",      "name": "Бар",           "kind": "amenity", "tier": 2,
      "cost_cash": 15_000, "cost_chips": 0,     "base_chips_per_sec": 0,    "capacity": 4, "unlock_rep": 1.5,
-     "icon": "🍸", "description": "+20% к среднему кошельку гостя (через repu)"},
+     "icon": "🍸", "description": "+20% к среднему кошельку гостя"},
+    {"key": "amen_smoke",    "name": "Курилка",       "kind": "amenity", "tier": 2,
+     "cost_cash": 18_000, "cost_chips": 0,     "base_chips_per_sec": 0,    "capacity": 3, "unlock_rep": 1.2,
+     "icon": "🚬", "description": "Гости задерживаются дольше"},
     {"key": "amen_atm",      "name": "Банкомат",      "kind": "amenity", "tier": 2,
      "cost_cash": 25_000, "cost_chips": 0,     "base_chips_per_sec": 0,    "capacity": 1, "unlock_rep": 2.0,
      "icon": "🏧", "description": "Гости тратят больше; +reputation"},
+    {"key": "amen_cafe",     "name": "Кафе",          "kind": "amenity", "tier": 3,
+     "cost_cash": 60_000, "cost_chips": 0,     "base_chips_per_sec": 0,    "capacity": 6, "unlock_rep": 2.5,
+     "icon": "☕", "description": "Кофе, круассаны — VIP кофе-брейк"},
+    {"key": "amen_restaurant","name": "Ресторан",     "kind": "amenity", "tier": 4,
+     "cost_cash": 200_000,"cost_chips": 0,     "base_chips_per_sec": 0,    "capacity": 8, "unlock_rep": 3.0,
+     "icon": "🍽", "description": "Высокая кухня. Привлекает китов"},
+    {"key": "amen_stage",    "name": "Концертная сцена","kind": "amenity", "tier": 5,
+     "cost_cash": 500_000,"cost_chips": 0,     "base_chips_per_sec": 0,    "capacity": 1, "unlock_rep": 3.8,
+     "icon": "🎤", "description": "Шоу каждый вечер. Прилив зрителей"},
     {"key": "amen_vip",      "name": "VIP-зона",      "kind": "amenity", "tier": 5,
      "cost_cash": 1_000_000, "cost_chips": 0,  "base_chips_per_sec": 0,    "capacity": 1, "unlock_rep": 4.0,
      "icon": "🌟", "description": "Открывает приток китов; огромный реп-бонус"},
@@ -793,8 +842,8 @@ async def buy_unit(user_id: int, unit_key: str, cell_x: int, cell_y: int) -> dic
                 return {"ok": False, "error": "Unknown unit"}
             state = await conn.fetchrow("select * from tycoon_state where user_id = $1 for update", user_id)
             cap = int(state["floor_capacity"])
-            # Validate cell
-            grid_w = 3 if cap <= 6 else 4 if cap <= 12 else 5 if cap <= 20 else 6
+            # Wide casino layout — always 6 columns, capacity grows by adding rows.
+            grid_w = 6
             if cell_x < 0 or cell_y < 0 or cell_x >= grid_w:
                 return {"ok": False, "error": "Cell out of bounds"}
             placed_count = await conn.fetchval(
