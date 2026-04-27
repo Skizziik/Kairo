@@ -145,7 +145,7 @@ async def rebalance_all() -> None:
         ("knife_or_nothing", 1399),
         ("igor_king_of_mid",  949),
         ("lera_golova",      1599),
-        ("rip",              8999),
+        ("rip",              6999),
     ]:
         try:
             await ensure_case_price(key, price)
@@ -154,6 +154,7 @@ async def rebalance_all() -> None:
     # Custom case images uploaded by the operator (in webapp/img/)
     for key, image_url in [
         ("igor_king_of_mid", "/img/case_igor.png"),
+        ("rip",              "/img/case_rip.png"),
     ]:
         try:
             await ensure_case_image(key, image_url)
