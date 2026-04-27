@@ -30,3 +30,8 @@ alter table economy_inventory
     add column if not exists coinflip_lobby_id bigint references coinflip_lobbies(id) on delete set null;
 
 create index if not exists idx_inventory_cf_lock on economy_inventory (coinflip_lobby_id) where coinflip_lobby_id is not null;
+
+-- Remember the chat invitation so it can be deleted once the lobby resolves.
+alter table coinflip_lobbies
+    add column if not exists invite_chat_id     bigint,
+    add column if not exists invite_message_id  bigint;

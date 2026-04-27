@@ -329,6 +329,11 @@ async def join_lobby(opponent_id: int, lobby_id: int, inv_ids: list[int]) -> dic
             row = await conn.fetchrow("select * from coinflip_lobbies where id = $1", lobby_id)
             lobby = _row_to_lobby(dict(row))
             enriched = await _enrich_lobby(conn, lobby)
+            invite_chat = row.get("invite_chat_id") if hasattr(row, "get") else row["invite_chat_id"]
+            invite_msg  = row.get("invite_message_id") if hasattr(row, "get") else row["invite_message_id"]
+
+    # Delete the group-chat invitation since the lobby is now resolved
+    await _delete_invite_message(invite_chat, invite_msg)
 
     # Retention hooks (outside the tx)
     try:
@@ -364,6 +369,7 @@ def _seed_to_unit_float(seed: str) -> float:
 # ============================================================
 
 async def cancel_lobby(creator_id: int, lobby_id: int) -> dict:
+    invite_chat = invite_msg = None
     async with pool().acquire() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
@@ -375,6 +381,8 @@ async def cancel_lobby(creator_id: int, lobby_id: int) -> dict:
                 return {"ok": False, "error": "Это не твоё лобби"}
             if row["status"] != "open":
                 return {"ok": False, "error": "Лобби уже неактивно"}
+            invite_chat = row["invite_chat_id"]
+            invite_msg  = row["invite_message_id"]
             # Unlock skins
             await conn.execute(
                 "update economy_inventory set coinflip_lobby_id = null where coinflip_lobby_id = $1",
@@ -384,6 +392,7 @@ async def cancel_lobby(creator_id: int, lobby_id: int) -> dict:
                 "update coinflip_lobbies set status = 'cancelled' where id = $1",
                 lobby_id,
             )
+    await _delete_invite_message(invite_chat, invite_msg)
     return {"ok": True}
 
 
@@ -399,14 +408,18 @@ async def expire_old() -> int:
     rows — the bot "sells" stale offers and rotates fresh stock.
     Real-user lobbies just have their lock cleared so the player gets skins back.
     """
+    invites_to_delete: list[tuple[int, int]] = []
     async with pool().acquire() as conn:
         async with conn.transaction():
             rows = await conn.fetch(
-                "select id, creator_id from coinflip_lobbies "
+                "select id, creator_id, invite_chat_id, invite_message_id from coinflip_lobbies "
                 "where status = 'open' and expires_at < now() for update",
             )
             if not rows:
                 return 0
+            for r in rows:
+                if r["invite_chat_id"] and r["invite_message_id"]:
+                    invites_to_delete.append((int(r["invite_chat_id"]), int(r["invite_message_id"])))
             bot_lobby_ids   = [int(r["id"]) for r in rows if int(r["creator_id"]) == BOT_USER_ID]
             human_lobby_ids = [int(r["id"]) for r in rows if int(r["creator_id"]) != BOT_USER_ID]
             if bot_lobby_ids:
@@ -425,6 +438,8 @@ async def expire_old() -> int:
                 "update coinflip_lobbies set status = 'expired' where id = any($1::bigint[])",
                 all_ids,
             )
+    for chat_id, message_id in invites_to_delete:
+        await _delete_invite_message(chat_id, message_id)
     return len(rows)
 
 
@@ -484,7 +499,12 @@ async def get_lobby(lobby_id: int) -> dict | None:
 # SHARE TO CHAT (one-shot per lobby)
 # ============================================================
 
-async def mark_invited_to_chat(lobby_id: int, creator_id: int) -> dict:
+async def mark_invited_to_chat(
+    lobby_id: int, creator_id: int,
+    chat_id: int | None = None, message_id: int | None = None,
+) -> dict:
+    """Mark the lobby as having sent its chat invitation, plus remember the
+    Telegram message_id so we can delete it once the lobby resolves."""
     async with pool().acquire() as conn:
         async with conn.transaction():
             r = await conn.fetchrow(
@@ -500,10 +520,24 @@ async def mark_invited_to_chat(lobby_id: int, creator_id: int) -> dict:
             if r["invited_to_chat"]:
                 return {"ok": False, "error": "Приглашение уже отправлялось"}
             await conn.execute(
-                "update coinflip_lobbies set invited_to_chat = true where id = $1",
-                lobby_id,
+                "update coinflip_lobbies set invited_to_chat = true, "
+                "invite_chat_id = $2, invite_message_id = $3 "
+                "where id = $1",
+                lobby_id, chat_id, message_id,
             )
     return {"ok": True}
+
+
+async def _delete_invite_message(chat_id: int | None, message_id: int | None) -> None:
+    """Best-effort delete the lobby's group-chat invitation message."""
+    if not chat_id or not message_id:
+        return
+    try:
+        from app.bot import get_bot
+        bot = get_bot()
+        await bot.delete_message(int(chat_id), int(message_id))
+    except Exception as e:
+        log.debug("coinflip: failed to delete invite message: %s", e)
 
 
 # ============================================================

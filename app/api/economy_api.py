@@ -962,11 +962,6 @@ async def api_cf_share(req: CFLobbyIdReq, user: dict = Depends(require_user)) ->
     if lobby["status"] != "open":
         raise HTTPException(status_code=400, detail="Лобби уже неактивно")
 
-    # Mark as invited (idempotent — second call returns ok=False)
-    mark = await _cfpvp.mark_invited_to_chat(int(req.lobby_id), tg_id)
-    if not mark.get("ok"):
-        return mark
-
     # Compose message + send to group via bot
     from app.bot import get_bot
     from app.config import get_settings
@@ -980,7 +975,6 @@ async def api_cf_share(req: CFLobbyIdReq, user: dict = Depends(require_user)) ->
     value = int(lobby.get("creator_value") or 0)
 
     # Build deep-link to mini app with start_param so the receiver auto-opens this lobby
-    # Format: t.me/<bot>/<app>?startapp=cf_<id>  (Telegram passes start_param to webapp)
     if s.miniapp_tme_url:
         deep_link = f"{s.miniapp_tme_url}?startapp=cf_{int(req.lobby_id)}"
     else:
@@ -996,8 +990,17 @@ async def api_cf_share(req: CFLobbyIdReq, user: dict = Depends(require_user)) ->
         f"Кто рискнёт?"
     )
     try:
-        await bot.send_message(s.tg_allowed_chat_id, text, reply_markup=keyboard)
+        sent = await bot.send_message(s.tg_allowed_chat_id, text, reply_markup=keyboard)
     except Exception as e:
         log.warning("coinflip share send_message failed: %s", e)
         return {"ok": False, "error": "Не удалось отправить в чат"}
+    # Mark as invited only AFTER message is sent — preserves message_id so
+    # we can delete it once the lobby resolves (settle/cancel/expire).
+    mark = await _cfpvp.mark_invited_to_chat(
+        int(req.lobby_id), tg_id,
+        chat_id=int(s.tg_allowed_chat_id),
+        message_id=int(sent.message_id),
+    )
+    if not mark.get("ok"):
+        return mark
     return {"ok": True}
