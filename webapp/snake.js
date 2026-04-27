@@ -314,7 +314,7 @@
 
     // Initial speed (slow_start makes it slower)
     const slowStartLvl = Number(upgrades.slow_start || 0);
-    G.tickMs = 200 + slowStartLvl * 6;  // 200 → 260ms
+    G.tickMs = 160 + slowStartLvl * 6;  // 160 → 220ms — faster default for snappier turns
 
     // Spawn obstacles
     const totalObs = mapCfg.obstacles + mapCfg.moving;
@@ -340,10 +340,26 @@
     }
 
     // ----- input -----
+    // Fast-forward: when player turns and we're past the halfway point of the
+    // current tick, we collapse the rest of the tick so the turn happens
+    // ~immediately. Cuts felt input lag from up-to-200ms to ≤80ms without
+    // breaking physics (player still moves the same cells, just earlier).
     const setDir = (dx, dy) => {
       // Prevent 180° flip
       if (dx === -snake.dir.x && dy === -snake.dir.y) return;
+      // Same direction = no-op (don't fast-forward, player just held)
+      if (dx === snake.dir.x && dy === snake.dir.y) {
+        snake.pendingDir = { x: dx, y: dy };
+        return;
+      }
       snake.pendingDir = { x: dx, y: dy };
+      const now = performance.now();
+      const elapsed = now - G.lastMoveAt;
+      if (elapsed >= G.tickMs * 0.5) {
+        // past halfway — pretend tickMs has fully elapsed so the next loop
+        // iteration runs the move immediately
+        G.lastMoveAt = now - G.tickMs;
+      }
     };
 
     const keyHandler = (e) => {
