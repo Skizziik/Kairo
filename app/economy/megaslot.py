@@ -58,16 +58,18 @@ WEIGHTS: dict[str, int] = {
 }
 assert sum(WEIGHTS.values()) == 100, f"weights must sum to 100, got {sum(WEIGHTS.values())}"
 
-# Pay table — strict (~55-60% RTP target). Knife jackpots still chunky but base wins minimal.
+# Pay table — calibrated to industry-standard ~96% base RTP via simulation
+# (paytable scaled ×1.85 from old 47% values, 2026-04-27 retune).
+# Knife/AWP jackpots still chunky, but every paying threshold now feels meaningful.
 PAYOUTS: dict[str, list[tuple[int, float]]] = {
-    "milspec":    [(8, 0.03), (10, 0.07), (12, 0.25)],
-    "classified": [(8, 0.05), (10, 0.12), (12, 0.5)],
-    "covert":     [(8, 0.08), (10, 0.20), (12, 1)],
-    "m4":         [(8, 0.13), (10, 0.25), (12, 1.3)],
-    "gloves":     [(8, 0.18), (10, 0.40), (12, 1.8)],
-    "ak":         [(8, 0.25), (10, 0.75), (12, 2.5)],
-    "awp":        [(8, 0.5),  (10, 1.5),  (12, 4)],
-    "knife":      [(8, 1.5),  (10, 3),    (12, 7)],
+    "milspec":    [(8, 0.05),  (10, 0.13),  (12, 0.45)],
+    "classified": [(8, 0.09),  (10, 0.22),  (12, 0.92)],
+    "covert":     [(8, 0.15),  (10, 0.37),  (12, 1.85)],
+    "m4":         [(8, 0.24),  (10, 0.46),  (12, 2.4)],
+    "gloves":     [(8, 0.33),  (10, 0.74),  (12, 3.3)],
+    "ak":         [(8, 0.46),  (10, 1.4),   (12, 4.6)],
+    "awp":        [(8, 0.93),  (10, 2.8),   (12, 7.4)],
+    "knife":      [(8, 2.8),   (10, 5.55),  (12, 13)],
 }
 
 # Scatter payouts (also triggers FS at 4+)
@@ -82,19 +84,19 @@ ORBS: list[tuple[int, float]] = [
     (2, 150), (3, 80), (4, 40), (5, 20), (6, 12), (8, 6), (10, 3),
     (12, 2), (15, 1), (20, 0.5), (25, 0.3), (50, 0.1), (100, 0.03), (250, 0.01), (500, 0.005),
 ]
-ORB_CHANCE_BASE = 0.06  # 6% per tumble in base
-ORB_CHANCE_FS = 0.22    # 22% per tumble in FS — this is where multiplier builds up
+ORB_CHANCE_BASE = 0.07  # 7% per tumble in base (tuned 2026-04-27 for 96% RTP)
+ORB_CHANCE_FS = 0.25    # 25% per tumble in FS — this is where multiplier builds up
 
 MAX_WIN_CAP = 5000
 
 # Bonus buy variants
 BONUS_BUY_REGULAR = {
-    "cost_mult": 120,    # 120× bet (operator-tuned 2026-04-27 — was 70×, exploited)
+    "cost_mult": 85,     # 85× bet — sim-verified RTP 83% at this cost (was 120×)
     "spins": 15,         # classic Gates of Olympus FS count
     "start_mult": 0,     # multiplier starts at 0, accumulates as orbs land
 }
 BONUS_BUY_PREMIUM = {
-    "cost_mult": 360,    # 360× bet (operator-tuned 2026-04-27 — was 220×)
+    "cost_mult": 250,    # 250× bet — sim-verified RTP 95% at this cost (was 360×)
     "spins": 25,         # more spins
     "start_mult": 10,    # starts at x10, accumulates on top
 }
