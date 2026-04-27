@@ -919,12 +919,12 @@ from app.economy import coinflip_pvp as _cfpvp
 
 
 class CFCreateReq(BaseModel):
-    inventory_ids: list[int] = Field(..., min_length=1, max_length=20)
+    inventory_ids: list[int] = Field(..., min_length=1, max_length=500)
 
 
 class CFJoinReq(BaseModel):
     lobby_id: int = Field(..., ge=1)
-    inventory_ids: list[int] = Field(..., min_length=1, max_length=20)
+    inventory_ids: list[int] = Field(..., min_length=1, max_length=500)
 
 
 class CFLobbyIdReq(BaseModel):

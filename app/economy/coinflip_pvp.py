@@ -154,8 +154,8 @@ async def _enrich_lobby(conn, lobby: dict) -> dict:
 async def create_lobby(creator_id: int, inv_ids: list[int]) -> dict:
     if not inv_ids:
         return {"ok": False, "error": "Выбери хотя бы один скин"}
-    if len(inv_ids) > 20:
-        return {"ok": False, "error": "Максимум 20 предметов"}
+    if len(inv_ids) > 500:
+        return {"ok": False, "error": "Максимум 500 предметов"}
     inv_ids = list({int(x) for x in inv_ids})
 
     async with pool().acquire() as conn:
@@ -212,8 +212,8 @@ async def create_lobby(creator_id: int, inv_ids: list[int]) -> dict:
 async def join_lobby(opponent_id: int, lobby_id: int, inv_ids: list[int]) -> dict:
     if not inv_ids:
         return {"ok": False, "error": "Выбери скины для матча"}
-    if len(inv_ids) > 20:
-        return {"ok": False, "error": "Максимум 20 предметов"}
+    if len(inv_ids) > 500:
+        return {"ok": False, "error": "Максимум 500 предметов"}
     inv_ids = list({int(x) for x in inv_ids})
 
     async with pool().acquire() as conn:

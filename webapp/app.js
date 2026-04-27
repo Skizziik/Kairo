@@ -58,12 +58,24 @@ async function api(path, options = {}) {
       clearTimeout(timeoutId);
       if (!resp.ok) {
         // Try to surface the real error: JSON detail first, then plain text body,
-        // finally just the status. This lets us see "ForeignKeyViolationError ..."
-        // instead of an opaque "Load failed".
+        // finally just the status. Format Pydantic 422 detail arrays nicely
+        // ("body.inventory_ids: max 20 items" instead of "[object Object]").
         let detail;
         try {
           const j = await resp.json();
-          detail = j.detail || (typeof j === 'string' ? j : JSON.stringify(j));
+          let d = j.detail;
+          if (Array.isArray(d)) {
+            detail = d.map(e => {
+              const loc = Array.isArray(e.loc) ? e.loc.filter(p => p !== 'body').join('.') : '';
+              return (loc ? loc + ': ' : '') + (e.msg || JSON.stringify(e));
+            }).join('; ');
+          } else if (typeof d === 'string') {
+            detail = d;
+          } else if (d) {
+            detail = JSON.stringify(d);
+          } else {
+            detail = (typeof j === 'string') ? j : JSON.stringify(j);
+          }
         } catch (_) {
           try { detail = (await resp.text()).slice(0, 300); } catch (__) { detail = resp.statusText; }
         }
@@ -2022,10 +2034,27 @@ function _cfPaintCreate(area) {
       const id = parseInt(el.dataset.invId);
       if (cfState.selectedIds.has(id)) cfState.selectedIds.delete(id);
       else cfState.selectedIds.add(id);
-      _cfPaintCreate(area);
+      el.classList.toggle('selected');
+      _cfUpdateCreateTotals(usable);
     });
   });
   document.getElementById('cf-create-confirm').addEventListener('click', () => _cfCreateConfirm(area));
+}
+
+// In-place updater for the create-flow header + button (no scroll-jump).
+function _cfUpdateCreateTotals(usable) {
+  const total = _cfSelectedTotal(usable);
+  const count = cfState.selectedIds.size;
+  const summary = document.querySelector('.cf-create-summary');
+  if (summary) {
+    const firstLine = summary.firstElementChild || summary.querySelector('div');
+    if (firstLine) firstLine.innerHTML = `Выбрано: <b>${count}</b> · Сумма: <b class="gold">${fmt(total)} 🪙</b>`;
+  }
+  const btn = document.getElementById('cf-create-confirm');
+  if (btn) {
+    btn.disabled = count === 0;
+    btn.textContent = `⚔️ Создать (${fmt(total)} 🪙)`;
+  }
 }
 
 function _cfSelectedTotal(items) {
@@ -2226,16 +2255,22 @@ function _cfRenderJoinFlow(area, lobby) {
   `;
 
   document.getElementById('cf-back').addEventListener('click', () => renderCfPvp(area));
+  // Item-click handler: instead of a full re-render (which destroys scroll
+  // position), just toggle the .selected class on the clicked tile and
+  // recompute the totals/button state in place.
   area.querySelectorAll('.cf-inv-item[data-inv-id]').forEach(el => {
     el.addEventListener('click', () => {
       const id = parseInt(el.dataset.invId);
       if (cfState.selectedIds.has(id)) cfState.selectedIds.delete(id);
       else cfState.selectedIds.add(id);
-      _cfRenderJoinFlow(area, lobby);
+      el.classList.toggle('selected');
+      _cfUpdateJoinTotals(usable, lobby, lo, hi);
     });
   });
   document.getElementById('cf-join-confirm').addEventListener('click', async () => {
-    if (!inRange) return;
+    const myTotalNow = _cfSelectedTotal(usable);
+    const inRangeNow = (myTotalNow >= lo && myTotalNow <= hi && cfState.selectedIds.size > 0);
+    if (!inRangeNow) return;
     const ids = Array.from(cfState.selectedIds);
     try {
       const r = await api('/api/pvp/coinflip/join', { method: 'POST', body: JSON.stringify({ lobby_id: lobby.id, inventory_ids: ids }) });
@@ -2246,6 +2281,26 @@ function _cfRenderJoinFlow(area, lobby) {
       _cfRenderAnimation(area, r.lobby, creatorWon, /*spectatorMode*/ false);
     } catch (e) { toast(e.message); }
   });
+}
+
+// In-place updater for the VS row totals + join button. Called from the
+// item-click handler instead of doing a full re-paint.
+function _cfUpdateJoinTotals(usable, lobby, lo, hi) {
+  const myTotal = _cfSelectedTotal(usable);
+  const inRange = myTotal >= lo && myTotal <= hi && cfState.selectedIds.size > 0;
+  const myValEl = document.querySelectorAll('.cf-vs-value');
+  if (myValEl && myValEl.length >= 2) {
+    const target = myValEl[myValEl.length - 1];
+    target.textContent = `${fmt(myTotal)} 🪙`;
+    target.classList.toggle('gold', inRange);
+    target.classList.toggle('danger', !inRange);
+  }
+  const btn = document.getElementById('cf-join-confirm');
+  if (btn) {
+    btn.classList.toggle('disabled', !inRange);
+    btn.disabled = !inRange;
+    btn.textContent = `⚔️ Принять вызов (${fmt(myTotal)} 🪙)`;
+  }
 }
 
 // ---------------- AVATARS (deterministic by tg_id) ----------------
