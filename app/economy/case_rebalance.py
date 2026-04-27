@@ -151,6 +151,14 @@ async def rebalance_all() -> None:
             await ensure_case_price(key, price)
         except Exception as e:
             log.warning("price update %s failed: %s", key, e)
+    # Custom case images uploaded by the operator (in webapp/img/)
+    for key, image_url in [
+        ("igor_king_of_mid", "/img/case_igor.png"),
+    ]:
+        try:
+            await ensure_case_image(key, image_url)
+        except Exception as e:
+            log.warning("image update %s failed: %s", key, e)
 
 
 # ============================================================
