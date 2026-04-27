@@ -769,6 +769,13 @@ async def record_run(
     coins *= greed_mult * total_mult * um_mult * daily_bonus_mult
     coins = int(coins)
 
+    # Recovery upgrade — adds back % of run earnings as a death bonus.
+    # Description: "% от заработка возвращается после смерти" → flat reward
+    # on top of computed coins. 5%/lvl → +50% at lvl 10.
+    recovery_lvl = int(upgrades.get("recovery", 0))
+    if recovery_lvl > 0 and died_to != "manual":
+        coins = int(coins * (1 + recovery_lvl * 0.05))
+
     # Anti-cheat: max coins per second
     max_allowed = int(MAX_COINS_PER_SECOND * max(1, duration_sec))
     if coins > max_allowed:

@@ -340,11 +340,11 @@
 
     // Initial speed (slow_start makes it slower)
     const slowStartLvl = Number(upgrades.slow_start || 0);
-    // 90ms tick = ~11 cells/sec. Worst-case input lag = 90ms (one tick), which
-    // is short enough that grid-lag stops being noticeable. Earlier attempts
-    // at fast-forward broke interpolation (visual snake "jumped"), pure-tick
-    // wins for stability.
-    G.tickMs = 90 + slowStartLvl * 5;
+    // 130ms = ~7.7 cells/sec — comfortable speed. The "instant turn feel" is
+    // achieved by rotating the head/eye visually toward pendingDir as soon as
+    // input arrives (see render), even though body movement still resolves
+    // at grid boundaries. Player gets responsive feedback without speed-up.
+    G.tickMs = 130 + slowStartLvl * 5;
 
     // Spawn obstacles
     const totalObs = mapCfg.obstacles + mapCfg.moving;
@@ -439,7 +439,6 @@
       if (G.modeCfg.key === 'survival') {
         const elapsed = (now - G.startedAt) / 1000;
         G.survivalScale = 1 + Math.floor(elapsed / 60) * 0.2;
-        // Spawn extra obstacle every minute
         if (elapsed > G.lastSurvivalSpawn + 60) {
           G.lastSurvivalSpawn = elapsed;
           const o = randomEmptyCell(G, snake);
@@ -447,8 +446,56 @@
         }
       }
 
-      // Move snake at tickMs cadence
-      if (now - G.lastMoveAt >= G.tickMs) {
+      // Treasure pulse: every 30s arm a "next eat is doubled" charge if there
+      // are pulses-left on this run. Charge is consumed in eatFood.
+      if (G.treasurePulsesLeft > 0 && !G.treasurePulseReady &&
+          now - G.lastTreasurePulseAt >= 30000) {
+        G.treasurePulseReady = true;
+        G.lastTreasurePulseAt = now;
+        G.treasurePulsesLeft -= 1;
+        // Visual cue
+        G.popups.push({
+          x: ctx.canvas.width / 2, y: 30,
+          text: '✨ Treasure Pulse — next eat ×2',
+          color: '#ffd700', t0: now,
+        });
+      }
+
+      // Decrement ghost mode (active for ghost_mode lvl seconds at run start)
+      if (G.ghostMs > 0) {
+        G.ghostMs = Math.max(0, G.ghostMs - 16);
+      }
+
+      // Effective tick rate is modulated by:
+      //   ghostMs (no effect on speed, just invulnerability)
+      //   timeSlow (slow during/after a crit, multiplies tickMs)
+      //   throttle (auto-slow when wall ahead — uses charges)
+      //   burst   (auto-fast after eating rare — uses charges)
+      let effectiveTickMs = G.tickMs;
+      if (G.timeSlowUntil && now < G.timeSlowUntil) {
+        effectiveTickMs *= (G.timeSlowMult || 1);
+      }
+      if (G.burstActiveUntil && now < G.burstActiveUntil) {
+        effectiveTickMs *= 0.6;          // 67% faster during burst
+      }
+      // Throttle: if upgraded and we're about to wall, slow down
+      if (G.throttleSec > 0 && !G._throttleSpent) {
+        const ahead = { x: snake.cells[0].x + snake.dir.x * 2, y: snake.cells[0].y + snake.dir.y * 2 };
+        const wallAhead = ahead.x < 0 || ahead.x >= G.size || ahead.y < 0 || ahead.y >= G.size;
+        if (wallAhead) {
+          if (!G.throttleActiveUntil || now > G.throttleActiveUntil) {
+            G.throttleActiveUntil = now + 800;
+            G.throttleSec -= 1;
+            if (G.throttleSec <= 0) G._throttleSpent = true;
+          }
+        }
+      }
+      if (G.throttleActiveUntil && now < G.throttleActiveUntil) {
+        effectiveTickMs *= 1.6;          // 60% slower during throttle
+      }
+
+      // Move snake at effectiveTickMs cadence
+      if (now - G.lastMoveAt >= effectiveTickMs) {
         G.lastMoveAt = now;
         // Snapshot positions BEFORE moving — render uses these as the "from"
         // anchor for interpolation, so the snake glides smoothly between cells
@@ -457,41 +504,111 @@
         snake.dir = snake.pendingDir;
         const head = { x: snake.cells[0].x + snake.dir.x, y: snake.cells[0].y + snake.dir.y };
 
-        // Wall collision
+        // Track visited cells for layout_memory (fade obstacles where snake has been)
+        if (Number(G.upgrades.layout_memory || 0) > 0) {
+          for (const c of snake.cells) G.visited.add(c.x + ',' + c.y);
+        }
+        // Reset consecutive-eats streak if turning sharply (lazy, no loss for simply moving)
+        // Actually streak resets only on death — never here.
+
+        // Save-token helper: when about to die, try quantum_leap then pause_token
+        // then extra_life. Returns true if saved (caller continues without dying).
+        const trySave = (whatKilled) => {
+          // 1. Quantum leap: teleport head 3 cells forward, skipping the obstacle/wall
+          if (G.leapLeft > 0) {
+            G.leapLeft -= 1;
+            // Pick a teleport target 3 cells ahead in current dir, clamped to grid,
+            // skipping any cell that would land on snake/obstacle.
+            for (let off = 3; off >= 1; off--) {
+              const tx = snake.cells[0].x + snake.dir.x * off;
+              const ty = snake.cells[0].y + snake.dir.y * off;
+              if (tx < 0 || tx >= G.size || ty < 0 || ty >= G.size) continue;
+              const onSelf = snake.cells.some(c => c.x === tx && c.y === ty);
+              const onObs = G.obstacles.some(o => o.x === tx && o.y === ty);
+              if (onSelf || onObs) continue;
+              snake.cells.unshift({ x: tx, y: ty });
+              snake.cells.pop();
+              snake.prevCells = snake.cells.map(c => ({ x: c.x, y: c.y }));
+              flash(G);
+              return true;
+            }
+          }
+          // 2. Extra life: full reset to center, half length
+          if (G.livesLeft > 0) {
+            G.livesLeft -= 1;
+            const keep = Math.max(3, Math.floor(snake.cells.length * 0.6));
+            snake.cells = [];
+            const cx = Math.floor(G.size/2), cy = Math.floor(G.size/2);
+            for (let i = 0; i < keep; i++) snake.cells.push({ x: cx - i, y: cy });
+            snake.dir = { x: 1, y: 0 };
+            snake.pendingDir = snake.dir;
+            snake.prevCells = snake.cells.map(c => ({ x: c.x, y: c.y }));
+            flash(G);
+            return true;
+          }
+          // 3. Pause token: freeze 2 seconds, no move advance, allow input
+          if (G.pauseLeft > 0) {
+            G.pauseLeft -= 1;
+            G.pauseActiveUntil = now + 2000;
+            // Keep cells where they are; just delay next tick
+            G.lastMoveAt = now + 2000 - G.tickMs;
+            flash(G);
+            return true;
+          }
+          // 4. Perfect brake: instant stop for 500ms
+          if (G.brakeLeft > 0) {
+            G.brakeLeft -= 1;
+            G.brakeActiveUntil = now + 500;
+            G.lastMoveAt = now + 500 - G.tickMs;
+            flash(G);
+            return true;
+          }
+          return false;
+        };
+
+        // Ghost mode: invulnerability bypasses wall+self+obstacle
+        const ghostActive = G.ghostMs > 0;
+
+        // Wall collision (ghost mode bypasses walls — wraps to opposite side)
         if (head.x < 0 || head.x >= G.size || head.y < 0 || head.y >= G.size) {
-          if (G.bouncesLeft > 0) {
+          if (ghostActive) {
+            // Wrap around to opposite side
+            head.x = ((head.x % G.size) + G.size) % G.size;
+            head.y = ((head.y % G.size) + G.size) % G.size;
+          } else if (G.bouncesLeft > 0) {
             G.bouncesLeft--;
-            // Reverse direction
             snake.dir = { x: -snake.dir.x, y: -snake.dir.y };
             snake.pendingDir = snake.dir;
-            // Skip move (snake stays)
             G.animFrame = requestAnimationFrame(loop);
             render(G, snake, ctx, now);
             return;
-          }
-          if (Number(G.upgrades.tough_skin || 0) > 0 && !G._toughUsed) {
+          } else if (Number(G.upgrades.tough_skin || 0) > 0 && !G._toughUsed) {
             G._toughUsed = true;
-            // Reset to center, keep half length
             const keep = Math.max(3, Math.floor(snake.cells.length * 0.5));
             snake.cells = [];
             const cx = Math.floor(G.size/2), cy = Math.floor(G.size/2);
             for (let i = 0; i < keep; i++) snake.cells.push({ x: cx - i, y: cy });
             snake.dir = { x: 1, y: 0 };
             snake.pendingDir = snake.dir;
+            G.consecutiveEats = 0;
             flash(G);
             G.animFrame = requestAnimationFrame(loop);
             render(G, snake, ctx, now);
             return;
+          } else if (trySave('wall')) {
+            G.animFrame = requestAnimationFrame(loop);
+            render(G, snake, ctx, now);
+            return;
+          } else {
+            return endRun(G, snake, 'wall');
           }
-          return endRun(G, snake, 'wall');
         }
 
-        // Self collision
-        const selfHit = snake.cells.some(c => c.x === head.x && c.y === head.y);
+        // Self collision (ghost mode bypasses)
+        const selfHit = !ghostActive && snake.cells.some(c => c.x === head.x && c.y === head.y);
         if (selfHit) {
-          const phantomChance = Number(G.upgrades.phantom_tail || 0) * 0.017;  // 1.7% per lvl
+          const phantomChance = Number(G.upgrades.phantom_tail || 0) * 0.017;
           if (Math.random() < phantomChance) {
-            // pass through self this tick — no dying, no growth
             snake.cells.unshift(head);
             snake.cells.pop();
             G.animFrame = requestAnimationFrame(loop);
@@ -501,32 +618,46 @@
           if (G.shieldsLeft > 0) {
             G.shieldsLeft--;
             flash(G);
-            // Don't kill — just don't move this tick
             G.animFrame = requestAnimationFrame(loop);
             render(G, snake, ctx, now);
             return;
           }
+          if (trySave('self')) {
+            G.animFrame = requestAnimationFrame(loop);
+            render(G, snake, ctx, now);
+            return;
+          }
+          G.consecutiveEats = 0;
           return endRun(G, snake, 'self');
         }
 
-        // Obstacle collision
+        // Obstacle collision (ghost mode + smash both bypass)
         const obstacleHit = G.obstacles.findIndex(o => o.x === head.x && o.y === head.y);
         if (obstacleHit >= 0) {
-          if (G.ghostMs > 0) {
-            // Ghost pass — destroy obstacle
+          if (ghostActive) {
             G.obstacles.splice(obstacleHit, 1);
           } else if (Number(G.upgrades.obstacle_smash || 0) > 0 && !G._smashesUsed) {
             G._smashesUsed = (G._smashesUsed || 0) + 1;
             if (G._smashesUsed <= Number(G.upgrades.obstacle_smash)) {
               G.obstacles.splice(obstacleHit, 1);
+            } else if (trySave('obstacle')) {
+              G.animFrame = requestAnimationFrame(loop);
+              render(G, snake, ctx, now);
+              return;
             } else {
+              G.consecutiveEats = 0;
               return endRun(G, snake, 'obstacle');
             }
           } else if (G.shieldsLeft > 0) {
             G.shieldsLeft--;
             G.obstacles.splice(obstacleHit, 1);
             flash(G);
+          } else if (trySave('obstacle')) {
+            G.animFrame = requestAnimationFrame(loop);
+            render(G, snake, ctx, now);
+            return;
           } else {
+            G.consecutiveEats = 0;
             return endRun(G, snake, 'obstacle');
           }
         }
@@ -578,6 +709,17 @@
           }
         }
 
+        // Tail whip — when snake's tail moves over an obstacle, destroy it.
+        // We compare the OLD tail position (in prevCells) with current obstacles.
+        if (Number(G.upgrades.tail_whip || 0) > 0 && snake.prevCells && snake.prevCells.length > 0) {
+          const oldTail = snake.prevCells[snake.prevCells.length - 1];
+          const idx = G.obstacles.findIndex(o => o.x === oldTail.x && o.y === oldTail.y);
+          if (idx >= 0) {
+            G.obstacles.splice(idx, 1);
+            flash(G);
+          }
+        }
+
         G.length = snake.cells.length;
         document.getElementById('sg-length').textContent = G.length;
       }
@@ -597,10 +739,7 @@
         }
       }
 
-      // Decrement ghost
-      if (G.ghostMs > 0) {
-        G.ghostMs = Math.max(0, G.ghostMs - 16);
-      }
+      // (ghost decrement is handled near the top of loop now — see Treasure Pulse block)
 
       render(G, snake, ctx, now);
       G.animFrame = requestAnimationFrame(loop);
@@ -622,18 +761,55 @@
     const r = SS.cfg.rarities.find(x => x.key === food.rarity);
     if (!r) return;
     let coins = Math.floor(r.coin_min + Math.random() * (r.coin_max - r.coin_min + 1));
+    const now = performance.now();
 
-    // Lucky strike
+    // Lucky strike (×2 chance)
     const luckyP = Number(G.upgrades.lucky_strike || 0) * 0.02;
     if (Math.random() < luckyP) coins *= 2;
-    // Critical bite
+    // Critical bite (×10 chance) — also triggers time_slow
     const critP = Number(G.upgrades.critical_bite || 0) * 0.005;
-    if (Math.random() < critP) coins *= 10;
+    if (Math.random() < critP) {
+      coins *= 10;
+      const timeSlowLvl = Number(G.upgrades.time_slow || 0);
+      if (timeSlowLvl > 0) {
+        G.timeSlowUntil = now + 1500;     // slow next 1.5s
+        G.timeSlowMult = 1 + timeSlowLvl * 0.05;
+      }
+    }
+    // Streak / Combo — consecutive eats grant extra
+    G.consecutiveEats += 1;
+    const streakLvl = Number(G.upgrades.streak_multiplier || 0);
+    if (streakLvl > 0 && G.consecutiveEats >= 3) {
+      const sm = 1 + streakLvl * 0.05 * Math.min(G.consecutiveEats, 10);
+      coins = Math.floor(coins * sm);
+    }
+    const comboLvl = Number(G.upgrades.combo_chain || 0);
+    if (comboLvl > 0 && G.consecutiveEats > 0 && G.consecutiveEats % 5 === 0) {
+      const cm = 1.5 + comboLvl * 0.17;
+      coins = Math.floor(coins * cm);
+    }
+    // Treasure pulse — every 30s next eat is doubled (charges per upgrade level)
+    if (G.treasurePulseReady) {
+      coins *= 2;
+      G.treasurePulseReady = false;
+    }
+    // Speed burst — eating covert+ skin triggers brief sprint if charges left
+    if ((food.rarity === 'covert' || food.rarity === 'exceedingly_rare') && G.burstLeft > 0) {
+      G.burstActiveUntil = now + 2000;
+      G.burstLeft -= 1;
+    }
 
     G.coins += coins;
     G.skinsEaten += 1;
     G.rarityCounts[r.key] = (G.rarityCounts[r.key] || 0) + 1;
     document.getElementById('sg-coins').textContent = fmt(G.coins);
+
+    // Map cleaner — chance to remove a random obstacle on each eat
+    const cleanerLvl = Number(G.upgrades.map_cleaner || 0);
+    if (cleanerLvl > 0 && G.obstacles.length > 0 && Math.random() < cleanerLvl * 0.015) {
+      const idx = Math.floor(Math.random() * G.obstacles.length);
+      G.obstacles.splice(idx, 1);
+    }
 
     // Popup
     G.popups.push({
@@ -641,7 +817,7 @@
       y: head.y * G.cellPx + G.cellPx / 2,
       text: '+' + fmt(coins),
       color: r.color,
-      t0: performance.now(),
+      t0: now,
     });
 
     // Haptic
@@ -666,9 +842,21 @@
       const onSnake = snake.cells.some(c => c.x === x && c.y === y);
       const onFood = G.foods.some(f => f.x === x && f.y === y);
       const onObs = G.obstacles.some(o => o.x === x && o.y === y);
-      if (!onSnake && !onFood && !onObs) { cell = { x, y, rarity: rarity }; break; }
+      if (!onSnake && !onFood && !onObs) { cell = { x, y, rarity, spawnedAt: performance.now() }; break; }
     }
-    if (cell) G.foods.push(cell);
+    if (cell) {
+      G.foods.push(cell);
+      // Double bite: chance to spawn an additional food along with this one
+      const dbLvl = Number((G.upgrades || {}).double_bite || 0);
+      if (dbLvl > 0 && Math.random() < (4 + dbLvl * 2) / 100) {
+        // recursive call but flag prevents infinite chain
+        if (!G._dbBusy) {
+          G._dbBusy = true;
+          spawnFood(G, snake, rarity);
+          G._dbBusy = false;
+        }
+      }
+    }
     return cell;
   }
 
@@ -731,23 +919,43 @@
       ctx.stroke();
     }
 
-    // Obstacles
+    // Obstacles — fade those on cells the snake has visited (layout_memory)
+    const layoutLvl = Number(G.upgrades.layout_memory || 0);
     for (const o of G.obstacles) {
+      const visited = layoutLvl > 0 && G.visited && G.visited.has(o.x + ',' + o.y);
+      const baseAlpha = visited ? 0.3 : 1.0;
+      ctx.globalAlpha = baseAlpha;
       ctx.fillStyle = o.dx !== undefined ? '#aa3030' : '#555';
       ctx.fillRect(o.x * G.cellPx + 1, o.y * G.cellPx + 1, G.cellPx - 2, G.cellPx - 2);
       ctx.strokeStyle = o.dx !== undefined ? '#ff5555' : '#888';
       ctx.lineWidth = 1;
       ctx.strokeRect(o.x * G.cellPx + 1, o.y * G.cellPx + 1, G.cellPx - 2, G.cellPx - 2);
+      ctx.globalAlpha = 1.0;
     }
 
     // Foods
+    const mapVisionLvl = Number(G.upgrades.map_vision || 0);
+    const mapVisionMs = mapVisionLvl * 500;     // lvl × 0.5s
     for (const f of G.foods) {
       const r = SS.cfg.rarities.find(x => x.key === f.rarity) || SS.cfg.rarities[0];
       const cx = f.x * G.cellPx + G.cellPx / 2;
       const cy = f.y * G.cellPx + G.cellPx / 2;
       const sz = Math.floor(G.cellPx * 0.65);
-      // Glow for rare
-      if (f.rarity === 'covert' || f.rarity === 'exceedingly_rare') {
+      // Map vision: extra-bright pulse on premium skins for first N seconds after spawn
+      const isPremium = f.rarity === 'covert' || f.rarity === 'exceedingly_rare' ||
+                        f.rarity === 'classified';
+      const sinceSpawn = now - (f.spawnedAt || 0);
+      if (isPremium && mapVisionLvl > 0 && sinceSpawn < mapVisionMs) {
+        const pulse = Math.sin(now * 0.012) * 0.5 + 0.5;
+        ctx.shadowColor = r.color;
+        ctx.shadowBlur = 24 * (0.5 + pulse * 0.5);
+        // Outer ring
+        ctx.strokeStyle = r.color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, sz / 2 + 4 + pulse * 3, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (f.rarity === 'covert' || f.rarity === 'exceedingly_rare') {
         const pulse = Math.sin(now * 0.005) * 0.3 + 0.7;
         ctx.shadowColor = r.color;
         ctx.shadowBlur = 12 * pulse;
@@ -757,6 +965,38 @@
       ctx.arc(cx, cy, sz / 2, 0, Math.PI * 2);
       ctx.fill();
       ctx.shadowBlur = 0;
+    }
+
+    // Skin radar — arrow pointing from head toward nearest exc_rare food
+    const radarLvl = Number(G.upgrades.skin_radar || 0);
+    if (radarLvl > 0) {
+      const target = G.foods.find(f => f.rarity === 'exceedingly_rare')
+                   || G.foods.find(f => f.rarity === 'covert');
+      if (target) {
+        const head = snake.cells[0];
+        const hx = head.x * G.cellPx + G.cellPx / 2;
+        const hy = head.y * G.cellPx + G.cellPx / 2;
+        const tx = target.x * G.cellPx + G.cellPx / 2;
+        const ty = target.y * G.cellPx + G.cellPx / 2;
+        const ang = Math.atan2(ty - hy, tx - hx);
+        const arrowDist = G.cellPx * 1.0;
+        const ax = hx + Math.cos(ang) * arrowDist;
+        const ay = hy + Math.sin(ang) * arrowDist;
+        ctx.save();
+        ctx.translate(ax, ay);
+        ctx.rotate(ang);
+        ctx.fillStyle = target.rarity === 'exceedingly_rare' ? '#ffd700' : '#eb4b4b';
+        ctx.shadowColor = ctx.fillStyle;
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(-8, -4);
+        ctx.lineTo(-8, 4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+        ctx.shadowBlur = 0;
+      }
     }
 
     // Snake — interpolate between previous tick and current tick positions
@@ -811,12 +1051,14 @@
       roundRect(ctx, x, y, sz, sz, radius);
       ctx.fill();
 
-      // Head: eye (uses interpolated position so it follows smoothly)
+      // Head: eye uses PENDING direction so it pivots the moment user swipes,
+      // giving instant visual feedback even though body movement waits for tick.
       if (isHead) {
         ctx.fillStyle = '#fff';
         const eyeSz = Math.max(2, G.cellPx * 0.15);
-        const ex = renderX * G.cellPx + G.cellPx / 2 + snake.dir.x * G.cellPx * 0.2;
-        const ey = renderY * G.cellPx + G.cellPx / 2 + snake.dir.y * G.cellPx * 0.2;
+        const eyeDir = snake.pendingDir || snake.dir;
+        const ex = renderX * G.cellPx + G.cellPx / 2 + eyeDir.x * G.cellPx * 0.2;
+        const ey = renderY * G.cellPx + G.cellPx / 2 + eyeDir.y * G.cellPx * 0.2;
         ctx.beginPath(); ctx.arc(ex, ey, eyeSz, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = '#000';
         ctx.beginPath(); ctx.arc(ex, ey, eyeSz * 0.5, 0, Math.PI * 2); ctx.fill();
