@@ -752,51 +752,27 @@
     ctx.closePath();
   }
 
-  async function endRun(G, snake, diedTo) {
+  function endRun(G, snake, diedTo) {
     if (G.stopped) return;
     G.stopped = true;
     if (G.animFrame) cancelAnimationFrame(G.animFrame);
     const overlay = document.querySelector('.snake-game-overlay');
     if (overlay && overlay._cleanup) overlay._cleanup();
+    if (overlay) overlay.remove();    // remove playfield immediately
 
     const duration = Math.floor((performance.now() - G.startedAt) / 1000);
     const length = snake.cells.length;
 
-    let resp = null;
-    try {
-      resp = await api('/api/snake/run', {
-        method: 'POST',
-        body: JSON.stringify({
-          rarity_counts: G.rarityCounts,
-          duration_sec: duration,
-          length,
-          mode: G.modeCfg.key,
-          map_id: G.mapCfg.key,
-          died_to: diedTo,
-        }),
-      });
-    } catch (e) {
-      toast('Ошибка сохранения: ' + e.message);
-    }
-
-    const credited = (resp && resp.coins_credited) || 0;
-    const xp = (resp && resp.xp_gained) || 0;
-
-    // Update global balance
-    if (resp && typeof resp.new_balance === 'number') {
-      window.state.me.balance = resp.new_balance;
-      const balEl = document.getElementById('balance-display');
-      if (balEl) balEl.textContent = fmt(resp.new_balance);
-    }
-
-    // Death modal
+    // Show modal IMMEDIATELY — API runs in background and updates fields in place.
+    // Earlier impl awaited the API first; if it hung or failed silently the user
+    // saw "game stopped, nothing happens".
+    const reasons = { wall: 'Стена', self: 'Себя сожрал', obstacle: 'Препятствие', timeout: 'Время вышло', manual: 'Сам ушёл' };
     const modal = document.createElement('div');
     modal.className = 'snake-death-modal';
-    const reasons = { wall: 'Стена', self: 'Себя сожрал', obstacle: 'Препятствие', timeout: 'Время вышло', manual: 'Сам ушёл' };
     modal.innerHTML = `
       <div class="snake-death-card">
         <div class="snake-death-title">${escape(reasons[diedTo] || 'Ран окончен')}</div>
-        <div class="snake-death-coins">+${fmt(credited)} 🪙</div>
+        <div class="snake-death-coins" id="sg-d-coins">…</div>
         <div class="snake-death-stats">
           <div class="snake-death-stat">
             <div class="snake-death-stat-label">Скинов</div>
@@ -812,7 +788,7 @@
           </div>
           <div class="snake-death-stat">
             <div class="snake-death-stat-label">XP</div>
-            <div class="snake-death-stat-value">+${fmt(xp)}</div>
+            <div class="snake-death-stat-value" id="sg-d-xp">…</div>
           </div>
         </div>
         <div class="snake-death-actions">
@@ -825,20 +801,49 @@
 
     document.getElementById('sg-close').addEventListener('click', async () => {
       modal.remove();
-      if (overlay) overlay.remove();
-      // Refresh state
       try { SS.state = await api('/api/snake/state'); } catch (e) {}
       paintHub();
     });
-    document.getElementById('sg-retry').addEventListener('click', () => {
+    document.getElementById('sg-retry').addEventListener('click', async () => {
       modal.remove();
-      if (overlay) overlay.remove();
-      // Refresh state then re-launch
-      api('/api/snake/state').then(s => { SS.state = s; startGame(); }).catch(() => startGame());
+      try { SS.state = await api('/api/snake/state'); } catch (e) {}
+      startGame();
     });
 
-    // Big haptic
-    tg?.HapticFeedback?.notificationOccurred?.(credited > 10000 ? 'success' : 'warning');
+    tg?.HapticFeedback?.notificationOccurred?.('warning');
+
+    // Fire-and-forget: settle on the server, then patch numbers in the modal.
+    api('/api/snake/run', {
+      method: 'POST',
+      body: JSON.stringify({
+        rarity_counts: G.rarityCounts,
+        duration_sec: duration,
+        length,
+        mode: G.modeCfg.key,
+        map_id: G.mapCfg.key,
+        died_to: diedTo,
+      }),
+    }).then(resp => {
+      if (!resp) return;
+      const credited = resp.coins_credited || 0;
+      const xp = resp.xp_gained || 0;
+      const coinsEl = document.getElementById('sg-d-coins');
+      const xpEl = document.getElementById('sg-d-xp');
+      if (coinsEl) coinsEl.textContent = '+' + fmt(credited) + ' 🪙';
+      if (xpEl)    xpEl.textContent = '+' + fmt(xp);
+      if (typeof resp.new_balance === 'number') {
+        window.state.me.balance = resp.new_balance;
+        const balEl = document.getElementById('balance-display');
+        if (balEl) balEl.textContent = fmt(resp.new_balance);
+      }
+      if (credited > 10000) tg?.HapticFeedback?.notificationOccurred?.('success');
+    }).catch(e => {
+      toast('Ошибка сохранения: ' + e.message);
+      const coinsEl = document.getElementById('sg-d-coins');
+      if (coinsEl) coinsEl.textContent = '+0 🪙';
+      const xpEl = document.getElementById('sg-d-xp');
+      if (xpEl) xpEl.textContent = '+0';
+    });
   }
 
   // ═════════════════ UPGRADES TAB ═════════════════
@@ -933,12 +938,19 @@
       const copiesHtml = copies.map((lvl, i) => {
         const isMax = lvl >= SS.cfg.afk_snake_max_level;
         const upCost = sn.upgrade_cost_base * Math.pow(1.4, lvl);
+        const copyRate = sn.base_rate * Math.pow(sn.rate_mult, lvl);
         return `
-          <div class="snake-afk-copy-pill ${isMax ? 'maxed' : ''}" data-snake="${sn.key}" data-idx="${i}">
-            #${i+1} L${lvl}/${SS.cfg.afk_snake_max_level}${isMax ? ' ⭐' : ' · ' + fmt(upCost) + '🪙'}
+          <div class="snake-afk-copy-pill ${isMax ? 'maxed' : ''}" data-snake="${sn.key}" data-idx="${i}" title="Уровень копии. Тап = апгрейд.">
+            #${i+1} L${lvl} · ${fmt(copyRate.toFixed(0))}/мин${isMax ? ' ⭐' : ' · ↑' + fmt(upCost) + '🪙'}
           </div>
         `;
       }).join('');
+
+      // Show base rate prominently — even when zero copies are owned the user
+      // can see what one copy contributes, makes the price-tag click-through.
+      const ownedSummary = copies.length === 0
+        ? `1 копия = <b>${fmt(sn.base_rate)} мон/мин</b>`
+        : `${copies.length} шт · сейчас даёт <b>${fmt(totalForSnake.toFixed(1))} мон/мин</b>`;
 
       return `
         <div class="snake-afk-snake-card">
@@ -946,9 +958,7 @@
             <div class="snake-afk-snake-icon">${sn.icon}</div>
             <div>
               <div class="snake-afk-snake-name">${escape(sn.name)}</div>
-              <div class="snake-afk-snake-stats">
-                ${copies.length} шт · даёт <b>${fmt(totalForSnake.toFixed(1))} мон/мин</b>
-              </div>
+              <div class="snake-afk-snake-stats">${ownedSummary}</div>
             </div>
           </div>
           <button class="snake-afk-buy-btn" data-buy="${sn.key}" ${canBuy ? '' : 'disabled'}>

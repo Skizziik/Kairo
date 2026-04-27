@@ -27,6 +27,10 @@ let state = {
   leaderboard: null,
   currentCase: null,
 };
+// Expose globally so sibling scripts (snake.js, etc.) can read balance.
+// `let` / `const` at top-level do NOT auto-attach to `window` in non-module scripts,
+// which silently broke every snake purchase (canAfford = balance >= cost = 0 >= cost).
+window.state = state;
 
 // ================= api helpers =================
 async function api(path, options = {}) {
