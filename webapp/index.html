@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>RIP Casino</title>
-  <link rel="stylesheet" href="./styles.css?v=20260427r" />
+  <link rel="stylesheet" href="./styles.css?v=20260427t" />
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
@@ -29,16 +29,32 @@
               <span id="streak-display">🔥 0</span>
               <span class="dot">·</span>
               <span id="cases-opened-display">0 кейсов</span>
+              <span class="dot">·</span>
+              <span class="lvl-chip">⭐ LVL <b id="level-num">1</b></span>
             </div>
           </div>
         </div>
 
-        <div class="level-card">
-          <div class="level-row">
-            <span class="level-badge">LVL <b id="level-num">1</b></span>
-            <span id="level-xp">0 / 100 XP</span>
+        <div class="tier-card" id="tier-card">
+          <div class="tier-card-row">
+            <div class="tier-card-icon" id="tier-icon">🥉</div>
+            <div class="tier-card-info">
+              <div class="tier-card-name" id="tier-name">Bronze</div>
+              <div class="tier-card-progress-text">
+                <span id="tier-wager">0</span>
+                <span class="tier-card-sep">/</span>
+                <span id="tier-next-threshold">100K</span>
+              </div>
+            </div>
+            <div class="tier-card-pct" id="tier-pct">0%</div>
           </div>
-          <div class="level-bar"><div class="level-bar-fill" id="level-fill"></div></div>
+          <div class="tier-bar"><div class="tier-bar-fill" id="tier-fill"></div></div>
+          <div class="tier-card-foot">
+            до <b id="tier-next-name">Silver</b>
+            <span class="tier-card-xp" title="общий XP за активность">
+              <span id="level-xp">0 / 100 XP</span>
+            </span>
+          </div>
         </div>
 
         <button id="daily-btn" class="btn big-btn daily-btn">
@@ -310,6 +326,6 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <script src="./app.js?v=20260427t"></script>
+  <script src="./app.js?v=20260427u"></script>
 </body>
 </html>

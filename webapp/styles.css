@@ -1044,43 +1044,111 @@ h2 {
   margin-top: 2px;
 }
 
-.level-card {
-  background: var(--bg-card);
+/* ===== tier card (lifetime wager) ===== */
+.tier-card {
+  background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-elev) 100%);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 14px;
   padding: 12px 14px;
   margin-bottom: 14px;
+  transition: border-color 0.4s ease;
 }
 
-.level-row {
+.tier-card-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  font-size: 13px;
-  margin-bottom: 8px;
+  gap: 12px;
+  margin-bottom: 9px;
 }
 
-.level-badge {
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-gold) 100%);
-  color: #0e0f14;
-  padding: 3px 10px;
-  border-radius: 8px;
+.tier-card-icon {
+  font-size: 28px;
+  line-height: 1;
+  filter: drop-shadow(0 0 6px rgba(245,176,66,0.3));
+}
+
+.tier-card-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tier-card-name {
   font-weight: 800;
-  font-size: 12px;
+  font-size: 16px;
+  letter-spacing: 0.3px;
+  line-height: 1.1;
+  transition: color 0.4s ease;
 }
 
-.level-bar {
-  height: 8px;
+.tier-card-progress-text {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.tier-card-sep {
+  opacity: 0.5;
+  margin: 0 3px;
+}
+
+.tier-card-pct {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent-gold);
+  font-variant-numeric: tabular-nums;
+  min-width: 48px;
+  text-align: right;
+}
+
+.tier-bar {
+  height: 7px;
   background: var(--bg-elev);
   border-radius: 4px;
   overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.04);
 }
 
-.level-bar-fill {
+.tier-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-gold) 100%);
   width: 0%;
-  transition: width 0.5s ease;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-gold) 100%);
+  transition: width 0.6s ease;
+  box-shadow: 0 0 8px rgba(245,176,66,0.35);
+}
+
+.tier-card-foot {
+  margin-top: 7px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.tier-card-foot b {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.tier-card-xp {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.65;
+}
+
+/* tiny LVL chip in profile-sub (replaces the old prominent level-card) */
+.lvl-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  opacity: 0.85;
+}
+.lvl-chip b {
+  color: var(--accent-gold);
+  font-weight: 700;
 }
 
 /* ===== missions ===== */
@@ -1871,6 +1939,15 @@ h2 {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.lb-tier {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  margin-right: 6px;
+  filter: drop-shadow(0 0 3px currentColor);
+  flex-shrink: 0;
 }
 
 /* Cinematic badge unlock overlay */

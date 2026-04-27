@@ -111,6 +111,57 @@ function fmt(n) {
   return new Intl.NumberFormat('ru-RU').format(Math.round(n));
 }
 
+// Compact wager formatter: 12_400 -> "12.4K", 5_500_000 -> "5.5M",
+// 1_000_000_000_000_000 -> "1Q". Used by the tier card so big thresholds
+// fit in tight UI slots.
+function fmtCompact(n) {
+  n = Number(n) || 0;
+  const abs = Math.abs(n);
+  const units = [
+    [1e15, 'Q'], [1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'K'],
+  ];
+  for (const [mag, suf] of units) {
+    if (abs >= mag) {
+      const v = n / mag;
+      return (v >= 100 ? v.toFixed(0) : v.toFixed(1).replace(/\.0$/, '')) + suf;
+    }
+  }
+  return String(Math.round(n));
+}
+
+// Renders the home-screen tier card from /api/me's `tier` (= get_progress dict).
+function renderTierCard(t) {
+  if (!t || !t.current) return;
+  const cur = t.current;
+  const nxt = t.next;
+  const pct = Math.max(0, Math.min(100, t.progress_pct || 0));
+
+  const iconEl = document.getElementById('tier-icon');
+  const nameEl = document.getElementById('tier-name');
+  if (iconEl) iconEl.textContent = cur.emoji || '🥉';
+  if (nameEl) {
+    nameEl.textContent = cur.name;
+    nameEl.style.color = cur.color || '';
+  }
+
+  const wagerEl = document.getElementById('tier-wager');
+  const nextThEl = document.getElementById('tier-next-threshold');
+  const nextNmEl = document.getElementById('tier-next-name');
+  const pctEl = document.getElementById('tier-pct');
+  const fillEl = document.getElementById('tier-fill');
+  if (wagerEl) wagerEl.textContent = fmtCompact(t.wager || 0);
+  if (nextThEl) nextThEl.textContent = nxt ? fmtCompact(nxt.threshold) : '—';
+  if (nextNmEl) nextNmEl.textContent = nxt ? nxt.name : 'MAX';
+  if (pctEl) pctEl.textContent = (nxt ? pct.toFixed(1) : '100') + '%';
+  if (fillEl) {
+    fillEl.style.width = pct + '%';
+    fillEl.style.background = `linear-gradient(90deg, ${cur.color || '#f5b042'} 0%, ${(nxt && nxt.color) || '#ffd700'} 100%)`;
+  }
+
+  const card = document.getElementById('tier-card');
+  if (card) card.style.borderColor = cur.color || '';
+}
+
 function toast(msg, duration = 2400) {
   const el = document.getElementById('toast');
   el.textContent = msg;
@@ -182,14 +233,17 @@ async function renderMe() {
   document.getElementById('streak-display').textContent = `🔥 ${me.current_streak}`;
   document.getElementById('cases-opened-display').textContent = `${me.cases_opened} кейсов`;
 
-  // Level + title (fetch in background)
+  // Tier card (driven by lifetime_wager)
+  if (me.tier) {
+    renderTierCard(me.tier);
+  }
+
+  // Level chip + title (fetch in background)
   try {
     const lvl = await api('/api/level');
     document.getElementById('level-num').textContent = lvl.level;
     const span = (lvl.next_level_xp - lvl.current_level_xp) || 1;
     const cur = Math.max(0, lvl.xp - lvl.current_level_xp);
-    const pct = Math.max(0, Math.min(100, (cur / span) * 100));
-    document.getElementById('level-fill').style.width = pct + '%';
     document.getElementById('level-xp').textContent = `${fmt(cur)} / ${fmt(span)} XP`;
   } catch (e) { /* non-critical */ }
   try {
@@ -3591,10 +3645,16 @@ function renderLeaderboard() {
     const badgesHtml = (Array.isArray(r.badges) ? r.badges : [])
       .map(b => `<span class="lb-badge rarity-${escape(b.rarity || 'rare')}" title="${escape(b.name || '')}${b.desc ? ' — ' + escape(b.desc) : ''}">${escape(b.icon || '')}</span>`)
       .join('');
+    // Tier chip in front of the name — single emoji + colored stroke, hover for full name + wager
+    const tier = r.tier || null;
+    const tierHtml = tier
+      ? `<span class="lb-tier" style="color:${tier.color || '#aaa'}" title="${escape(tier.name || '')} · оборот ${fmt(r.lifetime_wager || 0)}">${escape(tier.emoji || '')}</span>`
+      : '';
     return `
       <div class="lb-row">
         <div class="lb-rank ${rankClass}">${rankStr}</div>
         <div class="lb-name">
+          ${tierHtml}
           <span class="lb-name-text">${escape(name)}</span>
           ${badgesHtml ? `<span class="lb-badges">${badgesHtml}</span>` : ''}
         </div>

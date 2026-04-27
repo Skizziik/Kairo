@@ -47,18 +47,35 @@ async def log_bet(
     details: dict | None = None,
     balance_after: int | None = None,
 ) -> None:
-    """Write one audit row. Best-effort — never raises."""
+    """Write one audit row + bump lifetime_wager. Best-effort — never raises.
+
+    The wager bump and the audit insert share a single connection but are
+    independently try-wrapped so a missing audit table won't block the wager
+    counter (and vice versa).
+    """
     try:
         async with pool().acquire() as conn:
-            await conn.execute(
-                "insert into bet_audit "
-                "(user_id, game, bet, win, net, details, balance_after) "
-                "values ($1, $2, $3, $4, $5, $6::jsonb, $7)",
-                int(user_id), str(game),
-                int(bet), int(win), int(net),
-                json.dumps(details or {}, default=_json_default),
-                int(balance_after) if balance_after is not None else None,
-            )
+            try:
+                await conn.execute(
+                    "insert into bet_audit "
+                    "(user_id, game, bet, win, net, details, balance_after) "
+                    "values ($1, $2, $3, $4, $5, $6::jsonb, $7)",
+                    int(user_id), str(game),
+                    int(bet), int(win), int(net),
+                    json.dumps(details or {}, default=_json_default),
+                    int(balance_after) if balance_after is not None else None,
+                )
+            except Exception as e:
+                log.debug("audit insert skipped: %s", e)
+            try:
+                if int(bet) > 0:
+                    await conn.execute(
+                        "update economy_users set lifetime_wager = lifetime_wager + $2 "
+                        "where tg_id = $1",
+                        int(user_id), int(bet),
+                    )
+            except Exception as e:
+                log.debug("lifetime_wager bump skipped: %s", e)
     except Exception as e:
         log.debug("audit log_bet skipped: %s", e)
 

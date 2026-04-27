@@ -357,6 +357,7 @@ async def leaderboard_rich(limit: int = 10) -> list[dict]:
             """
             select e.tg_id, e.balance, e.cases_opened, e.current_streak,
                    coalesce(e.badges, '[]'::jsonb) as badges,
+                   coalesce(e.lifetime_wager, 0) as lifetime_wager,
                    u.username, u.first_name
             from economy_users e
             left join users u on u.tg_id = e.tg_id

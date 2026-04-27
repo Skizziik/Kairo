@@ -65,6 +65,9 @@ async def api_me(user: dict = Depends(require_user)) -> dict:
     await eco.ensure_user(tg_id)
     row = await eco.get_user(tg_id)
     inv_count = len(await eco.inventory_of(tg_id, limit=1000))
+    from app.economy import tiers as _tiers
+    wager = int(row["lifetime_wager"]) if row and ("lifetime_wager" in row) else 0
+    tier_info = _tiers.get_progress(wager)
     return {
         "tg_id": tg_id,
         "username": user.get("username"),
@@ -78,6 +81,8 @@ async def api_me(user: dict = Depends(require_user)) -> dict:
         "best_streak": int(row["best_streak"]) if row else 0,
         "last_daily_at": row["last_daily_at"].isoformat() if row and row.get("last_daily_at") else None,
         "inventory_count": inv_count,
+        "lifetime_wager": wager,
+        "tier": tier_info,
     }
 
 
@@ -412,6 +417,7 @@ async def api_leaderboard(user: dict = Depends(require_user)) -> list[dict]:
     _ = user
     import json as _json
     from app.economy.boss import BADGES as _BADGES
+    from app.economy import tiers as _tiers
     top = await eco.leaderboard_rich(limit=20)
     out = []
     for r in top:
@@ -423,6 +429,7 @@ async def api_leaderboard(user: dict = Depends(require_user)) -> list[dict]:
                 raw_badges = []
         # Resolve badge keys to display objects (icon + name + rarity)
         badges = [_BADGES[k] for k in raw_badges if k in _BADGES]
+        wager = int(r.get("lifetime_wager") or 0)
         out.append({
             "tg_id":        int(r["tg_id"]),
             "username":     r["username"],
@@ -431,6 +438,8 @@ async def api_leaderboard(user: dict = Depends(require_user)) -> list[dict]:
             "cases_opened": int(r["cases_opened"]),
             "streak":       int(r["current_streak"]),
             "badges":       badges,
+            "lifetime_wager": wager,
+            "tier":         _tiers.get_tier(wager),
         })
     return out
 

@@ -17,6 +17,7 @@ from app.economy import audit as _audit
 from app.economy import boss as _boss
 from app.economy import case_rebalance as _case_rebalance
 from app.economy import coinflip_pvp as _cfpvp
+from app.economy import tiers as _tiers
 from app.economy import gear as _gear
 from app.economy import mines as _mines
 from app.economy import prestige as _prestige
@@ -66,6 +67,10 @@ async def lifespan(_: FastAPI):
         await _audit.ensure_schema()
     except Exception as e:
         log.warning("audit schema migration failed: %s", e)
+    try:
+        await _tiers.ensure_schema()
+    except Exception as e:
+        log.warning("tiers schema migration failed: %s", e)
     # Trim oversized case pools (idempotent — only changes if current count > cap)
     try:
         await _case_rebalance.rebalance_all()
