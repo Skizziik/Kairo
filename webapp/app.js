@@ -4756,7 +4756,7 @@ const tycoonState = {
 };
 
 const TC_GRID_W = 6;     // ALWAYS 6 cols — wide casino layout. 6 rows max (24 cells).
-const TC_CELL_W = 64;    // narrower cell for 6 cols on phone screens
+const TC_CELL_W = 56;    // narrower cells so 6 cols fit on phones
 const TC_CELL_H = 64;    // square-ish cell for clarity
 
 // ---- VISITOR archetypes ----
@@ -4873,14 +4873,21 @@ function _tcPaintAll() {
   const area = tycoonState.area;
   if (!d || !area) return;
   const { cols, rows } = _tcGridDims(d.floor_capacity);
-  const floorWidthPx = cols * TC_CELL_W + 16;
-  const floorHeightPx = rows * (TC_CELL_H + 14) + 40;
+  // Cell gap = 6px (matches _tcCellPixel). Floor width must include the gaps
+  // between cells + a tiny outer border. Door+Cashier are absolute children of
+  // the stage; the stage scrolls horizontally if it overflows the viewport.
+  const cellGap = 6;
+  const floorWidthPx  = cols * TC_CELL_W + (cols - 1) * cellGap + 12;
+  const floorHeightPx = rows * (TC_CELL_H + 18) + 12;
+  // Total stage inner width = floor + door (50px) + cashier (60px) + paddings
+  const stageInnerWidthPx = floorWidthPx + 130;
 
   area.innerHTML = `
     <div class="tycoon-wrap">
       <div class="tc-hud" id="tc-hud">${_tcHudHtml(d)}</div>
 
-      <div class="tc-stage theme-${d.theme || 'vegas'} ${(d.streak && d.streak.kind!=='neutral') ? 'streak-'+d.streak.kind : ''} ${(d.celeb && d.celeb.active) ? 'celeb-active' : ''}" id="tc-stage" style="height:${floorHeightPx + 70}px">
+      <div class="tc-stage theme-${d.theme || 'vegas'} ${(d.streak && d.streak.kind!=='neutral') ? 'streak-'+d.streak.kind : ''} ${(d.celeb && d.celeb.active) ? 'celeb-active' : ''}" id="tc-stage" style="height:${floorHeightPx + 90}px">
+       <div class="tc-stage-inner" style="width:${stageInnerWidthPx}px; height:${floorHeightPx + 80}px">
         ${(d.streak && d.streak.kind === 'hot') ? `<div class="tc-streak-banner hot">🔥 HOT STREAK · +25% дохода · ${d.streak.seconds_left}с</div>` : ''}
         ${(d.streak && d.streak.kind === 'cold') ? `<div class="tc-streak-banner cold">❄️ COLD STREAK · −25% дохода · ${d.streak.seconds_left}с</div>` : ''}
         ${(d.celeb && d.celeb.active) ? `<div class="tc-celeb-banner">🌟 ${escape(d.celeb.name)} в казино! +50% · ${Math.floor(d.celeb.seconds_left/60)}мин</div>` : ''}
@@ -4898,6 +4905,7 @@ function _tcPaintAll() {
         ${d.floor_capacity < d.max_floor ? `
           <button class="tc-buy-cell" id="tc-buy-cell">＋ ячейка <b>${fmt(d.next_cell_cost)} $</b></button>
         ` : ''}
+       </div>
       </div>
 
       <div class="tc-toolbar">
