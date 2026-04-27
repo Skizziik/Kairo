@@ -347,6 +347,33 @@ h2 {
   border: 1px solid var(--border);
 }
 
+/* Struck-through original price next to discounted price (gear case_discount) */
+.case-tile-base {
+  font-size: 9px;
+  font-weight: 600;
+  text-decoration: line-through;
+  opacity: 0.55;
+  margin-left: 3px;
+}
+.case-preview-disc {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #1a1a1a;
+  background: linear-gradient(135deg, #6effa3 0%, #1ed560 100%);
+  letter-spacing: 0.3px;
+}
+.btn-was {
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: line-through;
+  opacity: 0.55;
+  margin-left: 5px;
+}
+
 /* per-rarity border glow */
 .case-tile.rarity-border-consumer         { box-shadow: 0 0 0 1px var(--r-consumer) inset, 0 6px 20px rgba(176,195,217,0.10); }
 .case-tile.rarity-border-industrial       { box-shadow: 0 0 0 1px var(--r-industrial) inset, 0 6px 20px rgba(94,152,217,0.12); }

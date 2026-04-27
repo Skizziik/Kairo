@@ -96,10 +96,29 @@ async def api_daily(user: dict = Depends(require_user)) -> dict:
 
 @router.get("/cases")
 async def api_cases(user: dict = Depends(require_user)) -> list[dict]:
-    _ = user
+    tg_id = int(user["id"])
     from app.db.client import pool as dbpool
 
     cases = await eco.list_cases()
+    # Resolve viewer's case_discount affix (gear-driven). Used to compute
+    # effective_price per case so the UI can show "1500 (was 2000)" instead of
+    # the base price — the actual discount is already applied in eco.open_case
+    # but without this hint the UI lies about the cost.
+    case_discount_pct = 0.0
+    try:
+        async with dbpool().acquire() as conn:
+            gr = await conn.fetchrow(
+                "select gear_affixes from forge_users where tg_id = $1", tg_id,
+            )
+            if gr and gr["gear_affixes"]:
+                ga = gr["gear_affixes"]
+                if isinstance(ga, str):
+                    ga = json.loads(ga) if ga else {}
+                case_discount_pct = float(ga.get("case_discount", 0) or 0)
+    except Exception:
+        case_discount_pct = 0.0
+    case_mult = max(0.0, 1.0 - case_discount_pct / 100.0)
+
     out = []
     async with dbpool().acquire() as conn:
         for c in cases:
@@ -138,12 +157,16 @@ async def api_cases(user: dict = Depends(require_user)) -> list[dict]:
                     for r in rows
                 ]
 
+            base_price = int(c["price"])
+            effective_price = max(1, int(base_price * case_mult)) if case_mult < 1.0 else base_price
             out.append({
                 "id": int(c["id"]),
                 "key": c["key"],
                 "name": c["name"],
                 "description": c["description"],
-                "price": int(c["price"]),
+                "price": effective_price,                  # what user actually pays
+                "base_price": base_price,                  # struck-through full price
+                "discount_pct": int(round(case_discount_pct)) if case_discount_pct > 0 else 0,
                 "image_url": c.get("image_url"),  # official case PNG (if seeded)
                 "preview_items": preview_items[:4],
             })
@@ -211,10 +234,27 @@ async def api_case_open_multi(req: OpenCaseMultiReq, user: dict = Depends(requir
 async def api_case_pool(case_id: int, user: dict = Depends(require_user)) -> dict:
     """Return the full loot pool (all items that can drop) for a case.
     Used to render the preview carousel."""
-    _ = user
+    tg_id = int(user["id"])
     case = await eco.get_case(case_id)
     if not case:
         raise HTTPException(status_code=404, detail="case not found")
+    # Resolve viewer's gear case_discount so the preview shows the price they
+    # actually pay, not the base price (matches the discount visible on /cases).
+    case_discount_pct = 0.0
+    try:
+        from app.db.client import pool as dbpool
+        async with dbpool().acquire() as conn:
+            gr = await conn.fetchrow(
+                "select gear_affixes from forge_users where tg_id = $1", tg_id,
+            )
+            if gr and gr["gear_affixes"]:
+                ga = gr["gear_affixes"]
+                if isinstance(ga, str):
+                    ga = json.loads(ga) if ga else {}
+                case_discount_pct = float(ga.get("case_discount", 0) or 0)
+    except Exception:
+        case_discount_pct = 0.0
+    case_mult = max(0.0, 1.0 - case_discount_pct / 100.0)
     pool = case["loot_pool"]
     if isinstance(pool, str):
         pool = json.loads(pool)
@@ -245,11 +285,15 @@ async def api_case_pool(case_id: int, user: dict = Depends(require_user)) -> dic
         for r in rows
     ]
     items.sort(key=lambda x: x["base_price"], reverse=True)
+    base_price = int(case["price"])
+    effective_price = max(1, int(base_price * case_mult)) if case_mult < 1.0 else base_price
     return {
         "id": int(case["id"]),
         "name": case["name"],
         "description": case["description"],
-        "price": int(case["price"]),
+        "price": effective_price,
+        "base_price": base_price,
+        "discount_pct": int(round(case_discount_pct)) if case_discount_pct > 0 else 0,
         "items": items,
     }
 

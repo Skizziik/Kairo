@@ -311,6 +311,7 @@ function renderCases() {
           <div class="case-tile-name">${escape(c.name)}</div>
           <div class="case-tile-price ${locked ? 'locked' : ''}">
             ${locked ? '🔒' : '🪙'} ${fmt(c.price)}
+            ${(c.base_price && c.base_price > c.price) ? `<span class="case-tile-base">${fmt(c.base_price)}</span>` : ''}
           </div>
         </div>
       </div>
@@ -329,10 +330,14 @@ async function openCasePreview(caseId) {
   try {
     const data = await api(`/api/case/${caseId}/pool`);
     state.currentCase = data;
+    const discountBadge = (data.discount_pct && data.discount_pct > 0)
+      ? `<span class="case-preview-disc">−${data.discount_pct}% от шмота 🎁</span>`
+      : '';
     wrap.innerHTML = `
       <div class="case-preview-header">
         <h2 class="case-preview-name">${escape(data.name)}</h2>
         <div class="case-preview-desc">${escape(data.description || '')}</div>
+        ${discountBadge}
       </div>
       <div class="case-preview-summary">Всего в пуле: <b>${data.items.length}</b> скинов</div>
       <div class="case-preview-items">
@@ -353,7 +358,7 @@ async function openCasePreview(caseId) {
       <div class="open-case-fixed">
         <button class="btn big-btn daily-btn" id="case-preview-open-btn">
           <span class="btn-icon">🎁</span>
-          <span class="btn-text">Открыть за ${fmt(data.price)} 🪙</span>
+          <span class="btn-text">Открыть за ${fmt(data.price)} 🪙${(data.base_price && data.base_price > data.price) ? ` <span class="btn-was">${fmt(data.base_price)}</span>` : ''}</span>
         </button>
         <button class="btn big-btn case-open-5x-btn" id="case-preview-open5-btn">
           ⚡ Открыть 5× за ${fmt(data.price * 5)} 🪙
@@ -3333,13 +3338,16 @@ function forgeEffectLabel(branchKey, level) {
   const branch = (forgeState.branches || []).find(b => b.key === branchKey);
   if (!branch) return '';
   const baseLabels = {
-    damage: { base: 1, suffix: ' урон' },
-    crit: { base: 0, suffix: '% шанс' },
-    luck: { base: 0, suffix: '% particles', prefix: '+' },
-    offline_cap: { base: 8, suffix: ' ч' },
-    silver: { base: 0.3, suffix: '/сек', decimals: 2 },
-    gold: { base: 1.0, suffix: '/сек', decimals: 1 },
-    global: { base: 4.0, suffix: '/сек', decimals: 1 },
+    damage:          { base: 1,   suffix: ' урон' },
+    crit:            { base: 0,   suffix: '% шанс' },
+    crit_power:      { base: 3.0, suffix: 'x', prefix: 'x', decimals: 1, prefix_replace: true },
+    luck:            { base: 0,   suffix: '% particles', prefix: '+' },
+    tier_luck:       { base: 0,   suffix: '% к топ-тиру', prefix: '+' },
+    stattrak_hunter: { base: 5,   suffix: '% ST-шанс' },
+    offline_cap:     { base: 8,   suffix: ' ч' },
+    silver:          { base: 0.3, suffix: '/сек', decimals: 2 },
+    gold:            { base: 1.0, suffix: '/сек', decimals: 1 },
+    global:          { base: 4.0, suffix: '/сек', decimals: 1 },
   };
   const conf = baseLabels[branchKey] || { base: 0, suffix: '' };
   let value;
@@ -3348,7 +3356,9 @@ function forgeEffectLabel(branchKey, level) {
     const idx = Math.min(level, branch.tiers.length) - 1;
     value = branch.tiers[idx].effect;
   }
-  if (conf.decimals !== undefined) value = value.toFixed(conf.decimals);
+  if (conf.decimals !== undefined) value = Number(value).toFixed(conf.decimals);
+  // crit_power label is "x3.5" — the prefix REPLACES (not prepends to) the number
+  if (conf.prefix_replace) return `x${value}`;
   return `${conf.prefix || ''}${value}${conf.suffix}`;
 }
 
