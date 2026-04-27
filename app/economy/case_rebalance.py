@@ -157,6 +157,7 @@ async def rebalance_all() -> None:
         ("rip",              "/img/case_rip.png"),
         ("lera_golova",      "/img/case_lera.png"),
         ("masha_yu_know",    "/img/case_masha.png"),
+        ("melkiy",           "/img/case_melkiy.png"),
     ]:
         try:
             await ensure_case_image(key, image_url)
