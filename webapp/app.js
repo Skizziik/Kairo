@@ -4440,6 +4440,12 @@ const MEGASLOT_GEM_CLASSES = {
 };
 // Populated from /api/casino/megaslot/config
 const MEGASLOT_IMAGE = {};
+// Bonus-buy cost multipliers — fetched from server config so UI/server stay in sync.
+// Defaults match current backend (post-2026-04-27 retune); will be overwritten
+// at config load time. Old hardcoded 120/360 caused user-visible price drift after
+// backend retunes (UI shown 12k, server charged 8.5k or vice-versa).
+let MEGASLOT_BB_REG_COST = 85;
+let MEGASLOT_BB_PREM_COST = 250;
 
 let _megaslotState = {
   busy: false,
@@ -4518,13 +4524,21 @@ async function renderMegaslot(area) {
       </details>
     </div>
   `;
-  // Load weapon images from server (once per session)
+  // Load weapon images + bonus-buy costs from server (once per session).
+  // Bonus-buy cost is server-authoritative — frontend MUST read from config
+  // instead of hardcoding, otherwise UI prices drift after backend retunes.
   if (!_megaslotState.configLoaded) {
     try {
       const cfg = await api('/api/casino/megaslot/config');
       (cfg.symbols || []).forEach(s => {
         if (s.image_url) MEGASLOT_IMAGE[s.key] = s.image_url;
       });
+      if (cfg.bonus_buy_regular && Number.isFinite(cfg.bonus_buy_regular.cost_mult)) {
+        MEGASLOT_BB_REG_COST = cfg.bonus_buy_regular.cost_mult;
+      }
+      if (cfg.bonus_buy_premium && Number.isFinite(cfg.bonus_buy_premium.cost_mult)) {
+        MEGASLOT_BB_PREM_COST = cfg.bonus_buy_premium.cost_mult;
+      }
       _megaslotState.configLoaded = true;
     } catch {}
   }
@@ -4649,8 +4663,8 @@ function _updateAutoSpinUi() {
 function _openBonusBuyModal() {
   if (_megaslotState.busy) return;
   const bet = _megaslotState.bet;
-  const regCost = bet * 120;
-  const premCost = bet * 360;
+  const regCost  = bet * MEGASLOT_BB_REG_COST;
+  const premCost = bet * MEGASLOT_BB_PREM_COST;
   const el = document.createElement('div');
   el.className = 'ms-bonus-modal';
   el.innerHTML = `
@@ -4883,7 +4897,10 @@ async function playMegaslot(bonusBuy, bonusType) {
   if (_megaslotState.busy) return;
   const bet = _megaslotState.bet;
   if (bet <= 0) return toast('Поставь сумму');
-  const costMult = bonusBuy ? (bonusType === 'premium' ? 360 : 120) : 1;
+  // Cost multiplier comes from server config (no more hardcoded 120/360)
+  const costMult = bonusBuy
+    ? (bonusType === 'premium' ? MEGASLOT_BB_PREM_COST : MEGASLOT_BB_REG_COST)
+    : 1;
   const cost = bet * costMult;
   // (modal already confirmed for bonus buy; no confirm() needed here)
 
