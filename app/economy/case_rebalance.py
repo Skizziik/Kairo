@@ -451,7 +451,7 @@ NATIO_SKINS: list[dict] = [
         "category":  "weapon",
         "image":     "/img/skin_ak_red_pussy.png",
         "price":     1500,
-        "weight":    0.55,
+        "weight":    0.49,
     },
     {
         "key":       "natio_glock_russia",
@@ -484,7 +484,7 @@ NATIO_SKINS: list[dict] = [
         "category":  "knife",
         "image":     "/img/skin_knife_meteor.png",
         "price":     25000,
-        "weight":    0.04,
+        "weight":    0.10,
     },
     {
         "key":       "natio_knife_taluy",
