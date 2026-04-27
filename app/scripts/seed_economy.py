@@ -229,7 +229,7 @@ CASE_DEFS = [
         "price": 4999,
         "weapon_set": None,  # all weapons allowed
         # Classic gambling spread — restricted is the "lose" bucket, exc_rare is jackpot.
-        "rarity_weights": {"restricted": 0.25, "classified": 0.35, "covert": 0.30, "exceedingly_rare": 0.10},
+        "rarity_weights": {"restricted": 0.35, "classified": 0.40, "covert": 0.20, "exceedingly_rare": 0.05},
         "image_url": CASE_IMAGE_KILOWATT,
     },
 ]
