@@ -127,6 +127,14 @@ BOT_KINDS: dict[str, dict] = {
         "max_count":     3,
         "description":   "+0.5⭐ к репутации (за бота, до +1.5)",
     },
+    "guard": {
+        "name":          "Охранник",
+        "icon":          "🛡",
+        "hire_cost":     8_000,
+        "salary_per_hr": 400,
+        "max_count":     3,
+        "description":   "−10% шанс рейдеру за бота (до −30%, защита кассы)",
+    },
 }
 
 
@@ -149,6 +157,100 @@ DECOR_REP_PER_RARITY = {                # reputation bonus per displayed skin
     "restricted": 0.1, "classified": 0.2,
     "covert": 0.4, "exceedingly_rare": 0.8,
 }
+
+
+# ============================================================
+# THEMES — visual variants + economic bonuses
+# ============================================================
+
+THEMES: dict[str, dict] = {
+    "vegas": {
+        "key":         "vegas",
+        "name":        "Vegas Classic",
+        "icon":        "🎰",
+        "cost":        0,
+        "income_mult": 1.00,
+        "rep_delta":   0.0,
+        "description": "Стандартная американская классика. Приветствует всех гостей.",
+    },
+    "macau": {
+        "key":         "macau",
+        "name":        "Macau Dragon",
+        "icon":        "🐉",
+        "cost":        1_000_000,
+        "income_mult": 1.10,
+        "rep_delta":   0.2,
+        "description": "Восточная роскошь. +10% дохода, +0.2⭐ к репутации.",
+    },
+    "underground": {
+        "key":         "underground",
+        "name":        "Underground",
+        "icon":        "🕴",
+        "cost":        5_000_000,
+        "income_mult": 1.20,
+        "rep_delta":   -1.0,
+        "description": "Гаражное казино, нет правил. +20% дохода, −1⭐ к репутации.",
+    },
+    "cs": {
+        "key":         "cs",
+        "name":        "CS Theme",
+        "icon":        "🔫",
+        "cost":        10_000_000,
+        "income_mult": 1.15,
+        "rep_delta":   0.3,
+        "description": "Гости — CT и T бойцы. Тематика CS2. +15% дохода.",
+    },
+    "cosmic": {
+        "key":         "cosmic",
+        "name":        "Cosmic",
+        "icon":        "🌌",
+        "cost":        50_000_000,
+        "income_mult": 1.30,
+        "rep_delta":   0.5,
+        "description": "Премиум-эффекты, частицы, +30% дохода.",
+    },
+}
+
+
+# ============================================================
+# STREAK / CELEB / RAID config
+# ============================================================
+
+STREAK_HOT_CHANCE   = 0.04   # per tick (~5s polling)
+STREAK_COLD_CHANCE  = 0.04
+STREAK_DURATION_SEC = 60
+STREAK_HOT_BONUS    = 1.25
+STREAK_COLD_PENALTY = 0.75
+
+CELEB_CHANCE        = 0.02   # per tick when reputation ≥ 3.5
+CELEB_DURATION_SEC  = 600    # 10 min
+CELEB_INCOME_MULT   = 1.50
+CELEB_NAMES         = [
+    "s1mple", "ZywOo", "Oleksandr", "Dread", "Игорь-Лудоман",
+    "Лагурман", "Пашабиаз", "Jame", "boombl4", "Эминем",
+]
+
+RAID_COOLDOWN_HOURS = 6
+RAID_STEAL_PCT      = 0.05   # 5% of victim's unbanked cash
+RAID_SUCCESS_BASE   = 0.30   # 30% base success
+RAID_BONUS_PER_GUARD = -0.10 # each guard bot = -10% to attacker success
+
+NEWS_MAX_ITEMS = 10
+
+
+# ============================================================
+# DAILY MISSIONS templates
+# ============================================================
+
+TYCOON_DAILY_TEMPLATES = [
+    {"key": "earn_chips_50k",  "name": "Заработать 50k чипов",     "metric": "chips_earned",   "target": 50_000,    "reward_chips": 5_000},
+    {"key": "earn_chips_500k", "name": "Заработать 500k чипов",    "metric": "chips_earned",   "target": 500_000,   "reward_chips": 25_000},
+    {"key": "collect_30",      "name": "Собрать с подносов 30 раз","metric": "trays_collected","target": 30,        "reward_chips": 8_000},
+    {"key": "buy_2_units",     "name": "Купить 2 юнита",           "metric": "units_bought",   "target": 2,         "reward_chips": 12_000},
+    {"key": "hire_bot",        "name": "Нанять бота",              "metric": "bots_hired",     "target": 1,         "reward_chips": 6_000},
+    {"key": "convert_cash",    "name": "Сконвертить в $",          "metric": "cash_converted", "target": 1_000,     "reward_chips": 4_000},
+    {"key": "convert_coins",   "name": "Сконвертить в 🪙",          "metric": "coins_converted","target": 100,       "reward_chips": 15_000},
+]
 
 
 # ============================================================
@@ -231,7 +333,78 @@ def _chips_per_sec_for_unit(u: dict, occupancy: float, dealer_factor: float, man
 
 
 async def get_state(user_id: int) -> dict:
-    """Read state, run offline tick, return full snapshot for the frontend."""
+    """Read state, run offline tick, return full snapshot for the frontend.
+
+    On first-deploy race conditions where the schema migration is still
+    running (Render free tier can be slow), self-heals by calling
+    ensure_schema() once and retrying.
+    """
+    try:
+        return await _get_state_inner(user_id)
+    except Exception as e:
+        msg = str(e)
+        if 'tycoon_' in msg.lower() and ('does not exist' in msg.lower() or 'undefinedtableerror' in msg.lower()):
+            log.warning("tycoon schema not ready, re-running ensure_schema and retrying")
+            try:
+                await ensure_schema()
+            except Exception:
+                pass
+            return await _get_state_inner(user_id)
+        raise
+
+
+async def _theme_bonuses(state: dict) -> tuple[float, float]:
+    """Return (income_mult, rep_delta) for the currently selected theme."""
+    theme = (state.get("theme") or "vegas")
+    cfg = THEMES.get(theme, THEMES["vegas"])
+    return float(cfg["income_mult"]), float(cfg["rep_delta"])
+
+
+def _resolve_streak(state: dict, now: datetime) -> tuple[str, datetime | None, float]:
+    """Return (kind, until, income_mult). Resolves expiry + chance to enter a new streak."""
+    kind  = state.get("streak_kind") or "neutral"
+    until = state.get("streak_until")
+    if kind != "neutral" and until and until < now:
+        kind, until = "neutral", None
+    if kind == "neutral":
+        roll = random.random()
+        if roll < STREAK_HOT_CHANCE:
+            kind, until = "hot",  now + timedelta(seconds=STREAK_DURATION_SEC)
+        elif roll < STREAK_HOT_CHANCE + STREAK_COLD_CHANCE:
+            kind, until = "cold", now + timedelta(seconds=STREAK_DURATION_SEC)
+    mult = STREAK_HOT_BONUS if kind == "hot" else (STREAK_COLD_PENALTY if kind == "cold" else 1.0)
+    return kind, until, mult
+
+
+def _resolve_celeb(state: dict, reputation: float, now: datetime) -> tuple[datetime | None, str | None, float]:
+    """Roll for celebrity visit. Active celeb gives +50% income for 10 min."""
+    until = state.get("celeb_until")
+    name  = state.get("celeb_name")
+    if until and until < now:
+        until, name = None, None
+    if until is None and reputation >= 3.5 and random.random() < CELEB_CHANCE:
+        until = now + timedelta(seconds=CELEB_DURATION_SEC)
+        name  = random.choice(CELEB_NAMES)
+    mult = CELEB_INCOME_MULT if (until and until > now) else 1.0
+    return until, name, mult
+
+
+async def _push_news(conn, user_id: int, msg: str) -> None:
+    """Append a string to the user's news feed (capped at NEWS_MAX_ITEMS)."""
+    cur = await conn.fetchval("select news from tycoon_state where user_id = $1", user_id)
+    items = []
+    if cur:
+        items = cur if isinstance(cur, list) else json.loads(cur)
+    ts = datetime.now(timezone.utc).isoformat()
+    items.append({"t": ts, "msg": msg})
+    items = items[-NEWS_MAX_ITEMS:]
+    await conn.execute(
+        "update tycoon_state set news = $2::jsonb where user_id = $1",
+        user_id, json.dumps(items),
+    )
+
+
+async def _get_state_inner(user_id: int) -> dict:
     async with pool().acquire() as conn:
         async with conn.transaction():
             await _ensure_state(conn, user_id)
@@ -277,10 +450,23 @@ async def get_state(user_id: int) -> dict:
                     decor_rep_bonus += DECOR_REP_PER_RARITY.get(rar, 0.0)
             decor_rep_bonus = min(2.0, decor_rep_bonus)              # cap so single user can't grind 5⭐ via decor only
 
-            # Reputation = 1 (base) + 0.4 per amenity + cleaner_rep + decor — capped 5
+            # Reputation = 1 (base) + 0.4 per amenity + cleaner_rep + decor + theme bonus
             n_amenities = sum(1 for u in unit_rows if u["kind"] == "amenity")
-            reputation = 1.0 + 0.4 * n_amenities + cleaner_rep + decor_rep_bonus
+            theme_income_mult, theme_rep_delta = await _theme_bonuses(state)
+            reputation = 1.0 + 0.4 * n_amenities + cleaner_rep + decor_rep_bonus + theme_rep_delta
             reputation = max(0.0, min(5.0, reputation))
+
+            # Streak + celeb modifiers (rolled on each tick)
+            streak_kind, streak_until, streak_mult = _resolve_streak(state, now)
+            celeb_until, celeb_name, celeb_mult   = _resolve_celeb(state, reputation, now)
+            global_income_mult = theme_income_mult * streak_mult * celeb_mult
+            # If celeb just appeared (was None, now set) — push news
+            if celeb_until and celeb_until > now and (state.get("celeb_until") is None or state.get("celeb_until") < now):
+                try:
+                    await _push_news(conn, user_id,
+                        f"🌟 {celeb_name} зашёл в твоё казино! +50% дохода 10 минут")
+                except Exception:
+                    pass
 
             # Run tick: each unit accrues chips, attendants auto-collect, cashier auto-converts
             new_chips = int(state["chips"])
@@ -289,7 +475,7 @@ async def get_state(user_id: int) -> dict:
             chips_per_sec_per_unit: dict[int, float] = {}
             for u in unit_rows:
                 occ = _compute_occupancy(reputation, int(u["tier"]), manager_bonus)
-                cps = _chips_per_sec_for_unit(dict(u), occ, dealer_factor, manager_bonus)
+                cps = _chips_per_sec_for_unit(dict(u), occ, dealer_factor, manager_bonus) * global_income_mult
                 occupancy_per_unit[u["id"]]    = occ
                 chips_per_sec_per_unit[u["id"]] = cps
                 gen = int(cps * elapsed)
@@ -343,11 +529,13 @@ async def get_state(user_id: int) -> dict:
                     salary_chips = new_chips
                     new_chips = 0
 
-            # Persist state changes from tick
+            # Persist state changes from tick (incl. streak / celeb)
             await conn.execute(
                 "update tycoon_state set chips = $2, cash = $3, reputation_stars = $4, last_tick_at = $5, "
+                "streak_kind = $6, streak_until = $7, celeb_until = $8, celeb_name = $9, "
                 "updated_at = now() where user_id = $1",
                 user_id, new_chips, new_cash, reputation, now,
+                streak_kind, streak_until, celeb_until, celeb_name,
             )
 
             # Re-fetch units after tick so chips_in_tray is current
@@ -395,6 +583,28 @@ async def get_state(user_id: int) -> dict:
     cap_left = max(0, COINS_DAILY_CAP_BASE - int(state.get("bank_conv_today") or 0)
                    if state.get("last_bank_conv_day") == datetime.now(timezone.utc).date() else COINS_DAILY_CAP_BASE)
 
+    # Themes — owned + catalog
+    raw_owned = state.get("themes_owned")
+    if raw_owned is None:
+        themes_owned = ["vegas"]
+    elif isinstance(raw_owned, list):
+        themes_owned = raw_owned
+    else:
+        try:
+            themes_owned = json.loads(raw_owned)
+        except Exception:
+            themes_owned = ["vegas"]
+    themes_payload = []
+    for tk, tcfg in THEMES.items():
+        themes_payload.append({**tcfg, "owned": tk in themes_owned, "selected": tk == state.get("theme")})
+
+    # News feed
+    news_raw = state.get("news") or []
+    news_items = news_raw if isinstance(news_raw, list) else json.loads(news_raw or "[]")
+
+    # Daily missions
+    daily_missions = await _get_or_create_daily_missions(user_id)
+
     return {
         "ok":             True,
         "chips":          int(new_chips),
@@ -418,6 +628,21 @@ async def get_state(user_id: int) -> dict:
         "bot_kinds":      [
             {"key": k, **v, "owned": _bot_counts(bot_rows).get(k, 0)} for k, v in BOT_KINDS.items()
         ],
+        "themes":         themes_payload,
+        "streak": {
+            "kind":          streak_kind,
+            "seconds_left":  int((streak_until - datetime.now(timezone.utc)).total_seconds()) if streak_until else 0,
+            "income_mult":   streak_mult,
+        },
+        "celeb": {
+            "active":        bool(celeb_until and celeb_until > datetime.now(timezone.utc)),
+            "name":          celeb_name if celeb_until and celeb_until > datetime.now(timezone.utc) else None,
+            "seconds_left":  int((celeb_until - datetime.now(timezone.utc)).total_seconds()) if (celeb_until and celeb_until > datetime.now(timezone.utc)) else 0,
+            "income_mult":   celeb_mult,
+        },
+        "global_income_mult": round(global_income_mult, 3),
+        "news":           news_items,
+        "missions":       daily_missions,
     }
 
 
@@ -501,6 +726,10 @@ async def buy_unit(user_id: int, unit_key: str, cell_x: int, cell_y: int) -> dic
                 "insert into tycoon_units (user_id, unit_key, cell_x, cell_y) values ($1, $2, $3, $4)",
                 user_id, unit_key, cell_x, cell_y,
             )
+    try:
+        await _bump_mission(user_id, "units_bought", 1)
+    except Exception:
+        pass
     return await get_state(user_id)
 
 
@@ -524,6 +753,11 @@ async def collect_unit(user_id: int, unit_id: int) -> dict:
                 "update tycoon_state set chips = chips + $2 where user_id = $1",
                 user_id, tray,
             )
+    try:
+        await _bump_mission(user_id, "trays_collected", 1)
+        await _bump_mission(user_id, "chips_earned",   tray)
+    except Exception:
+        pass
     return {"ok": True, "collected": tray}
 
 
@@ -563,6 +797,10 @@ async def convert_chips_to_cash(user_id: int, amount_chips: int) -> dict:
                 "update tycoon_state set chips = chips - $2, cash = cash + $3 where user_id = $1",
                 user_id, spent, cash_gain,
             )
+    try:
+        await _bump_mission(user_id, "cash_converted", cash_gain)
+    except Exception:
+        pass
     return {"ok": True, "spent_chips": spent, "cash_gained": cash_gain}
 
 
@@ -610,6 +848,10 @@ async def convert_cash_to_coins(user_id: int, amount_cash: int) -> dict:
                 "values ($1, $2, 'tycoon', $3, $4)",
                 user_id, coins_gain, f"tycoon_bank_conv_{spent}_cash", new_bal,
             )
+    try:
+        await _bump_mission(user_id, "coins_converted", coins_gain)
+    except Exception:
+        pass
     return {"ok": True, "spent_cash": spent, "coins_gained": coins_gain, "new_balance": new_bal}
 
 
@@ -636,6 +878,10 @@ async def hire_bot(user_id: int, kind: str) -> dict:
             await conn.execute(
                 "insert into tycoon_bots (user_id, kind) values ($1, $2)", user_id, kind,
             )
+    try:
+        await _bump_mission(user_id, "bots_hired", 1)
+    except Exception:
+        pass
     return await get_state(user_id)
 
 
@@ -696,6 +942,241 @@ async def remove_decor(user_id: int, decor_id: int) -> dict:
         )
     return await get_state(user_id)
 
+
+async def buy_theme(user_id: int, theme_key: str) -> dict:
+    cfg = THEMES.get(theme_key)
+    if cfg is None:
+        return {"ok": False, "error": "Unknown theme"}
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            state = await conn.fetchrow(
+                "select cash, themes_owned from tycoon_state where user_id = $1 for update", user_id,
+            )
+            if state is None:
+                return {"ok": False, "error": "No state"}
+            owned_raw = state["themes_owned"]
+            owned = owned_raw if isinstance(owned_raw, list) else json.loads(owned_raw or "[]")
+            if theme_key in owned:
+                return {"ok": False, "error": "Уже куплено"}
+            cost = int(cfg["cost"])
+            if int(state["cash"]) < cost:
+                return {"ok": False, "error": f"Нужно {cost:,} $"}
+            owned.append(theme_key)
+            await conn.execute(
+                "update tycoon_state set cash = cash - $2, themes_owned = $3::jsonb where user_id = $1",
+                user_id, cost, json.dumps(owned),
+            )
+    return await get_state(user_id)
+
+
+async def select_theme(user_id: int, theme_key: str) -> dict:
+    cfg = THEMES.get(theme_key)
+    if cfg is None:
+        return {"ok": False, "error": "Unknown theme"}
+    async with pool().acquire() as conn:
+        state = await conn.fetchrow(
+            "select themes_owned from tycoon_state where user_id = $1", user_id,
+        )
+        if state is None:
+            return {"ok": False, "error": "No state"}
+        owned_raw = state["themes_owned"]
+        owned = owned_raw if isinstance(owned_raw, list) else json.loads(owned_raw or "[]")
+        if theme_key not in owned and theme_key != "vegas":
+            return {"ok": False, "error": "Тема не куплена"}
+        await conn.execute(
+            "update tycoon_state set theme = $2 where user_id = $1", user_id, theme_key,
+        )
+    return await get_state(user_id)
+
+
+# ============================================================
+# DAILY MISSIONS
+# ============================================================
+
+async def _get_or_create_daily_missions(user_id: int) -> list[dict]:
+    today = datetime.now(timezone.utc).date()
+    async with pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "select missions from tycoon_daily_missions where user_id = $1 and day = $2",
+            user_id, today,
+        )
+        if row is not None:
+            raw = row["missions"]
+            return raw if isinstance(raw, list) else json.loads(raw)
+        # Roll 3 random missions
+        templates = random.sample(TYCOON_DAILY_TEMPLATES, k=3)
+        missions = [{**t, "progress": 0, "claimed": False} for t in templates]
+        await conn.execute(
+            "insert into tycoon_daily_missions (user_id, day, missions) values ($1, $2, $3::jsonb)",
+            user_id, today, json.dumps(missions),
+        )
+    return missions
+
+
+async def _bump_mission(user_id: int, metric: str, amount: int = 1) -> None:
+    """Increment progress on any mission matching the metric for today."""
+    today = datetime.now(timezone.utc).date()
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "select missions from tycoon_daily_missions where user_id = $1 and day = $2 for update",
+                user_id, today,
+            )
+            if row is None:
+                return
+            raw = row["missions"]
+            missions = raw if isinstance(raw, list) else json.loads(raw)
+            changed = False
+            for m in missions:
+                if m.get("metric") == metric and not m.get("claimed"):
+                    if m["progress"] < m["target"]:
+                        m["progress"] = min(m["target"], m["progress"] + amount)
+                        changed = True
+            if changed:
+                await conn.execute(
+                    "update tycoon_daily_missions set missions = $3::jsonb where user_id = $1 and day = $2",
+                    user_id, today, json.dumps(missions),
+                )
+
+
+async def claim_mission(user_id: int, mission_key: str) -> dict:
+    today = datetime.now(timezone.utc).date()
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "select missions from tycoon_daily_missions where user_id = $1 and day = $2 for update",
+                user_id, today,
+            )
+            if row is None:
+                return {"ok": False, "error": "Нет миссий"}
+            raw = row["missions"]
+            missions = raw if isinstance(raw, list) else json.loads(raw)
+            target = next((m for m in missions if m["key"] == mission_key), None)
+            if target is None:
+                return {"ok": False, "error": "Не найдено"}
+            if target.get("claimed"):
+                return {"ok": False, "error": "Уже забрано"}
+            if target["progress"] < target["target"]:
+                return {"ok": False, "error": "Ещё не выполнено"}
+            target["claimed"] = True
+            await conn.execute(
+                "update tycoon_daily_missions set missions = $3::jsonb where user_id = $1 and day = $2",
+                user_id, today, json.dumps(missions),
+            )
+            await conn.execute(
+                "update tycoon_state set chips = chips + $2 where user_id = $1",
+                user_id, int(target["reward_chips"]),
+            )
+    return {"ok": True, "reward_chips": int(target["reward_chips"]), "key": mission_key}
+
+
+# ============================================================
+# RAIDS — simple PvP: hit a friend's casino, steal % of cash
+# ============================================================
+
+async def list_raid_targets(user_id: int) -> list[dict]:
+    """List other players (humans, non-bot) with active casinos sorted by cash."""
+    async with pool().acquire() as conn:
+        rows = await conn.fetch(
+            """
+            select t.user_id, t.cash, t.reputation_stars, t.last_raided_at,
+                   u.username, u.first_name,
+                   (select count(*) from tycoon_bots b where b.user_id = t.user_id and b.kind = 'guard') as guards
+            from tycoon_state t
+            join users u on u.tg_id = t.user_id
+            where t.user_id != $1 and t.user_id != 1
+            order by t.cash desc
+            limit 30
+            """,
+            user_id,
+        )
+    out = []
+    now = datetime.now(timezone.utc)
+    for r in rows:
+        recent = r.get("last_raided_at")
+        recently_raided = bool(recent and (now - recent).total_seconds() < RAID_COOLDOWN_HOURS * 3600)
+        out.append({
+            "user_id":    int(r["user_id"]),
+            "name":       r["username"] or r["first_name"] or f"user{r['user_id']}",
+            "cash":       int(r["cash"]),
+            "reputation": float(r["reputation_stars"]),
+            "guards":     int(r["guards"] or 0),
+            "recently_raided": recently_raided,
+        })
+    return out
+
+
+async def raid(user_id: int, target_id: int) -> dict:
+    if user_id == target_id:
+        return {"ok": False, "error": "Сам себя?"}
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            attacker = await conn.fetchrow(
+                "select last_raid_at from tycoon_state where user_id = $1 for update", user_id,
+            )
+            if attacker is None:
+                return {"ok": False, "error": "Нет казино"}
+            now = datetime.now(timezone.utc)
+            if attacker["last_raid_at"] and (now - attacker["last_raid_at"]).total_seconds() < RAID_COOLDOWN_HOURS * 3600:
+                left = int(RAID_COOLDOWN_HOURS * 3600 - (now - attacker["last_raid_at"]).total_seconds())
+                return {"ok": False, "error": f"КД {left//60} мин"}
+            victim = await conn.fetchrow(
+                "select cash, last_raided_at from tycoon_state where user_id = $1 for update", target_id,
+            )
+            if victim is None:
+                return {"ok": False, "error": "Цель не найдена"}
+            if victim["last_raided_at"] and (now - victim["last_raided_at"]).total_seconds() < RAID_COOLDOWN_HOURS * 3600:
+                return {"ok": False, "error": "Цель недавно ограбили — попробуй позже"}
+            n_guards = int(await conn.fetchval(
+                "select count(*) from tycoon_bots where user_id = $1 and kind = 'guard'", target_id,
+            ) or 0)
+            success_chance = max(0.05, RAID_SUCCESS_BASE + RAID_BONUS_PER_GUARD * n_guards)
+            success = random.random() < success_chance
+            steal = 0
+            if success:
+                steal = int(int(victim["cash"]) * RAID_STEAL_PCT)
+                if steal > 0:
+                    await conn.execute(
+                        "update tycoon_state set cash = cash - $2 where user_id = $1", target_id, steal,
+                    )
+                    await conn.execute(
+                        "update tycoon_state set cash = cash + $2 where user_id = $1", user_id, steal,
+                    )
+            await conn.execute(
+                "update tycoon_state set last_raid_at = $2 where user_id = $1", user_id, now,
+            )
+            await conn.execute(
+                "update tycoon_state set last_raided_at = $2 where user_id = $1", target_id, now,
+            )
+            # Push news to both sides
+            attacker_name = await conn.fetchval(
+                "select coalesce(first_name, username, 'кто-то') from users where tg_id = $1", user_id,
+            )
+            victim_name = await conn.fetchval(
+                "select coalesce(first_name, username, 'кто-то') from users where tg_id = $1", target_id,
+            )
+            if success:
+                await _push_news(conn, user_id,
+                    f"⚔️ Ограбил {victim_name}! Унёс {steal:,} $.")
+                await _push_news(conn, target_id,
+                    f"💀 {attacker_name} налетел и стащил {steal:,} $!")
+            else:
+                await _push_news(conn, user_id,
+                    f"🛡 Налёт на {victim_name} провалился — охрана отбила.")
+                await _push_news(conn, target_id,
+                    f"🛡 Охрана отбила налёт от {attacker_name}.")
+    return {
+        "ok": True,
+        "success": success,
+        "stolen": steal,
+        "guards_at_target": n_guards,
+        "success_chance": round(success_chance, 2),
+    }
+
+
+# ============================================================
+# Original prestige (extended with celeb/streak reset)
+# ============================================================
 
 async def prestige(user_id: int) -> dict:
     """Reset everything for VIP stars. Threshold = $1B lifetime cash."""

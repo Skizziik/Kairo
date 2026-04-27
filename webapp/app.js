@@ -52,7 +52,8 @@ async function api(path, options = {}) {
       const ctrl = new AbortController();
       // Mutations get a longer timeout so we don't abort during cold-start
       // (Render free tier can take 15-30s to wake up).
-      const timeoutId = setTimeout(() => ctrl.abort(), isMutation ? 45000 : 10000);
+      // Render free tier cold-start can take 20-30s; give GETs more breathing room
+      const timeoutId = setTimeout(() => ctrl.abort(), isMutation ? 45000 : 30000);
       const resp = await fetch(url, { ...opts, signal: ctrl.signal });
       clearTimeout(timeoutId);
       if (!resp.ok) {
@@ -63,14 +64,22 @@ async function api(path, options = {}) {
     } catch (e) {
       lastErr = e;
       const msg = String(e?.message || e);
-      const isNetwork = msg === 'Failed to fetch' || msg.includes('NetworkError') || e?.name === 'AbortError';
+      // 'Load failed' is what iOS Safari/TG-WebView gives on network error
+      // (instead of Chrome's 'Failed to fetch'). Treat the same.
+      const isNetwork = msg === 'Failed to fetch'
+        || msg === 'Load failed'
+        || msg.includes('NetworkError')
+        || msg.includes('Network request failed')
+        || e?.name === 'AbortError';
       if (!isNetwork || attempt === maxRetries) break;
       await new Promise(r => setTimeout(r, 300 * (attempt + 1)));
     }
   }
   // Normalize message so users see something readable
   const msg = String(lastErr?.message || lastErr);
-  if (msg === 'Failed to fetch' || msg.includes('NetworkError') || msg.includes('aborted')) {
+  if (msg === 'Failed to fetch' || msg === 'Load failed'
+      || msg.includes('NetworkError') || msg.includes('aborted')
+      || msg.includes('Network request failed')) {
     throw new Error('Сеть лагает, попробуй ещё раз');
   }
   throw lastErr;
@@ -4695,15 +4704,43 @@ const TC_VISITOR_TYPES = [
 // ---- ENTRY POINT ----
 async function renderTycoon(area) {
   tycoonState.area = area;
-  area.innerHTML = `<div class="tycoon-wrap"><div class="loader">Загрузка казино…</div></div>`;
-  try {
-    tycoonState.data = await api('/api/tycoon/state');
-    _tcPaintAll();
-    _tcStartPolling();
-    _tcStartVisitorLoop();
-  } catch (e) {
-    area.innerHTML = `<div class="tycoon-wrap"><div class="loader">Ошибка: ${escape(e.message)}</div></div>`;
+  area.innerHTML = `<div class="tycoon-wrap"><div class="tc-loader-warm">
+    <div class="tc-loader-emoji">🎰</div>
+    <div>Запускаем казино…</div>
+    <div class="tc-loader-sub">Render free tier бывает медленный — может занять до 30 сек на старте</div>
+  </div></div>`;
+  // Try up to 3 times if the first call hits a cold-start network error
+  let lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      tycoonState.data = await api('/api/tycoon/state');
+      _tcPaintAll();
+      _tcStartPolling();
+      _tcStartVisitorLoop();
+      return;
+    } catch (e) {
+      lastErr = e;
+      const msg = String(e?.message || e);
+      const isNet = msg.includes('Сеть лагает') || msg === 'Load failed' || msg === 'Failed to fetch';
+      if (!isNet) break;  // non-network error — don't retry, show it
+      area.innerHTML = `<div class="tycoon-wrap"><div class="tc-loader-warm">
+        <div class="tc-loader-emoji">⏳</div>
+        <div>Будим сервер... (попытка ${attempt + 2}/3)</div>
+        <div class="tc-loader-sub">${escape(msg)}</div>
+      </div></div>`;
+      await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+    }
   }
+  area.innerHTML = `
+    <div class="tycoon-wrap">
+      <div class="tc-loader-warm">
+        <div class="tc-loader-emoji">⚠️</div>
+        <div>Ошибка: ${escape(lastErr?.message || lastErr || 'unknown')}</div>
+        <button class="btn" id="tc-retry-btn" style="margin-top:12px">Попробовать ещё раз</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('tc-retry-btn')?.addEventListener('click', () => renderTycoon(area));
 }
 
 function _tcStopAll() {
@@ -4764,7 +4801,10 @@ function _tcPaintAll() {
     <div class="tycoon-wrap">
       <div class="tc-hud" id="tc-hud">${_tcHudHtml(d)}</div>
 
-      <div class="tc-stage" id="tc-stage" style="height:${floorHeightPx + 70}px">
+      <div class="tc-stage theme-${d.theme || 'vegas'} ${(d.streak && d.streak.kind!=='neutral') ? 'streak-'+d.streak.kind : ''} ${(d.celeb && d.celeb.active) ? 'celeb-active' : ''}" id="tc-stage" style="height:${floorHeightPx + 70}px">
+        ${(d.streak && d.streak.kind === 'hot') ? `<div class="tc-streak-banner hot">🔥 HOT STREAK · +25% дохода · ${d.streak.seconds_left}с</div>` : ''}
+        ${(d.streak && d.streak.kind === 'cold') ? `<div class="tc-streak-banner cold">❄️ COLD STREAK · −25% дохода · ${d.streak.seconds_left}с</div>` : ''}
+        ${(d.celeb && d.celeb.active) ? `<div class="tc-celeb-banner">🌟 ${escape(d.celeb.name)} в казино! +50% · ${Math.floor(d.celeb.seconds_left/60)}мин</div>` : ''}
         <div class="tc-bg-sky"></div>
         <div class="tc-door" id="tc-door">
           <div class="tc-door-frame"></div>
@@ -4786,6 +4826,10 @@ function _tcPaintAll() {
         <button class="tc-tool-btn ${tycoonState.panelOpen==='bots' ? 'active' : ''}" data-panel="bots">🤖 Боты</button>
         <button class="tc-tool-btn ${tycoonState.panelOpen==='bank' ? 'active' : ''}" data-panel="bank">🏦 Банк</button>
         <button class="tc-tool-btn ${tycoonState.panelOpen==='decor' ? 'active' : ''}" data-panel="decor">💎 Декор</button>
+        <button class="tc-tool-btn ${tycoonState.panelOpen==='themes' ? 'active' : ''}" data-panel="themes">🎨 Темы</button>
+        <button class="tc-tool-btn ${tycoonState.panelOpen==='missions' ? 'active' : ''}" data-panel="missions">📅 Квесты</button>
+        <button class="tc-tool-btn ${tycoonState.panelOpen==='raids' ? 'active' : ''}" data-panel="raids">⚔️ Налёты</button>
+        <button class="tc-tool-btn ${tycoonState.panelOpen==='news' ? 'active' : ''}" data-panel="news">📰 Лента</button>
       </div>
 
       <div class="tc-panel" id="tc-panel">${_tcPanelHtml(d, tycoonState.panelOpen)}</div>
@@ -5134,11 +5178,126 @@ function _tcRefreshUnits() {
 
 // ---- PANELS (shop / bots / bank / decor) ----
 function _tcPanelHtml(d, panel) {
-  if (panel === 'shop') return _tcShopHtml(d);
-  if (panel === 'bots') return _tcBotsHtml(d);
-  if (panel === 'bank') return _tcBankHtml(d);
-  if (panel === 'decor') return _tcDecorHtml(d);
+  if (panel === 'shop')     return _tcShopHtml(d);
+  if (panel === 'bots')     return _tcBotsHtml(d);
+  if (panel === 'bank')     return _tcBankHtml(d);
+  if (panel === 'decor')    return _tcDecorHtml(d);
+  if (panel === 'themes')   return _tcThemesHtml(d);
+  if (panel === 'missions') return _tcMissionsHtml(d);
+  if (panel === 'raids')    return _tcRaidsHtml(d);
+  if (panel === 'news')     return _tcNewsHtml(d);
   return '';
+}
+
+function _tcThemesHtml(d) {
+  const items = (d.themes || []).map(t => {
+    const owned = !!t.owned;
+    const selected = !!t.selected;
+    const canBuy = !owned && d.cash >= t.cost;
+    return `
+      <div class="tc-theme-card ${selected ? 'selected' : ''} ${owned ? 'owned' : ''}" data-theme="${t.key}">
+        <div class="tc-theme-icon">${t.icon}</div>
+        <div class="tc-theme-name">${escape(t.name)}</div>
+        <div class="tc-theme-desc">${escape(t.description || '')}</div>
+        <div class="tc-theme-stats">
+          ${t.income_mult !== 1 ? `<span class="${t.income_mult>1?'good':'bad'}">×${t.income_mult.toFixed(2)}</span>` : '<span>×1.00</span>'}
+          ${t.rep_delta !== 0 ? `<span class="${t.rep_delta>0?'good':'bad'}">${t.rep_delta>0?'+':''}${t.rep_delta.toFixed(1)}⭐</span>` : ''}
+        </div>
+        ${selected
+          ? `<div class="tc-theme-active">✓ активна</div>`
+          : owned
+            ? `<button class="tc-theme-btn select" data-theme-select="${t.key}">выбрать</button>`
+            : `<button class="tc-theme-btn ${canBuy?'':'disabled'}" data-theme-buy="${t.key}" ${canBuy?'':'disabled'}>${fmt(t.cost)} $</button>`
+        }
+      </div>
+    `;
+  }).join('');
+  return `<div class="tc-panel-title">ТЕМА КАЗИНО</div><div class="tc-themes-grid">${items}</div>`;
+}
+
+function _tcMissionsHtml(d) {
+  const ms = d.missions || [];
+  const items = ms.map(m => {
+    const pct = Math.min(100, (m.progress / m.target) * 100);
+    const done = m.progress >= m.target;
+    return `
+      <div class="tc-mission-card ${done?'done':''} ${m.claimed?'claimed':''}">
+        <div class="tc-mission-row">
+          <div class="tc-mission-name">${escape(m.name)}</div>
+          <div class="tc-mission-reward">+${fmt(m.reward_chips)} 🎲</div>
+        </div>
+        <div class="tc-mission-prog"><div class="tc-mission-prog-fill" style="width:${pct}%"></div></div>
+        <div class="tc-mission-foot">
+          <span>${fmt(m.progress)} / ${fmt(m.target)}</span>
+          ${m.claimed
+            ? '<span class="tc-mission-claimed">✓ забрано</span>'
+            : done
+              ? `<button class="tc-mission-claim" data-mission="${m.key}">забрать</button>`
+              : '<span class="tc-mission-pending">в работе</span>'
+          }
+        </div>
+      </div>
+    `;
+  }).join('');
+  return `<div class="tc-panel-title">КВЕСТЫ ДНЯ</div>
+    <div class="tc-panel-hint">Сбрасываются каждый день. Награда — чипы.</div>
+    <div class="tc-missions-list">${items}</div>`;
+}
+
+function _tcRaidsHtml(d) {
+  if (!tycoonState.raidTargets) {
+    setTimeout(_tcLoadRaidTargets, 50);
+    return `<div class="tc-panel-title">НАЛЁТЫ</div>
+      <div class="tc-panel-hint">Загрузка целей...</div>`;
+  }
+  const targets = tycoonState.raidTargets || [];
+  const items = targets.length === 0
+    ? `<div class="tc-empty">Целей нет</div>`
+    : targets.map(t => `
+      <div class="tc-raid-card ${t.recently_raided?'cooldown':''}">
+        <div class="tc-raid-row">
+          <div class="tc-raid-name">${escape(t.name)}</div>
+          <div class="tc-raid-cash">💵 ${fmt(t.cash)}</div>
+        </div>
+        <div class="tc-raid-stats">
+          <span>⭐ ${t.reputation.toFixed(1)}</span>
+          <span>🛡 охранников: ${t.guards}</span>
+          <span>≈ +${fmt(Math.floor(t.cash * 0.05))} $ если повезёт</span>
+        </div>
+        <button class="tc-raid-btn ${t.recently_raided?'disabled':''}" data-raid="${t.user_id}" ${t.recently_raided?'disabled':''}>
+          ${t.recently_raided ? '💤 цель отдыхает' : '⚔️ налёт'}
+        </button>
+      </div>
+    `).join('');
+  return `<div class="tc-panel-title">НАЛЁТЫ</div>
+    <div class="tc-panel-hint">Своруй до 5% кассы. Кулдаун 6 часов. Охранники у цели снижают шанс на 10% каждый.</div>
+    <div class="tc-raids-list">${items}</div>`;
+}
+
+function _tcNewsHtml(d) {
+  const news = (d.news || []).slice().reverse();
+  if (news.length === 0) return `<div class="tc-panel-title">ЛЕНТА</div><div class="tc-empty">Пусто. Зарабатывай и налётами на других казик</div>`;
+  const items = news.map(n => {
+    const ts = new Date(n.t);
+    const time = ts.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    return `
+      <div class="tc-news-row">
+        <span class="tc-news-time">${time}</span>
+        <span class="tc-news-msg">${escape(n.msg)}</span>
+      </div>
+    `;
+  }).join('');
+  return `<div class="tc-panel-title">ЛЕНТА</div><div class="tc-news-list">${items}</div>`;
+}
+
+async function _tcLoadRaidTargets() {
+  try {
+    const r = await api('/api/tycoon/raid/targets');
+    tycoonState.raidTargets = Array.isArray(r) ? r : [];
+    if (tycoonState.panelOpen === 'raids') _tcPaintAll();
+  } catch (_) {
+    tycoonState.raidTargets = [];
+  }
 }
 
 function _tcShopHtml(d) {
@@ -5316,6 +5475,67 @@ function _tcWireEvents() {
   document.querySelectorAll('[data-decor-remove]').forEach(b => {
     b.addEventListener('click', () => _tcDecorRemove(parseInt(b.dataset.decorRemove)));
   });
+  document.querySelectorAll('[data-theme-buy]').forEach(b => {
+    b.addEventListener('click', () => _tcBuyTheme(b.dataset.themeBuy));
+  });
+  document.querySelectorAll('[data-theme-select]').forEach(b => {
+    b.addEventListener('click', () => _tcSelectTheme(b.dataset.themeSelect));
+  });
+  document.querySelectorAll('[data-mission]').forEach(b => {
+    b.addEventListener('click', () => _tcClaimMission(b.dataset.mission));
+  });
+  document.querySelectorAll('[data-raid]').forEach(b => {
+    b.addEventListener('click', () => _tcDoRaid(parseInt(b.dataset.raid)));
+  });
+}
+
+async function _tcBuyTheme(key) {
+  try {
+    const r = await api('/api/tycoon/theme/buy', { method: 'POST', body: JSON.stringify({ key }) });
+    if (!r.ok) { toast(r.error || 'Ошибка'); return; }
+    tycoonState.data = r;
+    _tcPaintAll();
+    toast('🎨 Тема куплена');
+  } catch (e) { toast(e.message); }
+}
+
+async function _tcSelectTheme(key) {
+  try {
+    const r = await api('/api/tycoon/theme/select', { method: 'POST', body: JSON.stringify({ key }) });
+    if (!r.ok) { toast(r.error || 'Ошибка'); return; }
+    tycoonState.data = r;
+    _tcPaintAll();
+  } catch (e) { toast(e.message); }
+}
+
+async function _tcClaimMission(key) {
+  try {
+    const r = await api('/api/tycoon/mission/claim', { method: 'POST', body: JSON.stringify({ key }) });
+    if (!r.ok) { toast(r.error || 'Ошибка'); return; }
+    toast(`+${fmt(r.reward_chips)} 🎲 за квест!`);
+    tg?.HapticFeedback?.notificationOccurred?.('success');
+    // Refresh state
+    tycoonState.data = await api('/api/tycoon/state');
+    _tcPaintAll();
+  } catch (e) { toast(e.message); }
+}
+
+async function _tcDoRaid(targetId) {
+  if (!confirm('Совершить налёт? Удача 30% базово, охрана цели снижает.')) return;
+  try {
+    const r = await api('/api/tycoon/raid', { method: 'POST', body: JSON.stringify({ target_id: targetId }) });
+    if (!r.ok) { toast(r.error || 'Ошибка'); return; }
+    if (r.success && r.stolen > 0) {
+      tg?.HapticFeedback?.notificationOccurred?.('success');
+      toast(`⚔️ Унёс ${fmt(r.stolen)} $!`);
+    } else {
+      tg?.HapticFeedback?.notificationOccurred?.('error');
+      toast(`🛡 Налёт провалился (шанс был ${Math.round(r.success_chance*100)}%)`);
+    }
+    tycoonState.raidTargets = null;
+    tycoonState.data = await api('/api/tycoon/state');
+    _tcPaintAll();
+  } catch (e) { toast(e.message); }
 }
 
 // ---- ACTIONS ----

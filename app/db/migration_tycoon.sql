@@ -75,3 +75,23 @@ create table if not exists tycoon_decor (
     placed_at       timestamptz not null default now()
 );
 create index if not exists idx_tycoon_decor_user on tycoon_decor (user_id);
+
+-- ===== Phase 2 columns (themes / streaks / celeb / raid cooldown) =====
+alter table tycoon_state
+    add column if not exists themes_owned        jsonb       not null default '["vegas"]'::jsonb,
+    add column if not exists streak_kind         text        not null default 'neutral',   -- neutral | hot | cold
+    add column if not exists streak_until        timestamptz,
+    add column if not exists celeb_until         timestamptz,
+    add column if not exists celeb_name          text,
+    add column if not exists last_raid_at        timestamptz,
+    add column if not exists last_raided_at      timestamptz,
+    add column if not exists news                jsonb       not null default '[]'::jsonb;  -- last ~10 events
+
+-- Daily missions for tycoon
+create table if not exists tycoon_daily_missions (
+    user_id     bigint not null references users(tg_id) on delete cascade,
+    day         date   not null,
+    missions    jsonb  not null,    -- list of {key, target, progress, reward, claimed}
+    primary key (user_id, day)
+);
+create index if not exists idx_tycoon_dm_user on tycoon_daily_missions (user_id, day);

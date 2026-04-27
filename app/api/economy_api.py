@@ -864,6 +864,44 @@ async def api_tycoon_prestige(user: dict = Depends(require_user)) -> dict:
     return await _tycoon.prestige(int(user["id"]))
 
 
+# Phase 2 — themes / missions / raids
+class TycoonThemeReq(BaseModel):
+    key: str
+
+
+class TycoonMissionReq(BaseModel):
+    key: str
+
+
+class TycoonRaidReq(BaseModel):
+    target_id: int = Field(..., ge=1)
+
+
+@router.post("/tycoon/theme/buy")
+async def api_tycoon_theme_buy(req: TycoonThemeReq, user: dict = Depends(require_user)) -> dict:
+    return await _tycoon.buy_theme(int(user["id"]), req.key)
+
+
+@router.post("/tycoon/theme/select")
+async def api_tycoon_theme_select(req: TycoonThemeReq, user: dict = Depends(require_user)) -> dict:
+    return await _tycoon.select_theme(int(user["id"]), req.key)
+
+
+@router.post("/tycoon/mission/claim")
+async def api_tycoon_mission_claim(req: TycoonMissionReq, user: dict = Depends(require_user)) -> dict:
+    return await _tycoon.claim_mission(int(user["id"]), req.key)
+
+
+@router.get("/tycoon/raid/targets")
+async def api_tycoon_raid_targets(user: dict = Depends(require_user)) -> list[dict]:
+    return await _tycoon.list_raid_targets(int(user["id"]))
+
+
+@router.post("/tycoon/raid")
+async def api_tycoon_raid(req: TycoonRaidReq, user: dict = Depends(require_user)) -> dict:
+    return await _tycoon.raid(int(user["id"]), req.target_id)
+
+
 # ================ PVP COINFLIP (skin duels) ================
 from app.economy import coinflip_pvp as _cfpvp
 
