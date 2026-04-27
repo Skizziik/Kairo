@@ -853,6 +853,31 @@ async def record_run(
     except Exception:
         pass
 
+    # Snake achievements (best-effort, won't block run)
+    new_lvl = level_for_xp(cur_xp)
+    achievements: list[dict] = []
+    try:
+        from app.economy import retention as _ret
+        # Per-run checks
+        run_ach = await _ret.check_achievements_after_action(tg_id, "snake_run", {
+            "runs": int((row or {}).get("runs_count", 0)) + 1,
+            "coins_this_run": coins,
+            "length": length,
+            "skins_eaten": skins_eaten,
+            "by_rarity": cleaned,
+            "lifetime": int((row or {}).get("coins_lifetime", 0)) + coins,
+        })
+        achievements.extend(run_ach)
+        # Snake-level-up check (if level changed)
+        old_lvl = int((row or {}).get("level", 1))
+        if new_lvl > old_lvl:
+            lvl_ach = await _ret.check_achievements_after_action(tg_id, "snake_level_up", {
+                "level": new_lvl,
+            })
+            achievements.extend(lvl_ach)
+    except Exception as e:
+        log.debug("snake achievements check failed: %s", e)
+
     return {
         "ok": True,
         "coins_credited": coins,
@@ -860,9 +885,10 @@ async def record_run(
         "skins_eaten": skins_eaten,
         "new_balance": new_bal,
         "new_xp": cur_xp,
-        "new_level": level_for_xp(cur_xp),
+        "new_level": new_lvl,
         "is_first_today": is_first_today,
         "daily_bonus_applied": daily_bonus_mult > 1,
+        "achievements": achievements,
     }
 
 
@@ -960,7 +986,20 @@ async def buy_afk_snake(tg_id: int, snake_key: str) -> dict:
                 "values ($1, $2, 'snake_afk_buy', $3, $4)",
                 tg_id, -cost, f"buy_{snake_key}_copy{len(owned)}", new_bal,
             )
-    return {"ok": True, "snake_key": snake_key, "copies": len(owned), "cost": cost, "new_balance": new_bal}
+
+    # Achievements (best-effort)
+    achievements: list[dict] = []
+    try:
+        from app.economy import retention as _ret
+        types_owned = sum(1 for k, v in sn.items() if k in AFK_SNAKE_BY_KEY and isinstance(v, list) and len(v) > 0)
+        achievements = await _ret.check_achievements_after_action(tg_id, "snake_afk_buy", {
+            "total_owned_types": types_owned,
+        })
+    except Exception as e:
+        log.debug("snake afk_buy achievements check failed: %s", e)
+
+    return {"ok": True, "snake_key": snake_key, "copies": len(owned), "cost": cost,
+            "new_balance": new_bal, "achievements": achievements}
 
 
 async def upgrade_afk_snake(tg_id: int, snake_key: str, copy_idx: int) -> dict:

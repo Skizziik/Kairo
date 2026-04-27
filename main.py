@@ -152,8 +152,12 @@ async def root() -> str:
     return "RIP нагибатор. Uptime is love."
 
 
-@app.get("/health", response_class=PlainTextResponse)
+@app.api_route("/health", methods=["GET", "HEAD"], response_class=PlainTextResponse)
 async def health() -> str:
+    # UptimeRobot (and most uptime monitors) hit this with HEAD by default to
+    # save bandwidth. Without explicit HEAD support FastAPI returns 405, which
+    # uptime tools log as "down" — that's why our monitor sat in 405-hell for
+    # a week. GET + HEAD covers all reasonable pingers.
     return "ok"
 
 

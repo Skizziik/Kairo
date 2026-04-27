@@ -272,11 +272,16 @@
     canvas.height = cellPx * size;
 
     // ----- game state -----
+    // We keep both `cells` (current logical positions, updated every tick) and
+    // `prevCells` (positions snapshot from the start of this tick). The render
+    // interpolates between them so visually the snake glides smoothly instead
+    // of teleporting cell-to-cell.
     const snake = {
       cells: [{ x: Math.floor(size / 2) - 1, y: Math.floor(size / 2) }, { x: Math.floor(size / 2) - 2, y: Math.floor(size / 2) }, { x: Math.floor(size / 2) - 3, y: Math.floor(size / 2) }],
       dir: { x: 1, y: 0 },
       pendingDir: { x: 1, y: 0 },
     };
+    snake.prevCells = snake.cells.map(c => ({ x: c.x, y: c.y }));
 
     const G = {
       size,
@@ -412,6 +417,10 @@
       // Move snake at tickMs cadence
       if (now - G.lastMoveAt >= G.tickMs) {
         G.lastMoveAt = now;
+        // Snapshot positions BEFORE moving — render uses these as the "from"
+        // anchor for interpolation, so the snake glides smoothly between cells
+        // instead of teleporting frame-by-frame.
+        snake.prevCells = snake.cells.map(c => ({ x: c.x, y: c.y }));
         snake.dir = snake.pendingDir;
         const head = { x: snake.cells[0].x + snake.dir.x, y: snake.cells[0].y + snake.dir.y };
 
@@ -717,10 +726,27 @@
       ctx.shadowBlur = 0;
     }
 
-    // Snake
+    // Snake — interpolate between previous tick and current tick positions
+    // so the snake glides smoothly instead of jumping cell-to-cell. `prog` =
+    // 0..1 progress within the current tick window.
+    const tickProgress = Math.max(0, Math.min(1, (now - G.lastMoveAt) / G.tickMs));
+    const prev = snake.prevCells || snake.cells;
     const skin = G.skinCfg;
     for (let i = 0; i < snake.cells.length; i++) {
       const c = snake.cells[i];
+      // For interpolation we need the corresponding previous-position cell.
+      // If snake grew this tick (length > prev), the new tail cell didn't exist —
+      // animate from current position (no-op). Otherwise lerp from prev[i] -> c.
+      const p = (i < prev.length) ? prev[i] : c;
+      const dx = c.x - p.x, dy = c.y - p.y;
+      // Wrapped/large jumps (e.g. tough_skin reset) should not interpolate; snap.
+      let renderX, renderY;
+      if (Math.abs(dx) > 1.5 || Math.abs(dy) > 1.5) {
+        renderX = c.x; renderY = c.y;
+      } else {
+        renderX = p.x + dx * tickProgress;
+        renderY = p.y + dy * tickProgress;
+      }
       const isHead = i === 0;
       const t = i / Math.max(1, snake.cells.length - 1);
       // Skin color logic
@@ -744,20 +770,20 @@
 
       ctx.fillStyle = color;
       const pad = isHead ? 0 : 1;
-      const x = c.x * G.cellPx + pad;
-      const y = c.y * G.cellPx + pad;
+      const x = renderX * G.cellPx + pad;
+      const y = renderY * G.cellPx + pad;
       const sz = G.cellPx - pad * 2;
       ctx.beginPath();
       const radius = isHead ? G.cellPx * 0.25 : G.cellPx * 0.18;
       roundRect(ctx, x, y, sz, sz, radius);
       ctx.fill();
 
-      // Head: eye
+      // Head: eye (uses interpolated position so it follows smoothly)
       if (isHead) {
         ctx.fillStyle = '#fff';
         const eyeSz = Math.max(2, G.cellPx * 0.15);
-        const ex = c.x * G.cellPx + G.cellPx / 2 + snake.dir.x * G.cellPx * 0.2;
-        const ey = c.y * G.cellPx + G.cellPx / 2 + snake.dir.y * G.cellPx * 0.2;
+        const ex = renderX * G.cellPx + G.cellPx / 2 + snake.dir.x * G.cellPx * 0.2;
+        const ey = renderY * G.cellPx + G.cellPx / 2 + snake.dir.y * G.cellPx * 0.2;
         ctx.beginPath(); ctx.arc(ex, ey, eyeSz, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = '#000';
         ctx.beginPath(); ctx.arc(ex, ey, eyeSz * 0.5, 0, Math.PI * 2); ctx.fill();
@@ -877,6 +903,14 @@
         const balEl = document.getElementById('balance-display');
         if (balEl) balEl.textContent = fmt(resp.new_balance);
       }
+      // Surface any unlocked achievements as toasts (sequential, 1.4s gap)
+      const ach = Array.isArray(resp.achievements) ? resp.achievements : [];
+      ach.forEach((a, idx) => {
+        setTimeout(() => {
+          toast(`🏆 ${a.name} +${fmt(a.reward)} 🪙`, 3000);
+          tg?.HapticFeedback?.notificationOccurred?.('success');
+        }, 800 + idx * 1400);
+      });
       if (credited > 10000) tg?.HapticFeedback?.notificationOccurred?.('success');
     }).catch(e => {
       toast('Ошибка сохранения: ' + e.message);

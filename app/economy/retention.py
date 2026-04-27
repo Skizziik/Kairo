@@ -122,6 +122,23 @@ ACHIEVEMENTS = {
     "level_5":           ("⭐ Уровень 5",       "Достиг 5 уровня",                           200,  None),
     "level_10":          ("⭐⭐ Уровень 10",     "Достиг 10 уровня",                          500,  None),
     "level_20":          ("⭐⭐⭐ Уровень 20",    "Достиг 20 уровня",                         2000, "Ветеран"),
+
+    # ═════════ 🐍 SNAKE — 15 ачивок ═════════
+    "snake_first_run":      ("🐍 Первый ползок",      "Сделал первый ран в Змейке",            200,  None),
+    "snake_10_runs":        ("🐍 Гадюшник",           "10 ранов в Змейке",                    1000,  None),
+    "snake_100_runs":       ("🐍🐍 Змееед",           "100 ранов в Змейке",                   5000,  "Змееед"),
+    "snake_first_mythic":   ("🟡 Жирная добыча",      "Скушал первый exceedingly_rare скин",   500,  None),
+    "snake_run_100k":       ("💰 Сотка за раз",       "1 ран = 100K+ монет",                  1500,  None),
+    "snake_run_1m":         ("💎 Миллион за ран",     "1 ран = 1M+ монет",                    7500,  "Гадюка"),
+    "snake_length_30":      ("📏 Длина 30",           "Снейк длиной 30 клеток",                500,  None),
+    "snake_length_100":     ("🪢 Длина 100",          "Снейк длиной 100 клеток",              3500,  "Анаконда"),
+    "snake_lifetime_1m":    ("📈 1M lifetime",        "Заработал 1M в Змейке за всё время",   2000,  None),
+    "snake_lifetime_100m":  ("⛰️ 100M lifetime",       "Заработал 100M в Змейке за всё время", 25000, "Эверест"),
+    "snake_first_afk":      ("🤖 Первая ферма",       "Купил первую AFK-змейку",               300,  None),
+    "snake_all_afk_types":  ("🐍🦎🐲 Зоопарк",         "По 1 копии каждого из 7 видов AFK",   25000,  "Терариум"),
+    "snake_lvl_25":         ("🐍 Уровень 25",         "Достиг 25 уровня в Змейке",            2000,  None),
+    "snake_lvl_50":         ("🐍🐍 Уровень 50",       "Достиг 50 уровня в Змейке",           10000,  "Джунгли"),
+    "snake_lvl_100":        ("👑🐍 Босс Джунглей",    "Достиг 100 уровня в Змейке",         100000,  "Босс Джунглей"),
 }
 
 
@@ -593,6 +610,38 @@ async def check_achievements_after_action(user_id: int, action: str, context: di
         checks.append(("level_5", level >= 5))
         checks.append(("level_10", level >= 10))
         checks.append(("level_20", level >= 20))
+
+    elif action == "snake_run":
+        # context: {runs, coins_this_run, length, skins_eaten, by_rarity, lifetime}
+        runs = int(context.get("runs", 0))
+        coins = int(context.get("coins_this_run", 0))
+        length = int(context.get("length", 0))
+        by_rarity = context.get("by_rarity") or {}
+        lifetime = int(context.get("lifetime", 0))
+        checks.append(("snake_first_run",     runs >= 1))
+        checks.append(("snake_10_runs",       runs >= 10))
+        checks.append(("snake_100_runs",      runs >= 100))
+        checks.append(("snake_run_100k",      coins >= 100_000))
+        checks.append(("snake_run_1m",        coins >= 1_000_000))
+        checks.append(("snake_length_30",     length >= 30))
+        checks.append(("snake_length_100",    length >= 100))
+        checks.append(("snake_lifetime_1m",   lifetime >= 1_000_000))
+        checks.append(("snake_lifetime_100m", lifetime >= 100_000_000))
+        if int(by_rarity.get("exceedingly_rare", 0) or 0) >= 1:
+            checks.append(("snake_first_mythic", True))
+
+    elif action == "snake_afk_buy":
+        # context: {total_owned_types: int, total_copies: int}
+        types_owned = int(context.get("total_owned_types", 0))
+        checks.append(("snake_first_afk", True))
+        checks.append(("snake_all_afk_types", types_owned >= 7))
+
+    elif action == "snake_level_up":
+        # context: {level: new_level}
+        slvl = int(context.get("level", 0))
+        checks.append(("snake_lvl_25",  slvl >= 25))
+        checks.append(("snake_lvl_50",  slvl >= 50))
+        checks.append(("snake_lvl_100", slvl >= 100))
 
     for code, condition in checks:
         if condition:

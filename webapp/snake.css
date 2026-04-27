@@ -392,22 +392,33 @@
 .snake-death-retry { background: linear-gradient(135deg, #5cc15c, #2f7a2f); color: #fff; }
 .snake-death-close { background: var(--bg-elev); color: var(--text); border: 1px solid var(--border); }
 
+/* 6 веток в 3x2 grid вместо горизонтального скролла */
 .snake-branch-strip {
-  display: flex; gap: 6px; overflow-x: auto;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
   margin-bottom: 12px;
-  scrollbar-width: none;
 }
-.snake-branch-strip::-webkit-scrollbar { display: none; }
 .snake-branch-pill {
-  flex-shrink: 0;
-  padding: 8px 12px;
-  background: var(--bg-card); border: 1px solid var(--border);
+  padding: 9px 6px;
+  background: linear-gradient(180deg, var(--bg-card) 0%, var(--bg-elev) 100%);
+  border: 1px solid var(--border);
   border-radius: 10px; cursor: pointer;
-  display: flex; align-items: center; gap: 6px;
-  font-size: 12px; font-weight: 700;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  font-size: 11px; font-weight: 700;
+  transition: all 0.2s ease;
+  min-height: 50px;
 }
-.snake-branch-pill.active { background: var(--bg-elev); border-color: var(--accent); }
-.snake-branch-pill .icon { font-size: 16px; }
+.snake-branch-pill .icon { font-size: 18px; line-height: 1; }
+.snake-branch-pill.active {
+  background: linear-gradient(135deg, rgba(92,193,92,0.20) 0%, rgba(26,58,26,0.6) 100%);
+  border-color: #5cc15c;
+  box-shadow: 0 4px 12px rgba(92,193,92,0.3), inset 0 1px 0 rgba(255,255,255,0.08);
+  color: #fff;
+}
+.snake-branch-pill.active .icon {
+  filter: drop-shadow(0 0 6px currentColor);
+}
 
 .snake-upgrade-list { display: flex; flex-direction: column; gap: 8px; }
 .snake-upgrade-card {
