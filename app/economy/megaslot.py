@@ -89,12 +89,12 @@ MAX_WIN_CAP = 5000
 
 # Bonus buy variants
 BONUS_BUY_REGULAR = {
-    "cost_mult": 70,     # 70× bet
+    "cost_mult": 120,    # 120× bet (operator-tuned 2026-04-27 — was 70×, exploited)
     "spins": 15,         # classic Gates of Olympus FS count
     "start_mult": 0,     # multiplier starts at 0, accumulates as orbs land
 }
 BONUS_BUY_PREMIUM = {
-    "cost_mult": 220,    # 220× bet
+    "cost_mult": 360,    # 360× bet (operator-tuned 2026-04-27 — was 220×)
     "spins": 25,         # more spins
     "start_mult": 10,    # starts at x10, accumulates on top
 }

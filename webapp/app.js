@@ -4478,8 +4478,8 @@ function _updateAutoSpinUi() {
 function _openBonusBuyModal() {
   if (_megaslotState.busy) return;
   const bet = _megaslotState.bet;
-  const regCost = bet * 70;
-  const premCost = bet * 220;
+  const regCost = bet * 120;
+  const premCost = bet * 360;
   const el = document.createElement('div');
   el.className = 'ms-bonus-modal';
   el.innerHTML = `
@@ -4712,7 +4712,7 @@ async function playMegaslot(bonusBuy, bonusType) {
   if (_megaslotState.busy) return;
   const bet = _megaslotState.bet;
   if (bet <= 0) return toast('Поставь сумму');
-  const costMult = bonusBuy ? (bonusType === 'premium' ? 220 : 70) : 1;
+  const costMult = bonusBuy ? (bonusType === 'premium' ? 360 : 120) : 1;
   const cost = bet * costMult;
   // (modal already confirmed for bonus buy; no confirm() needed here)
 
