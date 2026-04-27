@@ -122,12 +122,12 @@
             </div>
           </div>
           <div class="snake-tabs">
-            <button class="snake-tab" data-tab="play">▶ Играть</button>
-            <button class="snake-tab" data-tab="upgrades">⚒ Апгрейды</button>
-            <button class="snake-tab" data-tab="terrarium">🤖 Терариум</button>
-            <button class="snake-tab" data-tab="skins">🎨 Скины</button>
-            <button class="snake-tab" data-tab="maps">🗺 Карты</button>
-            <button class="snake-tab" data-tab="lb">🏆 Топ</button>
+            <button class="snake-tab" data-tab="play"><span class="snake-tab-icon">▶</span><span>Играть</span></button>
+            <button class="snake-tab" data-tab="upgrades"><span class="snake-tab-icon">⚒</span><span>Апгрейды</span></button>
+            <button class="snake-tab" data-tab="terrarium"><span class="snake-tab-icon">🤖</span><span>Ферма</span></button>
+            <button class="snake-tab" data-tab="skins"><span class="snake-tab-icon">🎨</span><span>Скины</span></button>
+            <button class="snake-tab" data-tab="maps"><span class="snake-tab-icon">🗺</span><span>Карты</span></button>
+            <button class="snake-tab" data-tab="lb"><span class="snake-tab-icon">🏆</span><span>Топ</span></button>
           </div>
           <div class="snake-tab-content" id="snake-tab-content"></div>
         </div>
