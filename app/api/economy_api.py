@@ -83,6 +83,7 @@ async def api_me(user: dict = Depends(require_user)) -> dict:
         "inventory_count": inv_count,
         "lifetime_wager": wager,
         "tier": tier_info,
+        "coinflip_max_bet": _tiers.coinflip_max_bet(wager),  # null = unlimited
     }
 
 

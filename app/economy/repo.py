@@ -598,8 +598,15 @@ async def upgrade_item(user_id: int, inventory_id: int, target_skin_id: int, ext
 # ============ casino ============
 
 async def play_coinflip(user_id: int, bet: int, side: str) -> dict:
-    """50/50 doubler. side = 'heads' or 'tails'."""
+    """50/50 doubler. side = 'heads' or 'tails'.
+
+    Bet is capped by the player's casino tier (lifetime_wager). Without a cap,
+    martingale doubling is guaranteed-profit; with a per-tier cap the spiral
+    immediately hits the ceiling and breaks. See app/economy/tiers.py for the
+    full cap ladder (Bronze 1K → Eternal 2.5B, Cosmic+ unlimited).
+    """
     import random
+    from app.economy import tiers as _tiers
     if bet <= 0:
         return {"ok": False, "error": "Bet must be positive"}
     if side not in ("heads", "tails"):
@@ -607,11 +614,20 @@ async def play_coinflip(user_id: int, bet: int, side: str) -> dict:
     async with pool().acquire() as conn:
         async with conn.transaction():
             bal_row = await conn.fetchrow(
-                "select balance from economy_users where tg_id = $1 for update",
+                "select balance, coalesce(lifetime_wager, 0) as lifetime_wager "
+                "from economy_users where tg_id = $1 for update",
                 user_id,
             )
             if bal_row is None or int(bal_row["balance"]) < bet:
                 return {"ok": False, "error": "Not enough coins"}
+            cap = _tiers.coinflip_max_bet(int(bal_row["lifetime_wager"]))
+            if cap is not None and bet > cap:
+                tier = _tiers.get_tier(int(bal_row["lifetime_wager"]))
+                cap_str = f"{cap:,}".replace(",", " ")
+                return {
+                    "ok": False,
+                    "error": f"Лимит на твоём тире {tier['emoji']} {tier['name']} — {cap_str} 🪙. Гриндай оборот для большего капа.",
+                }
             actual = random.choice(["heads", "tails"])
             win = (actual == side)
             # Pay 1.95x on win → 2.5% house edge, preserves "double" feel.

@@ -872,11 +872,18 @@ function renderGamePlay(game, target) {
   // `target` is where to render; falls back to game-play-area for safety
   const area = target || document.getElementById('game-play-area');
   if (game === 'coinflip') {
+    const me = state.me || {};
+    const cap = me.coinflip_max_bet;
+    const tier = (me.tier && me.tier.current) || null;
+    const capHint = (cap === null || cap === undefined)
+      ? `<div class="bet-cap-hint">${tier ? `${tier.emoji} ${tier.name}` : ''} · лимит снят 🚀</div>`
+      : `<div class="bet-cap-hint">Лимит ставки: <b>${fmt(cap)}</b> 🪙 ${tier ? `<span class="bet-cap-tier" style="color:${tier.color}">· ${tier.emoji} ${tier.name}</span>` : ''}<br><span class="bet-cap-sub">апгрейдь тир оборотом — кап растёт</span></div>`;
     area.innerHTML = `
       <div class="game-play">
         <h3>🪙 Coinflip</h3>
         <label>Ставка</label>
         <input type="text" inputmode="numeric" pattern="[0-9]*" id="cf-bet" value="100" autocomplete="off" />
+        ${capHint}
         <div class="game-row">
           <button class="btn" data-side="heads">🪙 Орёл</button>
           <button class="btn" data-side="tails">✨ Решка</button>

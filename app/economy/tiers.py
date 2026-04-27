@@ -60,6 +60,58 @@ TIERS: list[tuple[str, str, int, str, str]] = [
 ]
 
 
+# ============================================================
+# PER-TIER COINFLIP BET CAPS
+# ============================================================
+#
+# Coinflip with no cap = guaranteed money printer via martingale
+# (proven in production by an Igor session that pulled +4.4M in 5 minutes
+# at 21:00 on 2026-04-27). Cap by tier kills the doubling spiral while
+# rewarding genuine grinders with bigger limits.
+#
+# None = unlimited (Cosmic+ tiers earned the right to whale freely).
+
+COINFLIP_MAX_BET_BY_TIER: dict[str, int | None] = {
+    "bronze":         1_000,
+    "silver":         2_500,
+    "gold":           5_000,
+    "platinum":       10_000,
+    "diamond":        25_000,
+    "black_diamond":  50_000,
+    "obsidian":       100_000,
+    "titanium":       200_000,
+    "iridium":        500_000,
+    "palladium":      1_000_000,
+    "mythril":        2_000_000,
+    "adamantium":     5_000_000,
+    "vibranium":      10_000_000,
+    "aetherium":      25_000_000,
+    "celestium":      50_000_000,
+    "dragonsteel":    100_000_000,
+    "phoenix_core":   250_000_000,
+    "leviathan":      500_000_000,
+    "arcane":         1_000_000_000,
+    "eternal":        2_500_000_000,
+    # Cosmic + Endgame — no cap
+    "void":           None,
+    "nebula":         None,
+    "stellar":        None,
+    "galactic":       None,
+    "supernova":      None,
+    "quantum":        None,
+    "singularity":    None,
+    "infinity":       None,
+    "transcendent":   None,
+    "godlike":        None,
+}
+
+
+def coinflip_max_bet(wager: int) -> int | None:
+    """Return MAX_BET (in coins) for a given lifetime_wager, or None for unlimited."""
+    cur = get_tier(int(wager))
+    return COINFLIP_MAX_BET_BY_TIER.get(cur["key"], 1_000)
+
+
 def get_tier(wager: int) -> dict:
     """Return current tier info for a given lifetime wager."""
     wager = max(0, int(wager))

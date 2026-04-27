@@ -2958,6 +2958,31 @@ h2 {
   margin-bottom: 12px;
 }
 
+/* per-tier bet cap hint shown on coinflip screen */
+.bet-cap-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  margin-top: -6px;
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+.bet-cap-hint b {
+  color: var(--accent-gold);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.bet-cap-tier {
+  font-weight: 600;
+}
+.bet-cap-sub {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
 .game-row {
   display: flex;
   gap: 8px;
