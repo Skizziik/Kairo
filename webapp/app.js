@@ -1577,57 +1577,78 @@ async function _plinkoStartAuto(count) {
   plinkoState.autoTotal = count;
   plinkoState.autoStopRequested = false;
   _plinkoUpdateAutoUi();
-  // Backpressure tracking — if we hit busy/queue-full repeatedly, back off
-  // briefly instead of hammering and producing silent failures.
-  let busyStreak = 0;
-  let errorStreak = 0;
-  try {
-    while (plinkoState.autoCount > 0 && !plinkoState.autoStopRequested) {
-      if (!document.querySelector('.plinko-play')) break;  // user navigated away
-      if (!state.me || state.me.balance < plinkoState.bet) {
-        toast('Не хватает на следующий дроп');
-        break;
-      }
 
-      // AWAIT the drop so we know its outcome — otherwise auto can decrement
-      // even when the ball never spawned (rate limit / queue full / API error),
-      // and the user sees fewer balls than the counter promised.
-      const result = await _plinkoDrop();
+  // Concurrency design — фикс случая когда у одного игрока API долгий
+  // (500-800ms на холодном Render) и сериальный await ставит каденс в
+  // 1 шарик/сек. Решение: пускаем дропы fire-and-forget по wall-clock
+  // таймеру (как было до этого), параллельно держим до MAX_CONCURRENT
+  // в полёте, и считаем СУСПЕХИ — счётчик не разъедется с реальностью.
+  const MAX_CONCURRENT = 6;
+  const RETRY_BUFFER   = 6;   // extra fires on top of count to absorb transient fails
 
-      if (result && result.ok) {
-        // Real ball spawned — count it, reset backoff.
-        plinkoState.autoCount -= 1;
-        busyStreak = 0;
-        errorStreak = 0;
-        _plinkoUpdateAutoUi();
-      } else if (result && result.reason === 'busy') {
-        // Rate-limit OR ball queue saturated — wait for queue to drain a bit.
-        busyStreak += 1;
-        // Soft drain wait: short bursts so we don't visibly stall (30 → 200ms).
-        const drainWait = Math.min(200, 30 + busyStreak * 20);
-        await new Promise(r => setTimeout(r, drainWait));
-        continue;  // retry SAME drop without consuming the slot
-      } else if (result && result.reason === 'low-balance') {
-        toast('Не хватает на следующий дроп');
-        break;
+  let succeeded = 0;
+  let failed    = 0;
+  let inFlight  = 0;
+  let fired     = 0;
+  let consecutiveErrors = 0;
+
+  const fireOne = async () => {
+    inFlight += 1;
+    try {
+      const r = await _plinkoDrop();
+      if (r && r.ok) {
+        succeeded += 1;
+        consecutiveErrors = 0;
+      } else if (r && r.reason === 'busy') {
+        // Don't penalize counter — was a transient queue/rate hit, will retry
       } else {
-        // 'error' / 'spawn-failed' — count it (server already processed the bet)
-        // but back off so we don't tight-loop on a server hiccup.
-        errorStreak += 1;
-        plinkoState.autoCount -= 1;
-        _plinkoUpdateAutoUi();
-        if (errorStreak >= 3) {
-          toast('Серия ошибок — авто остановлен');
+        failed += 1;
+        if (r && r.reason !== 'low-balance') consecutiveErrors += 1;
+      }
+    } finally {
+      inFlight -= 1;
+      // Counter reflects actual successes (not fires)
+      plinkoState.autoCount = Math.max(0, plinkoState.autoTotal - succeeded);
+      _plinkoUpdateAutoUi();
+    }
+  };
+
+  try {
+    while (succeeded < count && !plinkoState.autoStopRequested) {
+      if (!document.querySelector('.plinko-play')) break;
+      if (!state.me || state.me.balance < plinkoState.bet) {
+        if (inFlight === 0) {
+          toast('Не хватает на следующий дроп');
           break;
         }
-        await new Promise(r => setTimeout(r, 400));
+        await new Promise(r => setTimeout(r, 60));
         continue;
       }
-
-      // Pace next iteration by wall clock (interruptable by stop-request)
-      if (plinkoState.autoCount > 0 && !plinkoState.autoStopRequested) {
-        await new Promise(r => setTimeout(r, PLINKO_AUTO_DELAY_MS));
+      // Stop if we've fired enough including buffer (failures absorbed)
+      if (fired >= count + RETRY_BUFFER && inFlight === 0) break;
+      // Hard-stop on repeated server errors
+      if (consecutiveErrors >= 3) {
+        toast('Серия ошибок — авто остановлен');
+        break;
       }
+      // Throttle by concurrency: if too many in flight, wait briefly
+      if (inFlight >= MAX_CONCURRENT) {
+        await new Promise(r => setTimeout(r, 30));
+        continue;
+      }
+      // Don't over-fire if we've already queued enough to fulfill the request
+      if (succeeded + inFlight >= count + 1) {
+        await new Promise(r => setTimeout(r, 30));
+        continue;
+      }
+      fireOne();          // fire-and-forget — pacing decoupled from API latency
+      fired += 1;
+      await new Promise(r => setTimeout(r, PLINKO_AUTO_DELAY_MS));
+    }
+
+    // Wait for in-flight drops to settle so the counter is final
+    while (inFlight > 0 && !plinkoState.autoStopRequested) {
+      await new Promise(r => setTimeout(r, 40));
     }
   } finally {
     plinkoState.autoCount = 0;
