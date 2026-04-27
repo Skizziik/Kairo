@@ -1380,9 +1380,12 @@ function _plinkoBallsInFlight() {
 }
 
 const PLINKO_BET_PRESETS = [50, 100, 200, 500, 1000];
-const PLINKO_MIN_CLICK_GAP_MS = 60;     // ~16 drops/sec hard ceiling
+const PLINKO_MIN_CLICK_GAP_MS = 30;     // ~30 drops/sec hard ceiling for manual clicks
 const PLINKO_MAX_ACTIVE_BALLS  = 40;    // safety cap to prevent rendering catastrophe
-const PLINKO_AUTO_DELAY_MS     = 110;   // ~7-9 drops/sec in auto-mode (incl. API latency)
+// Auto-loop now `await`s the drop (we need to know success vs busy/error to
+// keep the counter accurate), so the per-cycle wall-clock is API_LATENCY + this.
+// 50ms keeps moderate cadence ~7-10 drops/sec on a typical 30-80ms API roundtrip.
+const PLINKO_AUTO_DELAY_MS     = 50;
 
 // Bucket color tier by multiplier value
 function _plinkoBucketTier(m) {
@@ -1595,8 +1598,8 @@ async function _plinkoStartAuto(count) {
       } else if (result && result.reason === 'busy') {
         // Rate-limit OR ball queue saturated — wait for queue to drain a bit.
         busyStreak += 1;
-        // Soft drain wait: scales with how stuck we are (60 → 360ms).
-        const drainWait = Math.min(360, 60 + busyStreak * 30);
+        // Soft drain wait: short bursts so we don't visibly stall (30 → 200ms).
+        const drainWait = Math.min(200, 30 + busyStreak * 20);
         await new Promise(r => setTimeout(r, drainWait));
         continue;  // retry SAME drop without consuming the slot
       } else if (result && result.reason === 'low-balance') {
