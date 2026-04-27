@@ -9,6 +9,28 @@
 }
 .snake-card .game-icon { font-size: 38px; }
 
+/* "NEW" pulse badge so the freshly-launched Snake catches the eye */
+.snake-card-new {
+  animation: snakeCardPulse 2.4s ease-in-out infinite;
+}
+@keyframes snakeCardPulse {
+  0%, 100% { box-shadow: 0 0 20px rgba(92, 193, 92, 0.15); }
+  50%      { box-shadow: 0 0 28px rgba(92, 193, 92, 0.45); }
+}
+.snake-new-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  background: linear-gradient(135deg, #ffd700, #ffe066);
+  color: #0e0f14;
+  vertical-align: middle;
+  box-shadow: 0 0 10px rgba(255, 215, 0, 0.4);
+}
+
 #snake-app { padding-bottom: 100px; }
 
 .snake-hub { display: flex; flex-direction: column; gap: 14px; }
