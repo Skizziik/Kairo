@@ -865,10 +865,10 @@
         try { tg?.HapticFeedback?.notificationOccurred?.('success'); } catch (e) {}
       }
     }
-    // Молниеносный Удар — burst-вспышка на covert+ (бонусные монеты)
+    // Молниеносный Удар — burst-вспышка на covert+ (бонусные монеты ×covert_mult)
     if (artEff.burst_on_covert && (food.rarity === 'covert' || food.rarity === 'exceedingly_rare')) {
-      // Burst даёт ×1.5 к coins за этот еат + flash эффект
-      coins = Math.floor(coins * 1.5);
+      const m = Number(artEff.covert_mult || 1.5);
+      coins = Math.floor(coins * m);
       flash(G);
     }
 
@@ -963,7 +963,8 @@
     const magnetLvl = Number(G.upgrades.mythic_magnet || 0);
     const driftLvl  = Number(G.upgrades.skin_drop_plus || 0);
     const artEff    = G.artEff || {};
-    const mythicBonus = Number(artEff.mythic_bonus || 0);
+    const mythicBonus       = Number(artEff.mythic_bonus || 0);
+    const mythicWeightBonus = Number(artEff.mythic_weight_bonus || 0);
 
     let weights = rarities.map(r => Math.max(0.1, r.weight));
     if (magnetLvl > 0) {
@@ -979,6 +980,16 @@
         const k = rarities[i].key;
         if (k === 'covert' || k === 'exceedingly_rare') {
           return w * (1 + mythicBonus * 0.5);
+        }
+        return w;
+      });
+    }
+    // Призма Прозрения — +50% к весу covert/exc_rare (доп. на чистый шанс выпадения)
+    if (mythicWeightBonus > 0) {
+      weights = weights.map((w, i) => {
+        const k = rarities[i].key;
+        if (k === 'covert' || k === 'exceedingly_rare') {
+          return w * (1 + mythicWeightBonus);
         }
         return w;
       });
@@ -1398,14 +1409,24 @@
           <div class="snake-case-name">${escape(cs.name)}</div>
           <div class="snake-case-tier">${escape(cs.tier_label || '')}</div>
           <div class="snake-case-drops">${dropsList}</div>
-          <button class="snake-case-buy" data-case="${cs.key}" ${canAfford ? '' : 'disabled'}>
-            ${fmtCompact(cs.price)} 🪙
-          </button>
+          <div class="snake-case-actions">
+            <button class="snake-case-info" data-case-info="${cs.key}">📋 Что внутри?</button>
+            <button class="snake-case-buy" data-case="${cs.key}" ${canAfford ? '' : 'disabled'}>
+              ${fmtCompact(cs.price)} 🪙
+            </button>
+          </div>
         </div>
       `;
     }).join('');
 
     // ── 2. SHARDS INVENTORY ─────────────────────────
+    // Total inventory value (rolled-up sell-back) for headline
+    let inventoryValue = 0;
+    for (const s of shardCfg) {
+      const have = Number(ownedShards[s.key] || 0);
+      if (have > 0) inventoryValue += Math.floor(s.price * ratio) * have;
+    }
+
     const shardsHtml = shardCfg.map(s => {
       const have = Number(ownedShards[s.key] || 0);
       const meta = shardRarities[s.rarity] || {};
@@ -1416,8 +1437,9 @@
           <div class="snake-shard-rarity" style="color:${meta.color}">${escape(meta.label || s.rarity)}</div>
           <div class="snake-shard-name">${escape(s.name)}</div>
           <div class="snake-shard-count">×${have}</div>
+          <div class="snake-shard-price">${fmtCompact(sellPrice)} 🪙 / шт</div>
           ${have > 0
-            ? `<button class="snake-shard-sell" data-shard="${s.key}">−${fmtCompact(sellPrice)} 🪙</button>`
+            ? `<button class="snake-shard-sell" data-shard="${s.key}">Продать −1</button>`
             : `<div class="snake-shard-sell empty">—</div>`}
         </div>
       `;
@@ -1472,10 +1494,14 @@
     c.innerHTML = `
       <div class="snake-cases-section">
         <div class="snake-section-label">🎁 Кейсы (5)</div>
+        <div class="snake-section-hint">Нажми «Что внутри?» — увидишь всё, что может выпасть. Или сразу жми цену для быстрого открытия.</div>
         <div class="snake-cases-strip">${casesHtml}</div>
       </div>
       <div class="snake-cases-section">
-        <div class="snake-section-label">💎 Осколки (${shardCfg.length})</div>
+        <div class="snake-section-label">
+          💎 Инвентарь осколков (${shardCfg.length})
+          ${inventoryValue > 0 ? `<span class="snake-inv-total">всего на ${fmtCompact(inventoryValue)} 🪙</span>` : ''}
+        </div>
         <div class="snake-shards-grid">${shardsHtml}</div>
       </div>
       <div class="snake-cases-section">
@@ -1483,6 +1509,14 @@
         <div class="snake-artifacts-grid">${artHtml}</div>
       </div>
     `;
+
+    // Show case details modal
+    c.querySelectorAll('.snake-case-info').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showCaseDetails(b.dataset.caseInfo, c);
+      });
+    });
 
     // Buy a case
     c.querySelectorAll('.snake-case-buy').forEach(b => {
@@ -1580,6 +1614,103 @@
           paintCasesTab(c);
         } catch (e) { toast('Ошибка: ' + e.message); b.disabled = false; }
       });
+    });
+  }
+
+  // ═════════════════ CASE DETAILS MODAL ═════════════════
+  // Click "Что внутри?" on any case → shows a full drop table with each
+  // shard, its drop chance, sell-back price, and rarity color. Bottom CTA
+  // opens the case (re-uses the same buy flow + spinner animation).
+  function showCaseDetails(caseKey, casesTabRoot) {
+    const cs = (SS.cfg.cases || []).find(x => x.key === caseKey);
+    if (!cs) return;
+    const shardCfg = SS.cfg.shards || [];
+    const shardRarities = SS.cfg.shard_rarities || {};
+    const ratio = Number(SS.cfg.sell_back_ratio || 0.5);
+    const balance = window.state?.me?.balance || 0;
+    const canAfford = balance >= Number(cs.price);
+
+    // Compute per-shard drop probability:
+    //   P(shard) = (rarity_weight / total_weight) × (1 / shards_in_rarity)
+    const totalW = Object.values(cs.drops).reduce((a, b) => a + b, 0);
+    const drops = [];
+    for (const rar of Object.keys(cs.drops)) {
+      const pool = shardCfg.filter(s => s.rarity === rar);
+      if (!pool.length) continue;
+      const pct = (cs.drops[rar] / totalW) * (1 / pool.length) * 100;
+      for (const s of pool) drops.push({ ...s, pct });
+    }
+    drops.sort((a, b) => b.pct - a.pct);
+
+    const overlay = document.createElement('div');
+    overlay.className = 'snake-case-details-overlay';
+    const dropsHtml = drops.map(d => {
+      const meta = shardRarities[d.rarity] || {};
+      const sell = Math.floor(d.price * ratio);
+      const pctStr = d.pct >= 1 ? d.pct.toFixed(1) : d.pct.toFixed(2);
+      return `
+        <div class="snake-case-drop-row" style="--rar-color:${meta.color || '#aaa'}">
+          <img src="./img/snake/${d.image}" alt="" />
+          <div class="snake-case-drop-info">
+            <div class="snake-case-drop-rarity" style="color:${meta.color || '#aaa'}">${escape(meta.label || d.rarity)}</div>
+            <div class="snake-case-drop-name">${escape(d.name)}</div>
+            <div class="snake-case-drop-sell">Продаётся за ${fmtCompact(sell)} 🪙</div>
+          </div>
+          <div class="snake-case-drop-pct">${pctStr}%</div>
+        </div>
+      `;
+    }).join('');
+
+    overlay.innerHTML = `
+      <div class="snake-case-details-box">
+        <button class="snake-case-details-close" id="case-det-close">×</button>
+        <div class="snake-case-details-head">
+          <img src="./img/snake/${cs.image}" alt="${escape(cs.name)}" />
+          <div>
+            <div class="snake-case-details-name">${escape(cs.name)}</div>
+            <div class="snake-case-details-tier">${escape(cs.tier_label || '')}</div>
+            <div class="snake-case-details-price">${fmtCompact(cs.price)} 🪙</div>
+          </div>
+        </div>
+        <div class="snake-case-details-section-label">Возможные дропы (${drops.length}):</div>
+        <div class="snake-case-details-drops">${dropsHtml}</div>
+        <button class="snake-case-details-open" id="case-det-open" ${canAfford ? '' : 'disabled'}>
+          ${canAfford ? `🎁 Открыть за ${fmtCompact(cs.price)} 🪙` : 'Не хватает монет'}
+        </button>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const closeBtn = overlay.querySelector('#case-det-close');
+    const openBtn  = overlay.querySelector('#case-det-open');
+    const close = () => {
+      overlay.style.transition = 'opacity 0.2s';
+      overlay.style.opacity = '0';
+      setTimeout(() => overlay.remove(), 220);
+    };
+    closeBtn.addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+    openBtn.addEventListener('click', async () => {
+      if (openBtn.disabled) return;
+      openBtn.disabled = true;
+      try {
+        const r = await api('/api/snake/case/buy', {
+          method: 'POST', body: JSON.stringify({ case_key: caseKey }),
+        });
+        if (!r.ok) { toast(r.error || 'Ошибка'); openBtn.disabled = false; return; }
+        if (typeof r.new_balance === 'number') {
+          window.state.me.balance = r.new_balance;
+          const balEl = document.getElementById('balance-display');
+          if (balEl) balEl.textContent = fmt(r.new_balance);
+        }
+        SS.state.shards = SS.state.shards || {};
+        SS.state.shards[r.drop.key] = (Number(SS.state.shards[r.drop.key]) || 0) + 1;
+        close();
+        await playCaseSpinner(caseKey, r.drop);
+        tg?.HapticFeedback?.notificationOccurred?.('success');
+        if (casesTabRoot) paintCasesTab(casesTabRoot);
+      } catch (e) { toast('Ошибка: ' + e.message); openBtn.disabled = false; }
     });
   }
 

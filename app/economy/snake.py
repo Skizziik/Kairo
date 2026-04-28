@@ -485,10 +485,10 @@ ARTIFACTS: list[dict] = [
         "image": "art_lightning.png",
         "category": "combat",
         "price": 250_000_000,
-        "recipe": {"bolt": 15},        # 15x epic
-        "buff_short": "Burst на каждый covert+",
-        "buff_long": "При поедании covert или выше — мгновенно сжигает все скины в радиусе 3 клеток (бонус-выплата).",
-        "effect": {"burst_on_covert": True, "burst_radius": 3},
+        "recipe": {"bolt": 10},        # 10x epic
+        "buff_short": "×3 на covert+ • flash",
+        "buff_long": "Каждый covert или exceedingly rare скин даёт ×3 к доходу + визуальный взрыв света. Перевернёт долгие раны.",
+        "effect": {"burst_on_covert": True, "covert_mult": 3.0},
     },
     {
         "key": "prism",
@@ -496,10 +496,10 @@ ARTIFACTS: list[dict] = [
         "image": "art_prism.png",
         "category": "combat",
         "price": 500_000_000,
-        "recipe": {"prism": 20},       # 20x legendary
-        "buff_short": "Map Vision на всех скинах",
-        "buff_long": "Включает Map Vision (мини-карта со всеми скинами и препятствиями) для любого скина без апгрейда.",
-        "effect": {"map_vision": True},
+        "recipe": {"prism": 10},       # 10x legendary
+        "buff_short": "Map Vision • +50% к covert/exc spawn",
+        "buff_long": "Map Vision (мини-карта со всеми скинами и препятствиями) на любом скине без апгрейда + +50% к шансу спавна covert и exceedingly rare скинов.",
+        "effect": {"map_vision": True, "mythic_weight_bonus": 0.5},
     },
 
     # ── GREED (умножают доход) ─────────────────────────────────
@@ -531,10 +531,10 @@ ARTIFACTS: list[dict] = [
         "image": "art_dream_factory.png",
         "category": "greed",
         "price": 1_000_000_000,
-        "recipe": {"moon": 15},        # 15x epic
-        "buff_short": "Daily Bonus ×3",
-        "buff_long": "Множитель первого ран в день увеличивается ×3 (если у вас Daily Bonus 10 — станет 30%/lvl).",
-        "effect": {"daily_bonus_mult_3x": True},
+        "recipe": {"moon": 10},        # 10x epic
+        "buff_short": "Первый ран ×2 (стак с Daily)",
+        "buff_long": "Первый ран дня даёт +100% к доходу САМ ПО СЕБЕ. Если есть апгрейд Daily Bonus — стакает: каждый его уровень × 3.",
+        "effect": {"daily_bonus_mult_3x": True, "daily_first_run_base": 2.0},
     },
     {
         "key": "crown",
@@ -542,9 +542,9 @@ ARTIFACTS: list[dict] = [
         "image": "art_crown.png",
         "category": "greed",
         "price": 5_000_000_000,
-        "recipe": {"diamond": 20},     # 20x legendary
+        "recipe": {"diamond": 10},     # 10x legendary
         "buff_short": "Total ×1.05^lvl",
-        "buff_long": "Финальный множитель за ран = 1.05^level. На 50 уровне — ×11.5 ко всему доходу.",
+        "buff_long": "Финальный множитель за ран = 1.05^level. На 50 уровне — ×11.5 ко всему доходу. Бесконечный скейл.",
         "effect": {"crown_level_mult": True},
     },
 
@@ -566,10 +566,10 @@ ARTIFACTS: list[dict] = [
         "image": "art_conveyor.png",
         "category": "industrial",
         "price": 1_000_000_000,
-        "recipe": {"stardust": 30},    # 30x cosmic
-        "buff_short": "Daily AFK cap ×3",
-        "buff_long": "Дневной лимит AFK-фарма утраивается. С 500M на максимуме станет 1.5B/день.",
-        "effect": {"afk_daily_cap_mult": 3},
+        "recipe": {"stardust": 5},     # 5x cosmic
+        "buff_short": "Daily AFK cap ×5",
+        "buff_long": "Дневной лимит AFK-фарма пятикратно увеличен. С 500M на максимуме станет 2.5B/день. Без него Двигатель частично избыточен.",
+        "effect": {"afk_daily_cap_mult": 5},
     },
     {
         "key": "cosmic_engine",
@@ -577,10 +577,15 @@ ARTIFACTS: list[dict] = [
         "image": "art_cosmic_engine.png",
         "category": "industrial",
         "price": 50_000_000_000,
-        "recipe": {"supernova": 30},   # 30x cosmic
-        "buff_short": "24h offline cap",
-        "buff_long": "Offline AFK cap = 24 часа (вместо базовых 4ч). Идеально для редких заходов.",
-        "effect": {"offline_cap_hours": 24},
+        "recipe": {"supernova": 8},    # 8x cosmic — реалистично для эндгейма
+        "buff_short": "×3 AFK • БЕЗ ЛИМИТОВ • +20% run",
+        "buff_long": "Эндгейм-артефакт. ×3 ко всему AFK-фарму, дневной cap снят полностью, offline копится без ограничений (хоть месяц). Бонус: +20% к доходу за каждый ран. Стакается с Турбо и Конвейером.",
+        "effect": {
+            "afk_rate_mult":      3.0,
+            "afk_daily_cap_mult": 9999,
+            "offline_cap_hours":  9999,
+            "run_total_mult_bonus": 0.20,
+        },
     },
 ]
 ARTIFACT_BY_KEY = {a["key"]: a for a in ARTIFACTS}
@@ -947,12 +952,17 @@ async def get_state(tg_id: int) -> dict:
     is_first_today = (last_run_at is None) or (last_run_at.date() < today)
     daily_bonus_lvl = int(upgrades.get("daily_bonus", 0))
     daily_bonus_mult = (1 + daily_bonus_lvl * 0.10) if (is_first_today and daily_bonus_lvl > 0) else 1.0
-    # Artifact: Фабрика Снов — daily bonus mult ×3
-    if art_eff["daily_bonus_mult_3x"] and daily_bonus_mult > 1.0:
-        daily_bonus_mult = 1 + (daily_bonus_mult - 1) * 3
+    # Artifact: Фабрика Снов — даёт daily bonus даже без апгрейда + ×3 если есть
+    if art_eff["daily_bonus_mult_3x"]:
+        if daily_bonus_mult > 1.0:
+            daily_bonus_mult = 1 + (daily_bonus_mult - 1) * 3
+        elif is_first_today and art_eff["daily_first_run_base"] > 1.0:
+            daily_bonus_mult = float(art_eff["daily_first_run_base"])
     # Artifact: Корона Владыки — total ×1.05^level
     crown_mult = (1.05 ** cur_lvl) if art_eff["crown_level_mult"] else 1.0
-    coin_mult = round(greed_mult * total_mult * universal_mult * daily_bonus_mult * crown_mult, 4)
+    # Artifact: Космический Двигатель — +20% к финальному множителю
+    engine_mult = 1.0 + float(art_eff.get("run_total_mult_bonus", 0.0))
+    coin_mult = round(greed_mult * total_mult * universal_mult * daily_bonus_mult * crown_mult * engine_mult, 4)
 
     # Daily AFK cap with Conveyor (×3)
     afk_cap_today = daily_afk_cap_for(cur_lvl) * art_eff["afk_daily_cap_mult"]
@@ -1088,9 +1098,12 @@ async def record_run(
     is_first_today = (last_run_at is None) or (last_run_at.date() < today)
     if is_first_today and daily_bonus_lvl > 0:
         daily_bonus_mult = 1 + daily_bonus_lvl * 0.10
-    # Artifact: Фабрика Снов — daily bonus mult ×3 on top
-    if art_eff["daily_bonus_mult_3x"] and daily_bonus_mult > 1.0:
-        daily_bonus_mult = 1 + (daily_bonus_mult - 1) * 3
+    # Artifact: Фабрика Снов — base ×2 + ×3 stack with upgrade
+    if art_eff["daily_bonus_mult_3x"]:
+        if daily_bonus_mult > 1.0:
+            daily_bonus_mult = 1 + (daily_bonus_mult - 1) * 3
+        elif is_first_today and art_eff["daily_first_run_base"] > 1.0:
+            daily_bonus_mult = float(art_eff["daily_first_run_base"])
 
     # XP по факту скушанных скинов
     xp_total = 0
@@ -1155,6 +1168,11 @@ async def record_run(
     if art_eff["crown_level_mult"]:
         cur_level_now = int((row or {}).get("level", 1))
         coins = int(coins * (1.05 ** cur_level_now))
+
+    # Artifact: Космический Двигатель — +20% к финальному ран-доходу
+    engine_bonus = float(art_eff.get("run_total_mult_bonus", 0.0))
+    if engine_bonus > 0:
+        coins = int(coins * (1.0 + engine_bonus))
 
     # NOTE: low_rarity_mult / jackpot_every_25 / burst_on_covert effects are
     # already factored into the client-reported `coins_earned` because the
@@ -1547,21 +1565,25 @@ def aggregate_artifact_effects(owned: list[str]) -> dict:
     code can consume. Multipliers are multiplied together, additive bonuses
     summed, booleans OR'd."""
     eff = {
-        "phantom_bonus":       0.0,
-        "shield_bonus":        0,
-        "save_tokens_bonus":   0,
-        "radar":               False,
-        "mythic_bonus":        0,
-        "burst_on_covert":     False,
-        "burst_radius":        0,
-        "map_vision":          False,
-        "low_rarity_mult":     1.0,
-        "jackpot_every_25":    0,
-        "daily_bonus_mult_3x": False,
-        "crown_level_mult":    False,
-        "afk_rate_mult":       1.0,
-        "afk_daily_cap_mult":  1,
-        "offline_cap_hours":   0,   # 0 means "no override"
+        "phantom_bonus":         0.0,
+        "shield_bonus":          0,
+        "save_tokens_bonus":     0,
+        "radar":                 False,
+        "mythic_bonus":          0,
+        "mythic_weight_bonus":   0.0,    # Призма (+50% к весу covert/exc)
+        "burst_on_covert":       False,
+        "burst_radius":          0,
+        "covert_mult":           1.0,    # Молниеносный (×3 на covert+)
+        "map_vision":            False,
+        "low_rarity_mult":       1.0,
+        "jackpot_every_25":      0,
+        "daily_bonus_mult_3x":   False,
+        "daily_first_run_base":  1.0,    # Фабрика — базовый ×2 без апгрейда
+        "crown_level_mult":      False,
+        "afk_rate_mult":         1.0,
+        "afk_daily_cap_mult":    1,
+        "offline_cap_hours":     0,      # 0 means "no override"
+        "run_total_mult_bonus":  0.0,    # Двигатель: +20% к доходу за ран
     }
     for key in owned or []:
         a = ARTIFACT_BY_KEY.get(key)
@@ -1569,13 +1591,16 @@ def aggregate_artifact_effects(owned: list[str]) -> dict:
             continue
         e = a.get("effect", {}) or {}
         for k, v in e.items():
-            if k in ("phantom_bonus",):
+            if k in ("phantom_bonus", "mythic_weight_bonus", "run_total_mult_bonus"):
                 eff[k] += float(v)
             elif k in ("shield_bonus", "save_tokens_bonus", "mythic_bonus", "burst_radius",
                        "jackpot_every_25"):
                 eff[k] += int(v)
-            elif k in ("low_rarity_mult", "afk_rate_mult"):
+            elif k in ("low_rarity_mult", "afk_rate_mult", "covert_mult"):
                 eff[k] *= float(v)
+            elif k in ("daily_first_run_base",):
+                # Take MAX (not multiply) — only one such artifact, but be safe
+                eff[k] = max(eff[k], float(v))
             elif k in ("afk_daily_cap_mult",):
                 eff[k] *= int(v)
             elif k in ("offline_cap_hours",):

@@ -618,7 +618,13 @@
    ════════════════════════════════════════════════════════════════ */
 
 .snake-cases-section { margin-bottom: 24px; }
-.snake-cases-section .snake-section-label { margin-bottom: 10px; }
+.snake-cases-section .snake-section-label { margin-bottom: 4px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.snake-section-hint { font-size: 11px; color: var(--text-dim); margin-bottom: 10px; line-height: 1.4; }
+.snake-inv-total {
+  font-size: 11px; font-weight: 700;
+  color: #ffd700; background: rgba(255,215,0,0.08);
+  padding: 2px 8px; border-radius: 999px;
+}
 
 .snake-cases-strip {
   display: grid;
@@ -647,6 +653,20 @@
   display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 6px;
 }
 .snake-case-drop { white-space: nowrap; }
+.snake-case-actions {
+  display: flex; flex-direction: column; gap: 5px;
+}
+.snake-case-info {
+  width: 100%; padding: 6px;
+  background: rgba(90,169,255,0.15);
+  border: 1px solid rgba(90,169,255,0.35);
+  color: #5aa9ff;
+  border-radius: 7px;
+  font-weight: 700; font-size: 11px;
+  cursor: pointer; transition: all 0.15s;
+}
+.snake-case-info:hover { background: rgba(90,169,255,0.25); }
+.snake-case-info:active { filter: brightness(0.85); }
 .snake-case-buy {
   width: 100%; padding: 8px;
   background: linear-gradient(180deg, #ffd700, #d4a800);
@@ -679,6 +699,12 @@
 .snake-shard-rarity { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
 .snake-shard-name { font-size: 10px; color: var(--text); margin: 2px 0; line-height: 1.2; min-height: 24px; }
 .snake-shard-count { font-size: 14px; font-weight: 800; color: #ffd700; margin: 2px 0; }
+.snake-shard-price {
+  font-size: 9px; color: #cbd5e0;
+  margin: 2px 0 4px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.snake-shard-card.empty .snake-shard-price { color: var(--text-dim); opacity: 0.7; }
 .snake-shard-sell {
   width: 100%; padding: 4px;
   background: rgba(235,75,75,0.15);
@@ -875,3 +901,103 @@
   cursor: pointer; min-width: 140px;
 }
 .snake-case-spinner-close:active { filter: brightness(0.85); }
+
+/* ════════════════════════════════════════════════════════════════
+   CASE DETAILS MODAL
+   ════════════════════════════════════════════════════════════════ */
+
+.snake-case-details-overlay {
+  position: fixed; inset: 0; z-index: 1900;
+  background: rgba(0,0,0,0.85);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+  animation: fadeIn 0.18s ease-out;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.snake-case-details-box {
+  width: 100%; max-width: 520px;
+  max-height: 90vh; overflow: auto;
+  background: linear-gradient(180deg, #1a1a26, #0f0f1a);
+  border: 1px solid rgba(255,215,0,0.25);
+  border-radius: 16px;
+  padding: 20px;
+  position: relative;
+  box-shadow: 0 0 60px rgba(255,215,0,0.08);
+}
+.snake-case-details-close {
+  position: absolute; top: 8px; right: 8px;
+  width: 36px; height: 36px;
+  border: 0; border-radius: 50%;
+  background: rgba(255,255,255,0.05);
+  color: #ccc; font-size: 22px; line-height: 1;
+  cursor: pointer; transition: background 0.15s;
+}
+.snake-case-details-close:hover { background: rgba(255,255,255,0.12); color: #fff; }
+
+.snake-case-details-head {
+  display: flex; gap: 14px; align-items: center;
+  margin-bottom: 16px;
+  padding-right: 30px;
+}
+.snake-case-details-head img {
+  width: 80px; height: 80px; object-fit: contain;
+  filter: drop-shadow(0 6px 14px rgba(0,0,0,0.5));
+}
+.snake-case-details-name {
+  font-weight: 800; font-size: 18px; color: #ffd700;
+}
+.snake-case-details-tier {
+  font-size: 12px; color: var(--text-dim); margin: 2px 0;
+}
+.snake-case-details-price {
+  font-size: 14px; font-weight: 800; color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.snake-case-details-section-label {
+  font-size: 12px; font-weight: 700; color: var(--text-dim);
+  margin: 6px 0 8px;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.snake-case-details-drops {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-bottom: 18px;
+}
+.snake-case-drop-row {
+  display: grid;
+  grid-template-columns: 50px 1fr auto;
+  gap: 10px; align-items: center;
+  padding: 8px 10px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--rar-color, #888);
+  border-radius: 8px;
+}
+.snake-case-drop-row img { width: 50px; height: 50px; object-fit: contain; }
+.snake-case-drop-info { min-width: 0; }
+.snake-case-drop-rarity {
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.snake-case-drop-name { font-size: 13px; font-weight: 700; color: var(--text); }
+.snake-case-drop-sell {
+  font-size: 10px; color: var(--text-dim);
+  margin-top: 1px; font-variant-numeric: tabular-nums;
+}
+.snake-case-drop-pct {
+  font-size: 14px; font-weight: 800; color: #ffd700;
+  font-variant-numeric: tabular-nums;
+  text-align: right; min-width: 50px;
+}
+.snake-case-details-open {
+  width: 100%; padding: 12px;
+  background: linear-gradient(180deg, #ffd700, #d4a800);
+  border: 0; border-radius: 10px;
+  color: #000; font-weight: 800; font-size: 14px;
+  cursor: pointer; transition: filter 0.15s, transform 0.1s;
+}
+.snake-case-details-open:not(:disabled):active { transform: scale(0.98); filter: brightness(0.9); }
+.snake-case-details-open:disabled {
+  background: var(--bg-elev); color: var(--text-dim); cursor: not-allowed;
+}
