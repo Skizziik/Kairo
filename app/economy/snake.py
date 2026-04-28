@@ -634,6 +634,19 @@ async def get_state(tg_id: int) -> dict:
     if um_lvl > 0:
         total_afk_rate *= (1.01 ** um_lvl)
 
+    # Pre-computed run-wide coin multiplier — client multiplies every eat
+    # popup by this so the live counter reflects what will actually be
+    # credited at run end (no more "20K shown, 34K paid" surprise).
+    greed_mult     = 1 + int(upgrades.get("greed_boost", 0)) * 0.02
+    total_mult     = 1.03 ** int(upgrades.get("total_multiplier", 0))
+    universal_mult = 1.01 ** int(upgrades.get("universal_magnet", 0))
+    today          = datetime.now(timezone.utc).date()
+    last_run_at    = row.get("last_run_at") if hasattr(row, "get") else None
+    is_first_today = (last_run_at is None) or (last_run_at.date() < today)
+    daily_bonus_lvl = int(upgrades.get("daily_bonus", 0))
+    daily_bonus_mult = (1 + daily_bonus_lvl * 0.10) if (is_first_today and daily_bonus_lvl > 0) else 1.0
+    coin_mult = round(greed_mult * total_mult * universal_mult * daily_bonus_mult, 4)
+
     return {
         "tg_id":             int(row["tg_id"]),
         "level":             cur_lvl,
@@ -657,6 +670,8 @@ async def get_state(tg_id: int) -> dict:
         "daily_afk_earned":  int(row["daily_afk_earned"] or 0) if row["daily_afk_day"] == datetime.now(timezone.utc).date() else 0,
         "afk_just_gained":   int(afk_gained),
         "achievements":      achievements,
+        "coin_mult":         coin_mult,
+        "is_first_today":    is_first_today,
     }
 
 

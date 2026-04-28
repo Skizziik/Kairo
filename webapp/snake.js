@@ -295,7 +295,8 @@
       modeCfg,
       skinCfg,
       upgrades,
-      coins: 0,
+      coins: 0,           // DISPLAY value (with run-wide multiplier)
+      rawCoins: 0,        // raw per-eat sum (sent to server)
       skinsEaten: 0,
       rarityCounts: {},   // {key: count}
       length: snake.cells.length,
@@ -818,10 +819,21 @@
       G.burstLeft -= 1;
     }
 
-    G.coins += coins;
+    // Two counters:
+    //   rawCoins  = pre-multiplied per-eat value (with lucky/crit/combo/streak/treasure)
+    //   coins (display) = rawCoins * run-wide multiplier (greed/total/um/daily)
+    // Server applies its own greed/total/um/daily on top of `rawCoins`, so we
+    // submit raw — but the player sees the FINAL number live during the run.
+    const runMult = (SS.state && SS.state.coin_mult) || 1;
+    const displayCoins = (runMult !== 1) ? Math.floor(coins * runMult) : coins;
+
+    G.rawCoins  = (G.rawCoins || 0) + coins;        // sent to /api/snake/run
+    G.coins     += displayCoins;                    // HUD shows this (final amount)
     G.skinsEaten += 1;
     G.rarityCounts[r.key] = (G.rarityCounts[r.key] || 0) + 1;
     document.getElementById('sg-coins').textContent = fmt(G.coins);
+    // Use display value for popup so user sees the actual number they get
+    coins = displayCoins;
 
     // Map cleaner — chance to remove a random obstacle on each eat
     const cleanerLvl = Number(G.upgrades.map_cleaner || 0);
@@ -1183,7 +1195,10 @@
         mode: G.modeCfg.key,
         map_id: G.mapCfg.key,
         died_to: diedTo,
-        coins_earned: G.coins,    // include actual sum (with crit/combo/streak/etc)
+        // RAW pre-multiplier sum (server adds greed/total/um/daily on top).
+        // G.coins is the display value with run-wide mult already applied —
+        // sending that would double-apply.
+        coins_earned: G.rawCoins || G.coins,
       }),
     }).then(resp => {
       if (!resp) return;
