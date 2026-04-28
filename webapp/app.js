@@ -2,7 +2,18 @@
 
 // ================= config =================
 // API base — fill in at build time via CONFIG.js or fallback to same origin parent
-const API_BASE = window.KAIRO_API_BASE || 'https://kairo-em51.onrender.com';
+// API base auto-detection: each Render deployment of this static frontend
+// hits its corresponding backend. Old account: kairo-app → kairo-em51.
+// New account (post-migration): kairo-app-11u1 → kairo-bot-hc22.
+// Override with window.KAIRO_API_BASE if you set it before app.js loads.
+const API_BASE = (() => {
+  if (window.KAIRO_API_BASE) return window.KAIRO_API_BASE;
+  const host = window.location.host || '';
+  if (host.includes('kairo-app-11u1')) return 'https://kairo-bot-hc22.onrender.com';
+  if (host.includes('kairo-casino-app')) return 'https://kairo-em51.onrender.com';
+  // Default → new (post-migration) backend
+  return 'https://kairo-bot-hc22.onrender.com';
+})();
 
 // ================= telegram sdk =================
 const tg = window.Telegram?.WebApp;
