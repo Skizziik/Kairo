@@ -88,6 +88,23 @@ async def api_me(user: dict = Depends(require_user)) -> dict:
     }
 
 
+@router.get("/balance")
+async def api_balance(user: dict = Depends(require_user)) -> dict:
+    """Lightweight balance-only endpoint — calls Snake AFK tick to credit any
+    pending coins, then returns current balance. Polled globally by the Mini
+    App every 15s so the top-bar stays fresh on every view."""
+    tg_id = int(user["id"])
+    # Trigger AFK tick so accumulated bot coins land before we report balance
+    try:
+        from app.economy import snake as _snake
+        await _snake._tick_afk(tg_id)
+    except Exception:
+        pass
+    await eco.ensure_user(tg_id)
+    row = await eco.get_user(tg_id)
+    return {"balance": int(row["balance"]) if row else 0}
+
+
 @router.post("/daily")
 async def api_daily(user: dict = Depends(require_user)) -> dict:
     tg_id = int(user["id"])

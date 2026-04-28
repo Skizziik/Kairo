@@ -881,6 +881,22 @@ document.addEventListener('DOMContentLoaded', () => {
     if (typeof window.jackpotLeave === 'function') window.jackpotLeave();
     showView('games');
   });
+
+  // Global balance poller — keeps the top-bar in sync regardless of which
+  // tab the user is on. Snake AFK farm credits accumulate every minute on
+  // the server, so we poll every 15s. Endpoint is lightweight (just a
+  // SELECT after _tick_afk). Snake/Jackpot have their own faster pollers
+  // that ALSO update the bar, so this is mainly for Home/Cases/Inventory.
+  setInterval(async () => {
+    try {
+      const r = await api('/api/balance');
+      if (r && typeof r.balance === 'number' && state && state.me) {
+        state.me.balance = r.balance;
+        const el = document.getElementById('balance-display');
+        if (el) el.textContent = fmt(r.balance);
+      }
+    } catch (e) { /* silent */ }
+  }, 15000);
 });
 
 function openGameScreen(gameKey) {
