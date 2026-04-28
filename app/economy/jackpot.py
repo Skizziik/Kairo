@@ -160,13 +160,14 @@ async def _enrich_deposits(conn, deposits: list[dict]) -> list[dict]:
     for d in deposits:
         d = dict(d)
         if d["is_bot"]:
-            d["display_name"] = d.get("bot_name") or "🤖 Bot"
-            d["avatar_url"]   = None  # client renders robot emoji
+            display = d.get("bot_name") or "🤖 Bot"
         else:
             u = user_map.get(int(d["user_id"]))
-            d["display_name"] = (u and (u.get("first_name") or u.get("username"))) or f"user{d['user_id']}"
-            # photo_url for users isn't stored; client falls back to initials
-            d["avatar_url"]   = None
+            display = (u and (u.get("first_name") or u.get("username"))) or f"user{d['user_id']}"
+        # Set both `name` (what client uses) and `display_name` (legacy alias)
+        d["name"] = display
+        d["display_name"] = display
+        d["avatar_url"] = None
         out.append(d)
     return out
 

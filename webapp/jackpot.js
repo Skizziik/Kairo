@@ -176,9 +176,10 @@
   }
 
   function tileHtml(d, isWinner) {
-    const initial = (d.name || '?').charAt(0).toUpperCase();
+    const name = d.name || d.display_name || '?';
+    const initial = name.charAt(0).toUpperCase();
     const isBot = d.is_bot;
-    const visibleName = isBot ? d.name.replace('🤖 ', '') : d.name;
+    const visibleName = isBot ? name.replace('🤖 ', '') : name;
     return `
       <div class="jp-tile ${isWinner ? 'winner' : ''}" style="--tile-color:${d.color || '#5cc15c'}">
         <div class="jp-tile-avatar">${isBot ? '🤖' : escape(initial)}</div>
@@ -192,8 +193,9 @@
       return '<div class="loader" style="font-size:13px; padding:18px">Никто пока не депозитил...</div>';
     }
     return deposits.map(d => {
+      const name = d.name || d.display_name || '?';
       const pct = totalValue > 0 ? ((d.value / totalValue) * 100).toFixed(1) : '0';
-      const initial = (d.name || '?').charAt(0).toUpperCase();
+      const initial = name.charAt(0).toUpperCase();
       const skinsCount = (d.inventory_ids && d.inventory_ids.length) || 0;
       const coins = d.coins || 0;
       let breakdown = [];
@@ -204,7 +206,7 @@
         <div class="jp-participant" style="--p-color:${d.color}">
           <div class="jp-p-avatar">${d.is_bot ? '🤖' : escape(initial)}</div>
           <div>
-            <div class="jp-p-name">${escape(d.name)}</div>
+            <div class="jp-p-name">${escape(name)}</div>
             <div class="jp-p-skins-count">${escape(breakStr)}</div>
           </div>
           <div class="jp-p-value">${fmt(d.value)}</div>
@@ -265,12 +267,14 @@
     if (!strip || !wrap) return;
 
     // Build tiles for full sequence
-    const tilesHtml = sequence.map((s, i) =>
-      `<div class="jp-tile" style="--tile-color:${s.color}" data-idx="${i}">
-        <div class="jp-tile-avatar">${s.is_bot ? '🤖' : escape((s.name || '?').charAt(0).toUpperCase())}</div>
-        <div class="jp-tile-name">${escape(s.is_bot ? s.name.replace('🤖 ', '') : s.name)}</div>
-      </div>`
-    ).join('');
+    const tilesHtml = sequence.map((s, i) => {
+      const sname = s.name || '?';
+      const visible = s.is_bot ? sname.replace('🤖 ', '') : sname;
+      return `<div class="jp-tile" style="--tile-color:${s.color}" data-idx="${i}">
+        <div class="jp-tile-avatar">${s.is_bot ? '🤖' : escape(sname.charAt(0).toUpperCase())}</div>
+        <div class="jp-tile-name">${escape(visible)}</div>
+      </div>`;
+    }).join('');
     strip.innerHTML = tilesHtml;
     // Reset transition / position for clean start
     strip.classList.remove('spinning');
@@ -305,10 +309,11 @@
       launchConfetti(wrap);
       const winnerDep = deposits.find(d => Number(d.user_id) === Number(winnerId));
       if (winnerDep) {
+        const wname = winnerDep.name || winnerDep.display_name || '?';
         const pct = JS_.activeRound && JS_.activeRound.total_value
                   ? ((winnerDep.value / JS_.activeRound.total_value) * 100).toFixed(1)
                   : '?';
-        toast(`🏆 ${winnerDep.name} забирает ${fmt(JS_.activeRound.total_value)} 🪙 (${pct}%)`, 4500);
+        toast(`🏆 ${wname} забирает ${fmt(JS_.activeRound.total_value)} 🪙 (${pct}%)`, 4500);
       }
     }, 5050);
   }
