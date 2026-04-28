@@ -457,7 +457,7 @@ ARTIFACTS: list[dict] = [
         "image": "art_scepter.png",
         "category": "combat",
         "price": 10_000_000,           # «номинальная» цена для sell-back
-        "recipe": {"bone": 5},         # 5x common bone
+        "recipe": {"bone": 5, "scale": 3, "spark": 2},   # 5/3/2 = 10
         "buff_short": "+5% Phantom Tail • +1 щит",
         "buff_long": "Постоянный +5% к шансу пройти сквозь себя и +1 щит на каждый ран. Идеально для долгих забегов.",
         "effect": {"phantom_bonus": 0.05, "shield_bonus": 1},
@@ -468,7 +468,7 @@ ARTIFACTS: list[dict] = [
         "image": "art_moon_sickle.png",
         "category": "combat",
         "price": 50_000_000,
-        "recipe": {"scale": 8},        # 8x uncommon
+        "recipe": {"scale": 6, "bone": 4, "moon": 3},   # 6/4/3 = 13
         "buff_short": "+2 жетона save",
         "buff_long": "Каждый ран начинается с +2 жетонами Save Token (откатывают одну смерть в self-collision).",
         "effect": {"save_tokens_bonus": 2},
@@ -479,7 +479,7 @@ ARTIFACTS: list[dict] = [
         "image": "art_third_eye.png",
         "category": "combat",
         "price": 100_000_000,
-        "recipe": {"spark": 10},       # 10x rare
+        "recipe": {"spark": 7, "mercury": 5, "bolt": 3},   # 7/5/3 = 15
         "buff_short": "Skin Radar • +2 mythic spawn",
         "buff_long": "Видишь редкие скины через стены (radar-эффект) и +2 гарантированных mythic спавна на ран.",
         "effect": {"radar": True, "mythic_bonus": 2},
@@ -490,7 +490,7 @@ ARTIFACTS: list[dict] = [
         "image": "art_lightning.png",
         "category": "combat",
         "price": 250_000_000,
-        "recipe": {"bolt": 10},        # 10x epic
+        "recipe": {"bolt": 8, "spark": 5, "prism": 4},   # 8/5/4 = 17
         "buff_short": "×3 на covert+ • flash",
         "buff_long": "Каждый covert или exceedingly rare скин даёт ×3 к доходу + визуальный взрыв света. Перевернёт долгие раны.",
         "effect": {"burst_on_covert": True, "covert_mult": 3.0},
@@ -501,7 +501,7 @@ ARTIFACTS: list[dict] = [
         "image": "art_prism.png",
         "category": "combat",
         "price": 500_000_000,
-        "recipe": {"prism": 10},       # 10x legendary
+        "recipe": {"prism": 10, "moon": 6, "diamond": 4},  # 10/6/4 = 20
         "buff_short": "Map Vision • +50% к covert/exc spawn",
         "buff_long": "Map Vision (мини-карта со всеми скинами и препятствиями) на любом скине без апгрейда + +50% к шансу спавна covert и exceedingly rare скинов.",
         "effect": {"map_vision": True, "mythic_weight_bonus": 0.5},
@@ -514,7 +514,7 @@ ARTIFACTS: list[dict] = [
         "image": "art_silver_heart.png",
         "category": "greed",
         "price": 25_000_000,
-        "recipe": {"moon": 10},        # 10x epic moon
+        "recipe": {"nugget": 5, "gear": 5, "mercury": 3},  # 5/5/3 = 13
         "buff_short": "+10% к общему доходу",
         "buff_long": "+10% ко всем монетам за каждый ран. Универсальный буст — стакается с другими множителями.",
         "effect": {"run_total_mult_bonus": 0.10},
@@ -525,7 +525,7 @@ ARTIFACTS: list[dict] = [
         "image": "art_cauldron.png",
         "category": "greed",
         "price": 250_000_000,
-        "recipe": {"mercury": 10},     # 10x rare
+        "recipe": {"mercury": 10, "spark": 4, "moon": 3},  # 10/4/3 = 17
         "buff_short": "Каждый 25-й скин ×100",
         "buff_long": "Каждый 25-й съеденный скин в ране даёт ×100 монет (счётчик не сбрасывается между раннами).",
         "effect": {"jackpot_every_25": 100},
@@ -536,7 +536,7 @@ ARTIFACTS: list[dict] = [
         "image": "art_dream_factory.png",
         "category": "greed",
         "price": 1_000_000_000,
-        "recipe": {"moon": 10},        # 10x epic
+        "recipe": {"moon": 5, "bolt": 5, "prism": 10},   # 5/5/10 = 20
         "buff_short": "Первый ран ×2 (стак с Daily)",
         "buff_long": "Первый ран дня даёт +100% к доходу САМ ПО СЕБЕ. Если есть апгрейд Daily Bonus — стакает: каждый его уровень × 3.",
         "effect": {"daily_bonus_mult_3x": True, "daily_first_run_base": 2.0},
@@ -547,7 +547,7 @@ ARTIFACTS: list[dict] = [
         "image": "art_crown.png",
         "category": "greed",
         "price": 5_000_000_000,
-        "recipe": {"diamond": 10},     # 10x legendary
+        "recipe": {"diamond": 12, "prism": 8, "stardust": 5},  # 12/8/5 = 25
         "buff_short": "Total ×1.05^lvl",
         "buff_long": "Финальный множитель за ран = 1.05^level. На 50 уровне — ×11.5 ко всему доходу. Бесконечный скейл.",
         "effect": {"crown_level_mult": True},
@@ -560,7 +560,7 @@ ARTIFACTS: list[dict] = [
         "image": "art_turbo.png",
         "category": "industrial",
         "price": 100_000_000,
-        "recipe": {"gear": 8},         # 8x uncommon
+        "recipe": {"gear": 8, "scale": 4, "spark": 2},   # 8/4/2 = 14
         "buff_short": "+25% AFK farm",
         "buff_long": "Все AFK-змейки приносят +25% монет в минуту. Стакается с AFK Rate Boost.",
         "effect": {"afk_rate_mult": 1.25},
@@ -571,7 +571,7 @@ ARTIFACTS: list[dict] = [
         "image": "art_conveyor.png",
         "category": "industrial",
         "price": 1_000_000_000,
-        "recipe": {"stardust": 5},     # 5x cosmic
+        "recipe": {"gear": 10, "bolt": 6, "stardust": 3},  # 10/6/3 = 19
         "buff_short": "Daily AFK cap ×5",
         "buff_long": "Дневной лимит AFK-фарма пятикратно увеличен. С 500M на максимуме станет 2.5B/день. Без него Двигатель частично избыточен.",
         "effect": {"afk_daily_cap_mult": 5},
@@ -582,7 +582,7 @@ ARTIFACTS: list[dict] = [
         "image": "art_cosmic_engine.png",
         "category": "industrial",
         "price": 50_000_000_000,
-        "recipe": {"supernova": 8},    # 8x cosmic — реалистично для эндгейма
+        "recipe": {"supernova": 10, "stardust": 8, "diamond": 5},  # 10/8/5 = 23 — endgame
         "buff_short": "×3 AFK • БЕЗ ЛИМИТОВ • +20% run",
         "buff_long": "Эндгейм-артефакт. ×3 ко всему AFK-фарму, дневной cap снят полностью, offline копится без ограничений (хоть месяц). Бонус: +20% к доходу за каждый ран. Стакается с Турбо и Конвейером.",
         "effect": {
