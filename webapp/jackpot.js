@@ -336,8 +336,8 @@
     strip.classList.add('spinning');
     strip.style.transform = `translateY(-50%) translateX(${targetX + jitter}px)`;
 
-    // After animation: highlight winner + confetti
-    setTimeout(() => {
+    // After animation: highlight winner + confetti + balance refresh
+    setTimeout(async () => {
       const winnerTile = strip.querySelector(`[data-idx="${winnerIdx}"]`);
       if (winnerTile) winnerTile.classList.add('winner');
       tg?.HapticFeedback?.notificationOccurred?.('success');
@@ -350,6 +350,10 @@
                   : '?';
         toast(`🏆 ${wname} забирает ${fmt(JS_.activeRound.total_value)} 🪙 (${pct}%)`, 4500);
       }
+      // Refresh authoritative balance — server settled in DB by now and
+      // winner's balance jumped (or loser stayed). UI must reflect that
+      // so player doesn't see a stale number.
+      await syncBalanceFromServer();
     }, 5050);
   }
 
@@ -476,15 +480,13 @@
           confirmBtn.textContent = '💎 Поставить';
           return;
         }
-        // Refresh balance + state
-        if (coinAmount > 0 && window.state?.me) {
-          window.state.me.balance -= coinAmount;
-          const balEl = document.getElementById('balance-display');
-          if (balEl) balEl.textContent = fmt(window.state.me.balance);
-        }
         toast(`Ставка ${fmt(r.value)} 🪙 принята! Удачи 🍀`);
         tg?.HapticFeedback?.notificationOccurred?.('success');
         modal.remove();
+        // Reset inventory cache so re-opening modal reflects locked items
+        JS_.inventoryCache = null;
+        // Authoritative balance refresh — never trust client subtraction
+        await syncBalanceFromServer();
         refresh(false);
       } catch (e) {
         toast('Ошибка: ' + e.message);
@@ -492,6 +494,20 @@
         confirmBtn.textContent = '💎 Поставить';
       }
     });
+  }
+
+  // Pulls fresh balance from server and updates the top bar. Called after any
+  // event that affects coin balance (deposit, settle, refund) so UI never
+  // drifts from authoritative state.
+  async function syncBalanceFromServer() {
+    try {
+      const me = await api('/api/me');
+      if (me && typeof me.balance === 'number' && window.state) {
+        window.state.me = me;
+        const balEl = document.getElementById('balance-display');
+        if (balEl) balEl.textContent = fmt(me.balance);
+      }
+    } catch (e) { /* ignore */ }
   }
 
   async function loadSkinsForDeposit(modal, selectedSkins, updateSummary) {
