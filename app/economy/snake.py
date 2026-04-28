@@ -509,7 +509,7 @@ ARTIFACTS: list[dict] = [
         "image": "art_silver_heart.png",
         "category": "greed",
         "price": 25_000_000,
-        "recipe": {"nugget": 5},       # 5x common nugget
+        "recipe": {"moon": 10},        # 10x epic moon
         "buff_short": "+50% common/industrial",
         "buff_long": "Common и Industrial скины приносят +50% монет — идеально для долгих фарм-сессий.",
         "effect": {"low_rarity_mult": 1.5},
