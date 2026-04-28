@@ -69,3 +69,8 @@ create index if not exists idx_snake_runs_coins on snake_runs (coins desc);
 alter table snake_users add column if not exists shards        jsonb  not null default '{}'::jsonb;
 alter table snake_users add column if not exists artifacts     jsonb  not null default '[]'::jsonb;
 alter table snake_users add column if not exists cases_opened  int    not null default 0;
+
+-- Schema version of the `upgrades` jsonb. Bumped each time we rescale a
+-- branch (e.g. greed v2 expanded max level 5-50 → 100 across the board).
+-- migrate_*() in app/economy/snake.py uses this as a one-shot guard.
+alter table snake_users add column if not exists upgrades_version int not null default 1;
