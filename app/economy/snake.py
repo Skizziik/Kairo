@@ -340,8 +340,8 @@ def afk_snake_rate(snake_key: str, level: int) -> float:
 
 # Daily AFK cap by snake-game level (player-level, not upgrade level)
 def daily_afk_cap_for(player_level: int) -> int:
-    if player_level <= 10:    return       50_000
-    if player_level <= 30:    return      500_000
+    if player_level <= 10:    return      500_000
+    if player_level <= 30:    return    2_500_000
     if player_level <= 50:    return    5_000_000
     if player_level <= 75:    return   50_000_000
     if player_level <= 100:   return  500_000_000
