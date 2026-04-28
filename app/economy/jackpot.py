@@ -370,20 +370,62 @@ async def deposit(user_id: int, inventory_ids: list[int] | None = None,
 # ============================================================
 
 # Stake brackets for bot deposits
+# Bot stake brackets — (label, weight, min_value, max_value, item_count_range, rarity_weights)
 _BOT_BRACKETS = [
-    # (label, weight, min_value, max_value)
-    ("cheap",   55, 1_000,    8_000),
-    ("mid",     30, 8_001,    80_000),
-    ("premium", 12, 80_001,   500_000),
-    ("whale",    3, 500_001,  3_000_000),
+    ("cheap",   55, 1_000,         8_000,     (1, 2), {"consumer": 30, "industrial": 35, "mil-spec": 25, "restricted": 10}),
+    ("mid",     30, 8_001,         80_000,    (1, 3), {"mil-spec": 25, "restricted": 35, "classified": 30, "covert": 10}),
+    ("premium", 12, 80_001,        500_000,   (1, 3), {"restricted": 15, "classified": 35, "covert": 40, "exceedingly_rare": 10}),
+    ("whale",    3, 500_001,       3_000_000, (1, 3), {"covert": 55, "exceedingly_rare": 45}),
 ]
 
 
+async def _gen_bot_skins(conn, target_value: int, bracket: tuple) -> tuple[list[int], int]:
+    """Materialize 1-3 skin inventory rows for the bot user that sum near
+    `target_value`. Returns (inventory_ids, actual_total_value)."""
+    from app.economy.pricing import compute_price, roll_float, wear_from_float
+
+    n_min, n_max = bracket[4]
+    rarity_weights = bracket[5]
+    rarities  = list(rarity_weights.keys())
+    rweights  = list(rarity_weights.values())
+    n_items   = random.randint(n_min, n_max)
+
+    inv_ids: list[int] = []
+    total = 0
+    for _ in range(n_items):
+        rarity = random.choices(rarities, weights=rweights, k=1)[0]
+        cat_row = await conn.fetchrow(
+            "select id, base_price from economy_skins_catalog "
+            "where active and rarity = $1 order by random() limit 1",
+            rarity,
+        )
+        if cat_row is None:
+            continue
+        float_val = roll_float()
+        wear, _ = wear_from_float(float_val)
+        stat_trak = random.random() < 0.05
+        price = compute_price(int(cat_row["base_price"]), float_val, wear, stat_trak)
+        inv_id = await conn.fetchval(
+            "insert into economy_inventory "
+            "(user_id, skin_id, float_value, wear, stat_trak, price, source) "
+            "values ($1, $2, $3, $4, $5, $6, 'jackpot_bot') returning id",
+            BOT_USER_ID, int(cat_row["id"]), float_val, wear, stat_trak, int(price),
+        )
+        inv_ids.append(int(inv_id))
+        total += int(price)
+    return inv_ids, total
+
+
 async def _bot_deposit(round_id: int) -> None:
-    """Bot drops a coin-only stake into a pending round. Coins are virtual —
-    the bot doesn't have a real balance; we just inflate total_value of the pot."""
+    """Bot drops a stake — either coins, skins, or mixed (random) — into a
+    pending round. Skin deposits create real economy_inventory rows owned by
+    BOT_USER_ID, locked to the round. On settle they transfer to the winner
+    or burn if bot wins (same machinery as real-player deposits)."""
     bracket = random.choices(_BOT_BRACKETS, weights=[b[1] for b in _BOT_BRACKETS], k=1)[0]
-    value = random.randint(bracket[2], bracket[3])
+    target = random.randint(bracket[2], bracket[3])
+    # Random deposit shape:
+    #   40% pure coins, 40% pure skins, 20% mixed (half/half by target value)
+    shape = random.choices(["coins", "skins", "mixed"], weights=[40, 40, 20], k=1)[0]
 
     async with pool().acquire() as conn:
         async with conn.transaction():
@@ -406,6 +448,36 @@ async def _bot_deposit(round_id: int) -> None:
             if int(bot_count or 0) >= 4:
                 return
 
+            # Build the actual deposit by shape
+            coins_part = 0
+            skin_inv_ids: list[int] = []
+            skin_value = 0
+            if shape == "coins":
+                coins_part = target
+            elif shape == "skins":
+                skin_inv_ids, skin_value = await _gen_bot_skins(conn, target, bracket)
+                if not skin_inv_ids:
+                    coins_part = target           # fallback if catalog couldn't supply
+            else:  # mixed
+                coin_target = target // 2
+                skin_target = target - coin_target
+                coins_part = coin_target
+                skin_inv_ids, skin_value = await _gen_bot_skins(conn, skin_target, bracket)
+                if not skin_inv_ids:
+                    coins_part = target           # fallback
+
+            value = coins_part + skin_value
+            if value < MIN_DEPOSIT_VALUE:
+                return
+
+            # Lock the bot's freshly-minted skins to this round
+            if skin_inv_ids:
+                await conn.execute(
+                    "update economy_inventory set jackpot_round_id = $2 "
+                    "where id = any($1::bigint[])",
+                    skin_inv_ids, round_id,
+                )
+
             used_colors = set()
             color_rows = await conn.fetch(
                 "select color from jackpot_deposits where round_id = $1", round_id,
@@ -418,9 +490,10 @@ async def _bot_deposit(round_id: int) -> None:
             await conn.execute(
                 """
                 insert into jackpot_deposits (round_id, user_id, inventory_ids, coins, value, color, is_bot, bot_name)
-                values ($1, $2, '[]'::jsonb, $3, $3, $4, true, $5)
+                values ($1, $2, $3::jsonb, $4, $5, $6, true, $7)
                 """,
-                round_id, BOT_USER_ID, value, color, bot_name,
+                round_id, BOT_USER_ID,
+                json.dumps(skin_inv_ids), coins_part, value, color, bot_name,
             )
             await conn.execute(
                 "update jackpot_rounds set total_value = total_value + $2 where id = $1",
