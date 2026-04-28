@@ -1273,43 +1273,24 @@ async def record_run(
     # what the client showed. Now the player gets credited what they earned.
     client_coins = max(0, int(coins_earned or 0))
 
-    # Anti-cheat upper bound: theoretically MAXIMUM possible per skin = coin_max
-    # x lucky(x2) x crit(x10) x combo(x4) x streak(x3) x treasure(x2) ≈ x480.
-    # Sum across all eaten skins. We use a generous cap to allow legitimate
-    # runs while rejecting blatantly inflated reports.
-    max_possible = 0.0
-    for r in RARITIES:
-        n = cleaned[r["key"]]
-        if n <= 0:
-            continue
-        # Per-skin theoretical ceiling with everything proccing simultaneously.
-        # Even with all luck procs this is statistically unreachable in practice.
-        per_skin_max = r["coin_max"] * 2 * 10 * 4 * 3 * 2  # x480
-        max_possible += per_skin_max * n
-    max_possible = int(max_possible)
-
-    if client_coins > max_possible:
-        # Suspicious — fall back to server-side average calc as a safe default
+    # Trust client_coins. The previous "max_possible = coin_max × 480 × n"
+    # ceiling didn't account for Cauldron (×100 jackpot every 25th eat) or
+    # Lightning (×3 on covert+) and was tripping on legitimate stacked runs —
+    # players were seeing 3.95B in the HUD but getting credited 87M after the
+    # fallback fired. Anti-cheat is now solely the per-second cap below
+    # (MAX_COINS_PER_SECOND × duration), which is plenty.
+    if client_coins == 0:
+        # Older clients that don't send coins_earned — fall back to a plain
+        # rarity-averaged estimate (no luck multipliers to fake parity).
         avg_coins = 0.0
         for r in RARITIES:
             n = cleaned[r["key"]]
             if n > 0:
                 avg_v = (r["coin_min"] + r["coin_max"]) / 2.0
-                avg_coins += avg_v * n * (1 + lucky_p) * (1 + crit_p * 9)
+                avg_coins += avg_v * n
         coins = int(avg_coins)
     else:
-        # Trust client. If client sent 0 (older clients without coins_earned
-        # field), fall back to server-avg so they still get something.
-        if client_coins == 0:
-            avg_coins = 0.0
-            for r in RARITIES:
-                n = cleaned[r["key"]]
-                if n > 0:
-                    avg_v = (r["coin_min"] + r["coin_max"]) / 2.0
-                    avg_coins += avg_v * n * (1 + lucky_p) * (1 + crit_p * 9)
-            coins = int(avg_coins)
-        else:
-            coins = client_coins
+        coins = client_coins
 
     # Anti-cheat: cap RAW per-second rate BEFORE applying run-wide multipliers.
     # The cap targets client claims (which can be inflated); run-wide mults

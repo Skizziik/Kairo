@@ -106,6 +106,47 @@
       </div>
     ` : '';
 
+    // Newbie exemption banner — shown until lifetime total_earned >= 1B
+    const newbieBanner = s.is_newbie ? (() => {
+      const earned = Number(s.total_earned || 0);
+      const threshold = Number(s.newbie_threshold || 1_000_000_000);
+      const left = Math.max(0, threshold - earned);
+      const pct = Math.min(100, Math.floor((earned / threshold) * 100));
+      return `
+        <div class="tax-newbie-banner">
+          <div class="tax-newbie-head">
+            <span>🆓 <b>Налоговые каникулы</b></span>
+            <span class="tax-newbie-pct">${pct}%</span>
+          </div>
+          <div class="tax-newbie-text">
+            Налогов нет, пока твой общий заработок меньше ${fmtCompact(threshold)} 🪙.
+          </div>
+          <div class="tax-newbie-progress">
+            <div class="tax-newbie-bar"><div class="tax-newbie-bar-fill" style="width:${pct}%"></div></div>
+            <div class="tax-newbie-numbers">${fmtCompact(earned)} / ${fmtCompact(threshold)}</div>
+          </div>
+          <div class="tax-newbie-text small">Осталось до начала налогов: <b>${fmtCompact(left)} 🪙</b></div>
+        </div>
+      `;
+    })() : '';
+
+    // Next-tick estimate — what will be added to pending_tax_due in ≤1h
+    const nextTickEstimate = Number(s.next_tick_tax_estimate || 0);
+    const nextTickBlock = (s.is_newbie || nextTickEstimate <= 0)
+      ? (s.pending_taxable_income > 0
+          ? `<div class="tax-due-pending">Накоплено дохода: ${fmt(s.pending_taxable_income)} 🪙${s.is_newbie ? ' (налог 0% — каникулы)' : ''}</div>`
+          : '')
+      : `<div class="tax-next-tick">
+          <div class="tax-next-tick-row">
+            <span>Накоплено дохода</span>
+            <b>${fmt(s.pending_taxable_income)} 🪙</b>
+          </div>
+          <div class="tax-next-tick-row tick-tax">
+            <span>Будет налог через ≤1 час (${(s.effective_rate * 100).toFixed(1)}%)</span>
+            <b>+${fmt(nextTickEstimate)} 🪙</b>
+          </div>
+        </div>`;
+
     const dueHtml = (owedTotal > 0 || debt > 0) ? `
       <div class="tax-due-card">
         <div class="tax-due-row">
@@ -121,13 +162,12 @@
           <b>${fmt(owedTotal)} 🪙</b>
         </div>
         <button class="tax-pay-btn" id="tax-pay-btn">💳 Заплатить ${fmt(owedTotal)} 🪙</button>
+        ${nextTickBlock}
       </div>
     ` : `
       <div class="tax-due-card clean">
         <div class="tax-due-clean">✅ Все налоги уплачены. Доход за час обнулится при следующем тике.</div>
-        ${(s.pending_taxable_income > 0)
-          ? `<div class="tax-due-pending">Накоплено дохода для следующего тика: ${fmt(s.pending_taxable_income)} 🪙</div>`
-          : ''}
+        ${nextTickBlock}
       </div>
     `;
 
@@ -224,6 +264,7 @@
     // ── ASSEMBLE ─────────────────────────────────────────────
     r.innerHTML = `
       ${entityHtml}
+      ${newbieBanner}
       ${paradiseBanner}
       ${debtBanner}
       ${dueHtml}

@@ -150,6 +150,11 @@ AUDIT_CHANCE_PER_TICK = 0.01
 # Honest Citizen: how many consecutive clean days unlock the permanent badge.
 HONEST_CITIZEN_DAYS = 30
 
+# Newbie exemption: players whose lifetime `economy_users.total_earned` is below
+# this threshold pay zero tax. Lets new players ramp up without a punishing
+# tax drag in their first sessions.
+NEWBIE_EXEMPTION_THRESHOLD = 1_000_000_000  # 1B lifetime earnings
+
 
 # ============================================================
 # DB / SCHEMA
@@ -249,8 +254,14 @@ async def get_state(tg_id: int) -> dict:
         row = await conn.fetchrow(
             "select * from tax_users where tg_id = $1", tg_id,
         )
+        # Lifetime earnings — drives the newbie exemption.
+        eu_row = await conn.fetchrow(
+            "select total_earned from economy_users where tg_id = $1", tg_id,
+        )
     if row is None:
         return {}
+    total_earned = int(eu_row["total_earned"]) if eu_row else 0
+    is_newbie = total_earned < NEWBIE_EXEMPTION_THRESHOLD
 
     upgrades = _parse_jsonb(row["upgrades"]) or {}
     today = datetime.now(timezone.utc).date()
@@ -266,6 +277,16 @@ async def get_state(tg_id: int) -> dict:
         honest_citizen=bool(row["honest_citizen"]),
         paradise_active=paradise_active,
     )
+    # Newbie exemption — overrides everything to 0 until threshold reached.
+    if is_newbie:
+        rate = 0.0
+
+    # Estimate of how much tax will be charged at the NEXT hourly tick.
+    # Useful for UI: "к списанию через час: X 🪙".
+    pending_income = int(row["pending_taxable_income"])
+    exemption = _income_exemption(upgrades)
+    taxable_now = max(0, pending_income - exemption)
+    next_tick_tax_estimate = int(taxable_now * rate)
 
     # Amnesty cooldown — once per real month (30 days)
     last_amnesty = row["last_amnesty_at"]
@@ -282,7 +303,7 @@ async def get_state(tg_id: int) -> dict:
         "effective_rate": round(rate, 4),
         "rate_breakdown": _rate_breakdown(int(row["entity_level"]), upgrades,
                                           declared_today, bool(row["honest_citizen"]),
-                                          paradise_active),
+                                          paradise_active, is_newbie),
         "upgrades": upgrades,
         "pending_taxable_income": int(row["pending_taxable_income"]),
         "pending_tax_due":        int(row["pending_tax_due"]),
@@ -302,12 +323,19 @@ async def get_state(tg_id: int) -> dict:
         "income_exemption_per_hour": _income_exemption(upgrades),
         "debt_penalty_per_day":     _debt_penalty_rate(upgrades),
         "black_books_chance":       _black_books_chance(upgrades),
+        "next_tick_tax_estimate":   next_tick_tax_estimate,
+        "is_newbie":                is_newbie,
+        "total_earned":             total_earned,
+        "newbie_threshold":         NEWBIE_EXEMPTION_THRESHOLD,
     }
 
 
 def _rate_breakdown(entity_level: int, upgrades: dict, declared_today: bool,
-                     honest_citizen: bool, paradise_active: bool) -> list[dict]:
+                     honest_citizen: bool, paradise_active: bool,
+                     is_newbie: bool = False) -> list[dict]:
     """Itemized tax rate so the UI can show 'why your rate is what it is'."""
+    if is_newbie:
+        return [{"label": "🆓 Налоговые каникулы (до 1B)", "value": "0%", "color": "#5cc15c"}]
     if paradise_active:
         return [{"label": "🏖 Налоговый рай", "value": "0%", "color": "#5cc15c"}]
     entity = ENTITY_BY_LEVEL.get(entity_level, ENTITIES[0])
@@ -399,6 +427,19 @@ async def hourly_tick_user(tg_id: int) -> dict:
             declared_today = (row["last_declared_at"] is not None and
                               row["last_declared_at"].date() == today)
             honest = bool(row["honest_citizen"])
+
+            # Newbie exemption: lifetime earnings under threshold → 0% tax.
+            # Just clear the income accumulator and bail.
+            eu = await conn.fetchrow(
+                "select total_earned from economy_users where tg_id = $1", tg_id,
+            )
+            total_earned = int(eu["total_earned"]) if eu else 0
+            if total_earned < NEWBIE_EXEMPTION_THRESHOLD:
+                await conn.execute(
+                    "update tax_users set pending_taxable_income = 0, last_tick_at = $2 "
+                    "where tg_id = $1", tg_id, now,
+                )
+                return report
 
             rate = _effective_rate(entity_level, upgrades, declared_today, honest, paradise_active)
             exemption = _income_exemption(upgrades)

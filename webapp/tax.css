@@ -120,6 +120,75 @@
 }
 .tax-debt-note { font-size: 10px; color: rgba(255,255,255,0.65); }
 
+/* NEWBIE EXEMPTION BANNER */
+.tax-newbie-banner {
+  background: linear-gradient(135deg, rgba(92,193,92,0.18), rgba(92,193,92,0.06));
+  border: 1px solid rgba(92,193,92,0.5);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.tax-newbie-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 14px; color: #5cc15c;
+  font-weight: 700;
+}
+.tax-newbie-head b { color: #fff; }
+.tax-newbie-pct {
+  font-size: 18px; font-weight: 800; color: #5cc15c;
+  font-variant-numeric: tabular-nums;
+}
+.tax-newbie-text {
+  font-size: 11px; color: rgba(255,255,255,0.7);
+  margin: 6px 0 8px; line-height: 1.4;
+}
+.tax-newbie-text.small { font-size: 11px; margin-top: 6px; }
+.tax-newbie-text b { color: #ffd700; font-variant-numeric: tabular-nums; }
+.tax-newbie-progress {
+  display: flex; align-items: center; gap: 10px;
+}
+.tax-newbie-bar {
+  flex: 1; height: 6px;
+  background: rgba(0,0,0,0.4);
+  border-radius: 3px; overflow: hidden;
+}
+.tax-newbie-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3a8c3a, #5cc15c);
+  transition: width 0.5s ease;
+}
+.tax-newbie-numbers {
+  font-size: 11px; color: #cbd5e0;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* NEXT-TICK ESTIMATE BLOCK */
+.tax-next-tick {
+  margin-top: 10px;
+  padding: 10px;
+  background: rgba(255,215,0,0.05);
+  border: 1px solid rgba(255,215,0,0.2);
+  border-radius: 8px;
+}
+.tax-next-tick-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 3px 0;
+  font-size: 12px; color: var(--text-dim, #aaa);
+}
+.tax-next-tick-row b {
+  color: #fff; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.tax-next-tick-row.tick-tax {
+  border-top: 1px dashed rgba(255,255,255,0.08);
+  margin-top: 4px; padding-top: 6px;
+}
+.tax-next-tick-row.tick-tax b {
+  color: #ffd700; font-size: 14px; font-weight: 800;
+}
+.tax-next-tick-row.tick-tax span { color: #cbd5e0; font-weight: 600; }
+
 /* PARADISE BANNER */
 .tax-paradise-banner {
   background: linear-gradient(135deg, #2d5fa3, #5cc15c);
