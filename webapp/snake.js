@@ -388,25 +388,42 @@
     };
     window.addEventListener('keydown', keyHandler);
 
-    // Touch swipes — restricted to canvas; preventDefault to keep Telegram from
-    // interpreting them as navigation gestures.
+    // Touch swipes — fire AS SOON as the finger crosses the threshold during
+    // the move (touchmove), NOT on touchend. The earlier "wait for lift"
+    // version felt 50ms+ laggy on phones because users perceive the swipe
+    // gesture as committed mid-motion. We also lower the threshold (18 → 14px)
+    // so quick flicks register reliably.
+    const SWIPE_THRESHOLD = 14;
     let touchStart = null;
     const touchStartH = (e) => {
       if (!e.touches || e.touches.length === 0) return;
       const t = e.touches[0];
-      touchStart = { x: t.clientX, y: t.clientY, ts: Date.now() };
+      touchStart = { x: t.clientX, y: t.clientY, ts: Date.now(), consumed: false };
     };
     const touchMoveH = (e) => {
       e.preventDefault();
+      if (!touchStart || touchStart.consumed) return;
+      if (!e.touches || e.touches.length === 0) return;
+      const t = e.touches[0];
+      const dx = t.clientX - touchStart.x;
+      const dy = t.clientY - touchStart.y;
+      const ax = Math.abs(dx), ay = Math.abs(dy);
+      if (Math.max(ax, ay) < SWIPE_THRESHOLD) return;
+      if (ax > ay) setDir(dx > 0 ? 1 : -1, 0);
+      else         setDir(0, dy > 0 ? 1 : -1);
+      touchStart.consumed = true;            // one swipe per touch — prevents jitter
+      tg?.HapticFeedback?.selectionChanged?.();
     };
     const touchEndH = (e) => {
-      if (!touchStart) return;
+      // Fallback: if touchmove didn't trigger (very fast flick that ended
+      // before move events fired), check the displacement here.
+      if (!touchStart || touchStart.consumed) { touchStart = null; return; }
       const t = e.changedTouches && e.changedTouches[0];
       if (!t) { touchStart = null; return; }
       const dx = t.clientX - touchStart.x;
       const dy = t.clientY - touchStart.y;
       const ax = Math.abs(dx), ay = Math.abs(dy);
-      if (Math.max(ax, ay) < 18) { touchStart = null; return; }
+      if (Math.max(ax, ay) < SWIPE_THRESHOLD) { touchStart = null; return; }
       if (ax > ay) setDir(dx > 0 ? 1 : -1, 0);
       else         setDir(0, dy > 0 ? 1 : -1);
       touchStart = null;
