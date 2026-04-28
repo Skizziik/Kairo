@@ -1127,6 +1127,19 @@ class SnakeMapReq(BaseModel):
     map_id: str
 
 
+class SnakeCaseReq(BaseModel):
+    case_key: str
+
+
+class SnakeShardSellReq(BaseModel):
+    shard_key: str
+    amount: int = Field(default=1, ge=1, le=10000)
+
+
+class SnakeArtifactReq(BaseModel):
+    artifact_key: str
+
+
 @router.get("/snake/state")
 async def api_snake_state(user: dict = Depends(require_user)) -> dict:
     return await _snake.get_state(int(user["id"]))
@@ -1188,6 +1201,28 @@ async def api_snake_leaderboard(period: str = "all", user: dict = Depends(requir
     if period not in ("all", "week"):
         period = "all"
     return await _snake.leaderboard(period=period, limit=20)
+
+
+# ── Cases & crafting ────────────────────────────────────────────
+
+@router.post("/snake/case/buy")
+async def api_snake_case_buy(req: SnakeCaseReq, user: dict = Depends(require_user)) -> dict:
+    return await _snake.buy_case(int(user["id"]), req.case_key)
+
+
+@router.post("/snake/shard/sell")
+async def api_snake_shard_sell(req: SnakeShardSellReq, user: dict = Depends(require_user)) -> dict:
+    return await _snake.sell_shard(int(user["id"]), req.shard_key, int(req.amount))
+
+
+@router.post("/snake/artifact/craft")
+async def api_snake_artifact_craft(req: SnakeArtifactReq, user: dict = Depends(require_user)) -> dict:
+    return await _snake.craft_artifact(int(user["id"]), req.artifact_key)
+
+
+@router.post("/snake/artifact/sell")
+async def api_snake_artifact_sell(req: SnakeArtifactReq, user: dict = Depends(require_user)) -> dict:
+    return await _snake.sell_artifact(int(user["id"]), req.artifact_key)
 
 
 # ================================================================

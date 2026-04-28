@@ -401,6 +401,292 @@ MODES: list[dict] = [
 
 
 # ============================================================
+# SHARDS — 12 craft materials. Drops from cases.
+# Rarity drives drop weight inside each case.
+# ============================================================
+
+SHARD_RARITIES: dict[str, dict] = {
+    # color/badge for UI; "tier" sets craft cost scaling
+    "common":     {"tier": 1, "color": "#9aa6b2", "label": "Common"},
+    "uncommon":   {"tier": 2, "color": "#5cc15c", "label": "Uncommon"},
+    "rare":       {"tier": 3, "color": "#5aa9ff", "label": "Rare"},
+    "epic":       {"tier": 4, "color": "#b96eff", "label": "Epic"},
+    "legendary":  {"tier": 5, "color": "#ffb84d", "label": "Legendary"},
+    "cosmic":     {"tier": 6, "color": "#ff58e8", "label": "Cosmic"},
+}
+
+SHARDS: list[dict] = [
+    # Common (drop a lot, sell back at low value)
+    {"key": "bone",      "name": "Костяной осколок",     "rarity": "common",    "image": "shard_bone.png",      "price":     50_000},
+    {"key": "nugget",    "name": "Самородок",            "rarity": "common",    "image": "shard_nugget.png",    "price":     50_000},
+    # Uncommon
+    {"key": "gear",      "name": "Шестерня",             "rarity": "uncommon",  "image": "shard_gear.png",      "price":    250_000},
+    {"key": "scale",     "name": "Чешуя",                "rarity": "uncommon",  "image": "shard_scale.png",     "price":    250_000},
+    # Rare
+    {"key": "mercury",   "name": "Капля Меркурия",       "rarity": "rare",      "image": "shard_mercury.png",   "price":  1_500_000},
+    {"key": "spark",     "name": "Искра",                "rarity": "rare",      "image": "shard_spark.png",     "price":  1_500_000},
+    # Epic
+    {"key": "moon",      "name": "Лунный камень",        "rarity": "epic",      "image": "shard_moon.png",      "price":  8_000_000},
+    {"key": "bolt",      "name": "Заряд Молнии",         "rarity": "epic",      "image": "shard_bolt.png",      "price":  8_000_000},
+    # Legendary
+    {"key": "prism",     "name": "Призма Прозрения",     "rarity": "legendary", "image": "shard_prism.png",     "price": 40_000_000},
+    {"key": "diamond",   "name": "Алмаз",                "rarity": "legendary", "image": "shard_diamond.png",   "price": 40_000_000},
+    # Cosmic
+    {"key": "stardust",  "name": "Звёздная пыль",        "rarity": "cosmic",    "image": "shard_stardust.png",  "price": 250_000_000},
+    {"key": "supernova", "name": "Осколок Сверхновой",   "rarity": "cosmic",    "image": "shard_supernova.png", "price": 250_000_000},
+]
+SHARD_BY_KEY = {s["key"]: s for s in SHARDS}
+
+
+# ============================================================
+# ARTIFACTS — 12 always-on permanent buffs.
+# Crafted from shards. Owned at most once. Sell-back = 50%.
+# Effects are applied automatically (no equip slots).
+# ============================================================
+
+ARTIFACTS: list[dict] = [
+    # ── COMBAT (помощь в раннах) ──────────────────────────────
+    {
+        "key": "scepter",
+        "name": "Скипетр Спасения",
+        "image": "art_scepter.png",
+        "category": "combat",
+        "price": 10_000_000,           # «номинальная» цена для sell-back
+        "recipe": {"bone": 5},         # 5x common bone
+        "buff_short": "+5% Phantom Tail • +1 щит",
+        "buff_long": "Постоянный +5% к шансу пройти сквозь себя и +1 щит на каждый ран. Идеально для долгих забегов.",
+        "effect": {"phantom_bonus": 0.05, "shield_bonus": 1},
+    },
+    {
+        "key": "moon_sickle",
+        "name": "Лунный Серп",
+        "image": "art_moon_sickle.png",
+        "category": "combat",
+        "price": 50_000_000,
+        "recipe": {"scale": 8},        # 8x uncommon
+        "buff_short": "+2 жетона save",
+        "buff_long": "Каждый ран начинается с +2 жетонами Save Token (откатывают одну смерть в self-collision).",
+        "effect": {"save_tokens_bonus": 2},
+    },
+    {
+        "key": "third_eye",
+        "name": "Третий Глаз",
+        "image": "art_third_eye.png",
+        "category": "combat",
+        "price": 100_000_000,
+        "recipe": {"spark": 10},       # 10x rare
+        "buff_short": "Skin Radar • +2 mythic spawn",
+        "buff_long": "Видишь редкие скины через стены (radar-эффект) и +2 гарантированных mythic спавна на ран.",
+        "effect": {"radar": True, "mythic_bonus": 2},
+    },
+    {
+        "key": "lightning",
+        "name": "Молниеносный Удар",
+        "image": "art_lightning.png",
+        "category": "combat",
+        "price": 250_000_000,
+        "recipe": {"bolt": 15},        # 15x epic
+        "buff_short": "Burst на каждый covert+",
+        "buff_long": "При поедании covert или выше — мгновенно сжигает все скины в радиусе 3 клеток (бонус-выплата).",
+        "effect": {"burst_on_covert": True, "burst_radius": 3},
+    },
+    {
+        "key": "prism",
+        "name": "Призма Прозрения",
+        "image": "art_prism.png",
+        "category": "combat",
+        "price": 500_000_000,
+        "recipe": {"prism": 20},       # 20x legendary
+        "buff_short": "Map Vision на всех скинах",
+        "buff_long": "Включает Map Vision (мини-карта со всеми скинами и препятствиями) для любого скина без апгрейда.",
+        "effect": {"map_vision": True},
+    },
+
+    # ── GREED (умножают доход) ─────────────────────────────────
+    {
+        "key": "silver_heart",
+        "name": "Серебряное Сердце",
+        "image": "art_silver_heart.png",
+        "category": "greed",
+        "price": 25_000_000,
+        "recipe": {"nugget": 5},       # 5x common nugget
+        "buff_short": "+50% common/industrial",
+        "buff_long": "Common и Industrial скины приносят +50% монет — идеально для долгих фарм-сессий.",
+        "effect": {"low_rarity_mult": 1.5},
+    },
+    {
+        "key": "cauldron",
+        "name": "Котёл Удачи",
+        "image": "art_cauldron.png",
+        "category": "greed",
+        "price": 250_000_000,
+        "recipe": {"mercury": 10},     # 10x rare
+        "buff_short": "Каждый 25-й скин ×100",
+        "buff_long": "Каждый 25-й съеденный скин в ране даёт ×100 монет (счётчик не сбрасывается между раннами).",
+        "effect": {"jackpot_every_25": 100},
+    },
+    {
+        "key": "dream_factory",
+        "name": "Фабрика Снов",
+        "image": "art_dream_factory.png",
+        "category": "greed",
+        "price": 1_000_000_000,
+        "recipe": {"moon": 15},        # 15x epic
+        "buff_short": "Daily Bonus ×3",
+        "buff_long": "Множитель первого ран в день увеличивается ×3 (если у вас Daily Bonus 10 — станет 30%/lvl).",
+        "effect": {"daily_bonus_mult_3x": True},
+    },
+    {
+        "key": "crown",
+        "name": "Корона Владыки",
+        "image": "art_crown.png",
+        "category": "greed",
+        "price": 5_000_000_000,
+        "recipe": {"diamond": 20},     # 20x legendary
+        "buff_short": "Total ×1.05^lvl",
+        "buff_long": "Финальный множитель за ран = 1.05^level. На 50 уровне — ×11.5 ко всему доходу.",
+        "effect": {"crown_level_mult": True},
+    },
+
+    # ── INDUSTRIAL (AFK farm) ──────────────────────────────────
+    {
+        "key": "turbo",
+        "name": "Турбо-Лопасти",
+        "image": "art_turbo.png",
+        "category": "industrial",
+        "price": 100_000_000,
+        "recipe": {"gear": 8},         # 8x uncommon
+        "buff_short": "+25% AFK farm",
+        "buff_long": "Все AFK-змейки приносят +25% монет в минуту. Стакается с AFK Rate Boost.",
+        "effect": {"afk_rate_mult": 1.25},
+    },
+    {
+        "key": "conveyor",
+        "name": "Конвейер Изобилия",
+        "image": "art_conveyor.png",
+        "category": "industrial",
+        "price": 1_000_000_000,
+        "recipe": {"stardust": 30},    # 30x cosmic
+        "buff_short": "Daily AFK cap ×3",
+        "buff_long": "Дневной лимит AFK-фарма утраивается. С 500M на максимуме станет 1.5B/день.",
+        "effect": {"afk_daily_cap_mult": 3},
+    },
+    {
+        "key": "cosmic_engine",
+        "name": "Космический Двигатель",
+        "image": "art_cosmic_engine.png",
+        "category": "industrial",
+        "price": 50_000_000_000,
+        "recipe": {"supernova": 30},   # 30x cosmic
+        "buff_short": "24h offline cap",
+        "buff_long": "Offline AFK cap = 24 часа (вместо базовых 4ч). Идеально для редких заходов.",
+        "effect": {"offline_cap_hours": 24},
+    },
+]
+ARTIFACT_BY_KEY = {a["key"]: a for a in ARTIFACTS}
+
+
+# ============================================================
+# CASES — 5 cases with weighted shard drop tables.
+# Higher tier case → richer shard pool. Cosmic case can drop ALL.
+# Weights are normalized at draw time.
+# ============================================================
+
+CASES: list[dict] = [
+    {
+        "key": "bronze",
+        "name": "Бронзовый кейс",
+        "image": "case_bronze.png",
+        "price":      5_000_000,
+        "tier_label": "Стартовый",
+        # weight per shard rarity (only these rarities can drop)
+        "drops": {
+            "common":   70,
+            "uncommon": 25,
+            "rare":      5,
+        },
+    },
+    {
+        "key": "silver",
+        "name": "Серебряный кейс",
+        "image": "case_silver.png",
+        "price":     50_000_000,
+        "tier_label": "Базовый",
+        "drops": {
+            "common":   30,
+            "uncommon": 45,
+            "rare":     20,
+            "epic":      5,
+        },
+    },
+    {
+        "key": "gold",
+        "name": "Золотой кейс",
+        "image": "case_gold.png",
+        "price":    500_000_000,
+        "tier_label": "Премиум",
+        "drops": {
+            "uncommon": 25,
+            "rare":     40,
+            "epic":     25,
+            "legendary": 10,
+        },
+    },
+    {
+        "key": "legendary",
+        "name": "Легендарный кейс",
+        "image": "case_legendary.png",
+        "price":  5_000_000_000,
+        "tier_label": "Эндгейм",
+        "drops": {
+            "rare":      20,
+            "epic":      40,
+            "legendary": 30,
+            "cosmic":    10,
+        },
+    },
+    {
+        "key": "cosmic",
+        "name": "Космический кейс",
+        "image": "case_cosmic.png",
+        "price": 50_000_000_000,
+        "tier_label": "Топ-тир",
+        "drops": {
+            "epic":      20,
+            "legendary": 40,
+            "cosmic":    40,
+        },
+    },
+]
+CASE_BY_KEY = {c["key"]: c for c in CASES}
+
+# Sell-back ratio for shards/artifacts (50%).
+SELL_BACK_RATIO = 0.5
+
+
+def _shards_by_rarity(rarity: str) -> list[dict]:
+    return [s for s in SHARDS if s["rarity"] == rarity]
+
+
+def _draw_shard_from_case(case_key: str) -> dict | None:
+    """Roll one shard out of a case according to its drop table."""
+    case = CASE_BY_KEY.get(case_key)
+    if not case:
+        return None
+    drops = case["drops"]
+    # Pick rarity by weight
+    rarity = random.choices(
+        list(drops.keys()),
+        weights=list(drops.values()),
+        k=1,
+    )[0]
+    pool = _shards_by_rarity(rarity)
+    if not pool:
+        return None
+    return random.choice(pool)
+
+
+# ============================================================
 # LEVEL / XP
 # ============================================================
 
@@ -469,13 +755,15 @@ async def _tick_afk(tg_id: int) -> int:
         async with conn.transaction():
             row = await conn.fetchrow(
                 "select level, last_afk_tick_at, daily_afk_earned, daily_afk_day, "
-                "afk_snakes, upgrades from snake_users where tg_id = $1 for update",
+                "afk_snakes, upgrades, artifacts from snake_users where tg_id = $1 for update",
                 tg_id,
             )
             if row is None:
                 return 0
             afk_snakes = _parse_jsonb(row["afk_snakes"]) or {}
             upgrades = _parse_jsonb(row["upgrades"]) or {}
+            artifacts = _parse_jsonb(row["artifacts"]) or []
+            art_eff = aggregate_artifact_effects(artifacts)
 
             # Total coin/min from all owned AFK snakes
             total_rate_per_min = 0.0
@@ -500,6 +788,10 @@ async def _tick_afk(tg_id: int) -> int:
             if um_lvl > 0:
                 total_rate_per_min *= (1.01 ** um_lvl)
 
+            # Artifact: Турбо-Лопасти — +25% to AFK rate
+            if art_eff["afk_rate_mult"] != 1.0:
+                total_rate_per_min *= art_eff["afk_rate_mult"]
+
             if total_rate_per_min <= 0:
                 # Still update last_tick if missing so future ticks don't claim huge ranges
                 if row["last_afk_tick_at"] is None:
@@ -509,9 +801,11 @@ async def _tick_afk(tg_id: int) -> int:
                     )
                 return 0
 
-            # Offline cap (4h base + AFK Cap Extender)
+            # Offline cap (4h base + AFK Cap Extender, with Cosmic Engine override)
             cap_extender_lvl = int(upgrades.get("afk_cap_extender", 0))
             offline_cap_h = DEFAULT_OFFLINE_CAP_H + cap_extender_lvl
+            if art_eff["offline_cap_hours"] > offline_cap_h:
+                offline_cap_h = art_eff["offline_cap_hours"]
             offline_cap_sec = offline_cap_h * 3600
 
             last_tick = row["last_afk_tick_at"]
@@ -522,8 +816,8 @@ async def _tick_afk(tg_id: int) -> int:
             if gross <= 0:
                 return 0
 
-            # Daily cap by player level
-            daily_cap = daily_afk_cap_for(int(row["level"]))
+            # Daily cap by player level (×Conveyor mult if owned)
+            daily_cap = daily_afk_cap_for(int(row["level"])) * art_eff["afk_daily_cap_mult"]
             daily_today = 0 if row["daily_afk_day"] != today else int(row["daily_afk_earned"] or 0)
             cap_left = max(0, daily_cap - daily_today)
             credited = min(gross, cap_left)
@@ -611,6 +905,11 @@ async def get_state(tg_id: int) -> dict:
     owned_skins = _parse_jsonb(row["owned_skins"]) or ["default"]
     unlocked_maps = _parse_jsonb(row["unlocked_maps"]) or ["park"]
     achievements = _parse_jsonb(row["achievements"]) or []
+    shards     = _parse_jsonb(row["shards"]) if "shards" in row.keys() else {}
+    artifacts  = _parse_jsonb(row["artifacts"]) if "artifacts" in row.keys() else []
+    shards     = shards or {}
+    artifacts  = artifacts or []
+    art_eff    = aggregate_artifact_effects(artifacts)
 
     # XP/level — recompute level from xp in case formula changed
     cur_xp = int(row["xp"] or 0)
@@ -633,6 +932,9 @@ async def get_state(tg_id: int) -> dict:
     um_lvl = int(upgrades.get("universal_magnet", 0))
     if um_lvl > 0:
         total_afk_rate *= (1.01 ** um_lvl)
+    # Artifact: Турбо-Лопасти (+25% afk rate)
+    if art_eff["afk_rate_mult"] != 1.0:
+        total_afk_rate *= art_eff["afk_rate_mult"]
 
     # Pre-computed run-wide coin multiplier — client multiplies every eat
     # popup by this so the live counter reflects what will actually be
@@ -645,7 +947,15 @@ async def get_state(tg_id: int) -> dict:
     is_first_today = (last_run_at is None) or (last_run_at.date() < today)
     daily_bonus_lvl = int(upgrades.get("daily_bonus", 0))
     daily_bonus_mult = (1 + daily_bonus_lvl * 0.10) if (is_first_today and daily_bonus_lvl > 0) else 1.0
-    coin_mult = round(greed_mult * total_mult * universal_mult * daily_bonus_mult, 4)
+    # Artifact: Фабрика Снов — daily bonus mult ×3
+    if art_eff["daily_bonus_mult_3x"] and daily_bonus_mult > 1.0:
+        daily_bonus_mult = 1 + (daily_bonus_mult - 1) * 3
+    # Artifact: Корона Владыки — total ×1.05^level
+    crown_mult = (1.05 ** cur_lvl) if art_eff["crown_level_mult"] else 1.0
+    coin_mult = round(greed_mult * total_mult * universal_mult * daily_bonus_mult * crown_mult, 4)
+
+    # Daily AFK cap with Conveyor (×3)
+    afk_cap_today = daily_afk_cap_for(cur_lvl) * art_eff["afk_daily_cap_mult"]
 
     return {
         "tg_id":             int(row["tg_id"]),
@@ -666,12 +976,16 @@ async def get_state(tg_id: int) -> dict:
         "upgrades":          upgrades,
         "afk_snakes":        afk_snakes,
         "afk_rate_per_min":  round(total_afk_rate, 2),
-        "afk_cap_today":     daily_afk_cap_for(cur_lvl),
+        "afk_cap_today":     afk_cap_today,
         "daily_afk_earned":  int(row["daily_afk_earned"] or 0) if row["daily_afk_day"] == datetime.now(timezone.utc).date() else 0,
         "afk_just_gained":   int(afk_gained),
         "achievements":      achievements,
         "coin_mult":         coin_mult,
         "is_first_today":    is_first_today,
+        "shards":            shards,
+        "artifacts":         artifacts,
+        "artifact_effects":  art_eff,
+        "cases_opened":      int(row["cases_opened"] or 0) if "cases_opened" in row.keys() else 0,
     }
 
 
@@ -695,6 +1009,11 @@ async def get_config() -> dict:
         "maps":      MAPS,
         "modes":     MODES,
         "max_coins_per_second": MAX_COINS_PER_SECOND,
+        "cases":     CASES,
+        "shards":    SHARDS,
+        "shard_rarities": SHARD_RARITIES,
+        "artifacts": ARTIFACTS,
+        "sell_back_ratio": SELL_BACK_RATIO,
     }
 
 
@@ -739,10 +1058,12 @@ async def record_run(
     async with pool().acquire() as conn:
         row = await conn.fetchrow(
             "select level, xp, runs_count, best_run_coins, best_run_length, "
-            "       last_run_at, upgrades, current_map_id "
+            "       last_run_at, upgrades, current_map_id, artifacts "
             "from snake_users where tg_id = $1 for update", tg_id,
         )
     upgrades = _parse_jsonb((row or {}).get("upgrades")) or {}
+    artifacts = _parse_jsonb((row or {}).get("artifacts")) or []
+    art_eff = aggregate_artifact_effects(artifacts)
 
     greed_lvl = int(upgrades.get("greed_boost", 0))
     greed_mult = 1 + greed_lvl * 0.02   # +2%/lvl, max +100%
@@ -767,6 +1088,9 @@ async def record_run(
     is_first_today = (last_run_at is None) or (last_run_at.date() < today)
     if is_first_today and daily_bonus_lvl > 0:
         daily_bonus_mult = 1 + daily_bonus_lvl * 0.10
+    # Artifact: Фабрика Снов — daily bonus mult ×3 on top
+    if art_eff["daily_bonus_mult_3x"] and daily_bonus_mult > 1.0:
+        daily_bonus_mult = 1 + (daily_bonus_mult - 1) * 3
 
     # XP по факту скушанных скинов
     xp_total = 0
@@ -826,6 +1150,16 @@ async def record_run(
 
     # Apply RUN-WIDE multipliers (NOT applied client-side):
     coins = int(coins * greed_mult * total_mult * um_mult * daily_bonus_mult)
+
+    # Artifact: Корона Владыки — total ×1.05^level (kicks in regardless of upgrade)
+    if art_eff["crown_level_mult"]:
+        cur_level_now = int((row or {}).get("level", 1))
+        coins = int(coins * (1.05 ** cur_level_now))
+
+    # NOTE: low_rarity_mult / jackpot_every_25 / burst_on_covert effects are
+    # already factored into the client-reported `coins_earned` because the
+    # frontend applies them per-eat in real time (along with combo/streak/
+    # treasure_pulse). This keeps the live HUD honest.
 
     # Recovery upgrade — adds back % of run earnings as a death bonus.
     # Description: "% от заработка возвращается после смерти" → flat reward
@@ -1202,6 +1536,244 @@ async def select_map(tg_id: int, map_id: str) -> dict:
             tg_id, map_id,
         )
     return {"ok": True, "current_map_id": map_id}
+
+
+# ============================================================
+# CASES & CRAFTING
+# ============================================================
+
+def aggregate_artifact_effects(owned: list[str]) -> dict:
+    """Sum effects of all owned artifacts into a single dict the rest of the
+    code can consume. Multipliers are multiplied together, additive bonuses
+    summed, booleans OR'd."""
+    eff = {
+        "phantom_bonus":       0.0,
+        "shield_bonus":        0,
+        "save_tokens_bonus":   0,
+        "radar":               False,
+        "mythic_bonus":        0,
+        "burst_on_covert":     False,
+        "burst_radius":        0,
+        "map_vision":          False,
+        "low_rarity_mult":     1.0,
+        "jackpot_every_25":    0,
+        "daily_bonus_mult_3x": False,
+        "crown_level_mult":    False,
+        "afk_rate_mult":       1.0,
+        "afk_daily_cap_mult":  1,
+        "offline_cap_hours":   0,   # 0 means "no override"
+    }
+    for key in owned or []:
+        a = ARTIFACT_BY_KEY.get(key)
+        if not a:
+            continue
+        e = a.get("effect", {}) or {}
+        for k, v in e.items():
+            if k in ("phantom_bonus",):
+                eff[k] += float(v)
+            elif k in ("shield_bonus", "save_tokens_bonus", "mythic_bonus", "burst_radius",
+                       "jackpot_every_25"):
+                eff[k] += int(v)
+            elif k in ("low_rarity_mult", "afk_rate_mult"):
+                eff[k] *= float(v)
+            elif k in ("afk_daily_cap_mult",):
+                eff[k] *= int(v)
+            elif k in ("offline_cap_hours",):
+                eff[k] = max(eff[k], int(v))
+            elif k in ("radar", "burst_on_covert", "map_vision", "daily_bonus_mult_3x",
+                       "crown_level_mult"):
+                eff[k] = bool(v) or eff[k]
+    return eff
+
+
+async def buy_case(tg_id: int, case_key: str) -> dict:
+    """Charge the user, roll a shard, add it to their inventory."""
+    case = CASE_BY_KEY.get(case_key)
+    if not case:
+        return {"ok": False, "error": "Unknown case"}
+    price = int(case["price"])
+    drop = _draw_shard_from_case(case_key)
+    if not drop:
+        return {"ok": False, "error": "Drop table empty"}
+
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            # Charge balance
+            bal_row = await conn.fetchrow(
+                "select balance from economy_users where tg_id = $1 for update", tg_id,
+            )
+            if not bal_row or int(bal_row["balance"]) < price:
+                return {"ok": False, "error": "Не хватает монет", "need": price}
+            new_bal_row = await conn.fetchrow(
+                "update economy_users set balance = balance - $2 "
+                "where tg_id = $1 returning balance",
+                tg_id, price,
+            )
+            new_bal = int(new_bal_row["balance"])
+            # Add shard
+            srow = await conn.fetchrow(
+                "select shards, cases_opened from snake_users where tg_id = $1 for update",
+                tg_id,
+            )
+            shards = _parse_jsonb((srow or {}).get("shards")) or {}
+            shards[drop["key"]] = int(shards.get(drop["key"], 0)) + 1
+            await conn.execute(
+                "update snake_users set shards = $2::jsonb, "
+                "cases_opened = cases_opened + 1 where tg_id = $1",
+                tg_id, json.dumps(shards),
+            )
+            # Transaction log
+            try:
+                await conn.execute(
+                    "insert into economy_transactions (user_id, amount, kind, reason, balance_after) "
+                    "values ($1, $2, 'snake_case', $3, $4)",
+                    tg_id, -price, f"case_{case_key}_drop_{drop['key']}", new_bal,
+                )
+            except Exception:
+                pass
+
+    # Audit (best-effort)
+    try:
+        from app.economy import audit as _audit
+        await _audit.log_bet(
+            tg_id, "snake_case", bet=price, win=0, net=-price,
+            details={"case": case_key, "drop": drop["key"], "rarity": drop["rarity"]},
+            balance_after=new_bal,
+        )
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "drop": {
+            "key":    drop["key"],
+            "name":   drop["name"],
+            "rarity": drop["rarity"],
+            "image":  drop["image"],
+            "price":  drop["price"],
+        },
+        "new_balance": new_bal,
+        "spent":       price,
+    }
+
+
+async def sell_shard(tg_id: int, shard_key: str, amount: int = 1) -> dict:
+    s = SHARD_BY_KEY.get(shard_key)
+    if not s:
+        return {"ok": False, "error": "Unknown shard"}
+    amount = max(1, int(amount or 1))
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            srow = await conn.fetchrow(
+                "select shards from snake_users where tg_id = $1 for update", tg_id,
+            )
+            shards = _parse_jsonb((srow or {}).get("shards")) or {}
+            have = int(shards.get(shard_key, 0))
+            if have < amount:
+                return {"ok": False, "error": "Недостаточно осколков"}
+            shards[shard_key] = have - amount
+            if shards[shard_key] <= 0:
+                shards.pop(shard_key, None)
+            payout = int(s["price"] * SELL_BACK_RATIO) * amount
+            new_bal_row = await conn.fetchrow(
+                "update economy_users set balance = balance + $2 "
+                "where tg_id = $1 returning balance",
+                tg_id, payout,
+            )
+            new_bal = int(new_bal_row["balance"]) if new_bal_row else 0
+            await conn.execute(
+                "update snake_users set shards = $2::jsonb where tg_id = $1",
+                tg_id, json.dumps(shards),
+            )
+            try:
+                await conn.execute(
+                    "insert into economy_transactions (user_id, amount, kind, reason, balance_after) "
+                    "values ($1, $2, 'snake_shard_sell', $3, $4)",
+                    tg_id, payout, f"sell_{shard_key}_x{amount}", new_bal,
+                )
+            except Exception:
+                pass
+    return {"ok": True, "payout": payout, "new_balance": new_bal, "shards": shards}
+
+
+async def craft_artifact(tg_id: int, artifact_key: str) -> dict:
+    a = ARTIFACT_BY_KEY.get(artifact_key)
+    if not a:
+        return {"ok": False, "error": "Unknown artifact"}
+    recipe = a["recipe"]
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            srow = await conn.fetchrow(
+                "select shards, artifacts from snake_users where tg_id = $1 for update",
+                tg_id,
+            )
+            shards = _parse_jsonb((srow or {}).get("shards")) or {}
+            owned  = _parse_jsonb((srow or {}).get("artifacts")) or []
+            if artifact_key in owned:
+                return {"ok": False, "error": "Артефакт уже скрафчен"}
+            # Check ingredients
+            for k, n in recipe.items():
+                if int(shards.get(k, 0)) < int(n):
+                    return {
+                        "ok": False,
+                        "error": f"Не хватает: {SHARD_BY_KEY[k]['name']} ({shards.get(k,0)}/{n})",
+                    }
+            # Consume
+            for k, n in recipe.items():
+                shards[k] = int(shards[k]) - int(n)
+                if shards[k] <= 0:
+                    shards.pop(k, None)
+            owned.append(artifact_key)
+            await conn.execute(
+                "update snake_users set shards = $2::jsonb, artifacts = $3::jsonb "
+                "where tg_id = $1",
+                tg_id, json.dumps(shards), json.dumps(owned),
+            )
+    # Audit
+    try:
+        from app.economy import audit as _audit
+        await _audit.log_bet(
+            tg_id, "snake_craft", bet=0, win=0, net=0,
+            details={"artifact": artifact_key, "recipe": recipe},
+        )
+    except Exception:
+        pass
+    return {"ok": True, "artifact": artifact_key, "shards": shards, "artifacts": owned}
+
+
+async def sell_artifact(tg_id: int, artifact_key: str) -> dict:
+    a = ARTIFACT_BY_KEY.get(artifact_key)
+    if not a:
+        return {"ok": False, "error": "Unknown artifact"}
+    payout = int(a["price"] * SELL_BACK_RATIO)
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            srow = await conn.fetchrow(
+                "select artifacts from snake_users where tg_id = $1 for update", tg_id,
+            )
+            owned = _parse_jsonb((srow or {}).get("artifacts")) or []
+            if artifact_key not in owned:
+                return {"ok": False, "error": "У вас нет такого артефакта"}
+            owned = [x for x in owned if x != artifact_key]
+            new_bal_row = await conn.fetchrow(
+                "update economy_users set balance = balance + $2 "
+                "where tg_id = $1 returning balance",
+                tg_id, payout,
+            )
+            new_bal = int(new_bal_row["balance"]) if new_bal_row else 0
+            await conn.execute(
+                "update snake_users set artifacts = $2::jsonb where tg_id = $1",
+                tg_id, json.dumps(owned),
+            )
+            try:
+                await conn.execute(
+                    "insert into economy_transactions (user_id, amount, kind, reason, balance_after) "
+                    "values ($1, $2, 'snake_artifact_sell', $3, $4)",
+                    tg_id, payout, f"sell_artifact_{artifact_key}", new_bal,
+                )
+            except Exception:
+                pass
+    return {"ok": True, "payout": payout, "new_balance": new_bal, "artifacts": owned}
 
 
 # ============================================================

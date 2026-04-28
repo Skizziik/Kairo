@@ -61,3 +61,11 @@ create table if not exists snake_runs (
 );
 create index if not exists idx_snake_runs_user_time on snake_runs (user_id, created_at desc);
 create index if not exists idx_snake_runs_coins on snake_runs (coins desc);
+
+-- Cases & Crafting (added later — idempotent ALTERs).
+-- shards: { shard_key: count }
+-- artifacts: [ artifact_key, ... ]  (each artifact is owned at most once)
+-- cases_opened: lifetime count for stats
+alter table snake_users add column if not exists shards        jsonb  not null default '{}'::jsonb;
+alter table snake_users add column if not exists artifacts     jsonb  not null default '[]'::jsonb;
+alter table snake_users add column if not exists cases_opened  int    not null default 0;

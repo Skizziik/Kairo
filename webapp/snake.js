@@ -126,6 +126,7 @@
           <div class="snake-tabs">
             <button class="snake-tab" data-tab="play"><span class="snake-tab-icon">▶</span><span>Играть</span></button>
             <button class="snake-tab" data-tab="upgrades"><span class="snake-tab-icon">⚒</span><span>Апгрейды</span></button>
+            <button class="snake-tab" data-tab="cases"><span class="snake-tab-icon">🎁</span><span>Кейсы</span></button>
             <button class="snake-tab" data-tab="terrarium"><span class="snake-tab-icon">🤖</span><span>Ферма</span></button>
             <button class="snake-tab" data-tab="skins"><span class="snake-tab-icon">🎨</span><span>Скины</span></button>
             <button class="snake-tab" data-tab="maps"><span class="snake-tab-icon">🗺</span><span>Карты</span></button>
@@ -150,6 +151,7 @@
     if (!c) return;
     if (tab === 'play')      paintPlayTab(c);
     if (tab === 'upgrades')  paintUpgradesTab(c);
+    if (tab === 'cases')     paintCasesTab(c);
     if (tab === 'terrarium') paintTerrariumTab(c);
     if (tab === 'skins')     paintSkinsTab(c);
     if (tab === 'maps')      paintMapsTab(c);
@@ -302,8 +304,12 @@
       length: snake.cells.length,
       foods: [],          // [{x, y, rarity, spawnedAt}]
       obstacles: [],      // [{x, y, dx?, dy?}]
-      shieldsLeft: Number(upgrades.iron_shield || 0),
+      shieldsLeft: Number(upgrades.iron_shield || 0) + Number(((SS.state && SS.state.artifact_effects) || {}).shield_bonus || 0),
       bouncesLeft: Number(upgrades.wall_bounce || 0),
+      // Artifact effects passed through (read on each eat, etc.)
+      artEff: (SS.state && SS.state.artifact_effects) || {},
+      saveTokensLeft: Number(((SS.state && SS.state.artifact_effects) || {}).save_tokens_bonus || 0),
+      jackpotEats: 0,    // Cauldron — counts global eats, every 25th = ×100
       // Ghost mode — granted at start of run, ticks down. Lvl × 1000ms.
       ghostMs: Number(upgrades.ghost_mode || 0) * 1000,
       // Extra lives (separate from shields — full reset on use)
@@ -534,6 +540,23 @@
         // Save-token helper: when about to die, try quantum_leap then pause_token
         // then extra_life. Returns true if saved (caller continues without dying).
         const trySave = (whatKilled) => {
+          // 0. Лунный Серп save token: instant rewind one death (self-only)
+          if (whatKilled === 'self' && G.saveTokensLeft > 0) {
+            G.saveTokensLeft -= 1;
+            // Remove last 3 cells of body to give space, keep head pos
+            if (snake.cells.length > 4) {
+              snake.cells.splice(-3, 3);
+            }
+            G.consecutiveEats = 0;
+            flash(G);
+            G.popups.push({
+              x: snake.cells[0].x * G.cellPx + G.cellPx / 2,
+              y: snake.cells[0].y * G.cellPx,
+              text: '🌙 Save Token',
+              color: '#9aa6b2', t0: now,
+            });
+            return true;
+          }
           // 1. Quantum leap: teleport head 3 cells forward, skipping the obstacle/wall
           if (G.leapLeft > 0) {
             G.leapLeft -= 1;
@@ -627,7 +650,8 @@
         // Self collision (ghost mode bypasses)
         const selfHit = !ghostActive && snake.cells.some(c => c.x === head.x && c.y === head.y);
         if (selfHit) {
-          const phantomChance = Number(G.upgrades.phantom_tail || 0) * 0.017;
+          const phantomChance = Number(G.upgrades.phantom_tail || 0) * 0.017
+                                + Number((G.artEff || {}).phantom_bonus || 0);
           if (Math.random() < phantomChance) {
             snake.cells.unshift(head);
             snake.cells.pop();
@@ -819,6 +843,35 @@
       G.burstLeft -= 1;
     }
 
+    // ─── ARTIFACT EFFECTS (per-eat) ──────────────────────────────
+    const artEff = G.artEff || {};
+    // Серебряное Сердце — +50% common/industrial
+    if (artEff.low_rarity_mult && artEff.low_rarity_mult !== 1) {
+      if (food.rarity === 'consumer' || food.rarity === 'industrial') {
+        coins = Math.floor(coins * artEff.low_rarity_mult);
+      }
+    }
+    // Котёл Удачи — каждый 25-й скушанный скин даёт ×100
+    if (artEff.jackpot_every_25 && artEff.jackpot_every_25 > 0) {
+      G.jackpotEats = (G.jackpotEats || 0) + 1;
+      if (G.jackpotEats % 25 === 0) {
+        coins = coins * Number(artEff.jackpot_every_25);
+        G.popups.push({
+          x: (G.size * G.cellPx) / 2,
+          y: 50,
+          text: '🍀 JACKPOT ×' + artEff.jackpot_every_25,
+          color: '#ffd700', t0: now,
+        });
+        try { tg?.HapticFeedback?.notificationOccurred?.('success'); } catch (e) {}
+      }
+    }
+    // Молниеносный Удар — burst-вспышка на covert+ (бонусные монеты)
+    if (artEff.burst_on_covert && (food.rarity === 'covert' || food.rarity === 'exceedingly_rare')) {
+      // Burst даёт ×1.5 к coins за этот еат + flash эффект
+      coins = Math.floor(coins * 1.5);
+      flash(G);
+    }
+
     // Two counters:
     //   rawCoins  = pre-multiplied per-eat value (with lucky/crit/combo/streak/treasure)
     //   coins (display) = rawCoins * run-wide multiplier (greed/total/um/daily)
@@ -909,6 +962,8 @@
     // Apply mythic_magnet boost
     const magnetLvl = Number(G.upgrades.mythic_magnet || 0);
     const driftLvl  = Number(G.upgrades.skin_drop_plus || 0);
+    const artEff    = G.artEff || {};
+    const mythicBonus = Number(artEff.mythic_bonus || 0);
 
     let weights = rarities.map(r => Math.max(0.1, r.weight));
     if (magnetLvl > 0) {
@@ -916,6 +971,16 @@
       weights = rarities.map((r, i) => {
         if (r.key === 'covert' || r.key === 'exceedingly_rare') return r.weight * (1 + magnetLvl * 0.5);
         return r.weight;
+      });
+    }
+    // Третий Глаз — увеличивает вес mythic+exc_rare на +50% за каждый бонус
+    if (mythicBonus > 0) {
+      weights = weights.map((w, i) => {
+        const k = rarities[i].key;
+        if (k === 'covert' || k === 'exceedingly_rare') {
+          return w * (1 + mythicBonus * 0.5);
+        }
+        return w;
       });
     }
     let total = weights.reduce((a, b) => a + b, 0);
@@ -1301,6 +1366,305 @@
           tg?.HapticFeedback?.impactOccurred?.('light');
           paintUpgradesTab(c);
         } catch (e) { toast('Ошибка: ' + e.message); }
+      });
+    });
+  }
+
+  // ═════════════════ CASES TAB ═════════════════
+  function paintCasesTab(c) {
+    const cases     = SS.cfg.cases     || [];
+    const shardCfg  = SS.cfg.shards    || [];
+    const artifacts = SS.cfg.artifacts || [];
+    const shardRarities = SS.cfg.shard_rarities || {};
+    const ratio     = Number(SS.cfg.sell_back_ratio || 0.5);
+
+    const ownedShards    = SS.state.shards    || {};
+    const ownedArtifacts = SS.state.artifacts || [];
+    const balance = window.state?.me?.balance || 0;
+
+    // ── 1. CASES STRIP ──────────────────────────────
+    const casesHtml = cases.map(cs => {
+      const canAfford = balance >= Number(cs.price);
+      const drops = cs.drops || {};
+      const dropsList = Object.keys(drops).map(rar => {
+        const total = Object.values(drops).reduce((a, b) => a + b, 0);
+        const pct = Math.round((drops[rar] / total) * 100);
+        const meta = shardRarities[rar] || {};
+        return `<span class="snake-case-drop" style="color:${meta.color || '#aaa'}">${escape(meta.label || rar)} ${pct}%</span>`;
+      }).join(' • ');
+      return `
+        <div class="snake-case-card ${canAfford ? '' : 'locked'}" data-case="${cs.key}">
+          <img class="snake-case-img" src="./img/snake/${cs.image}" alt="${escape(cs.name)}" />
+          <div class="snake-case-name">${escape(cs.name)}</div>
+          <div class="snake-case-tier">${escape(cs.tier_label || '')}</div>
+          <div class="snake-case-drops">${dropsList}</div>
+          <button class="snake-case-buy" data-case="${cs.key}" ${canAfford ? '' : 'disabled'}>
+            ${fmtCompact(cs.price)} 🪙
+          </button>
+        </div>
+      `;
+    }).join('');
+
+    // ── 2. SHARDS INVENTORY ─────────────────────────
+    const shardsHtml = shardCfg.map(s => {
+      const have = Number(ownedShards[s.key] || 0);
+      const meta = shardRarities[s.rarity] || {};
+      const sellPrice = Math.floor(s.price * ratio);
+      return `
+        <div class="snake-shard-card ${have > 0 ? 'owned' : 'empty'}" data-shard="${s.key}">
+          <img class="snake-shard-img" src="./img/snake/${s.image}" alt="${escape(s.name)}" />
+          <div class="snake-shard-rarity" style="color:${meta.color}">${escape(meta.label || s.rarity)}</div>
+          <div class="snake-shard-name">${escape(s.name)}</div>
+          <div class="snake-shard-count">×${have}</div>
+          ${have > 0
+            ? `<button class="snake-shard-sell" data-shard="${s.key}">−${fmtCompact(sellPrice)} 🪙</button>`
+            : `<div class="snake-shard-sell empty">—</div>`}
+        </div>
+      `;
+    }).join('');
+
+    // ── 3. ARTIFACTS ────────────────────────────────
+    const artHtml = artifacts.map(a => {
+      const owned = ownedArtifacts.includes(a.key);
+      const recipe = a.recipe || {};
+      const recipeChips = Object.keys(recipe).map(k => {
+        const need = Number(recipe[k]);
+        const have = Number(ownedShards[k] || 0);
+        const ok = have >= need;
+        const sh = shardCfg.find(x => x.key === k);
+        const meta = sh ? (shardRarities[sh.rarity] || {}) : {};
+        const img = sh ? `<img src="./img/snake/${sh.image}" alt="" />` : '';
+        return `
+          <div class="snake-recipe-chip ${ok ? 'ok' : 'short'}">
+            ${img}
+            <span class="snake-recipe-need" style="color:${meta.color || '#aaa'}">
+              ${have}/${need}
+            </span>
+          </div>
+        `;
+      }).join('');
+      const canCraft = !owned && Object.keys(recipe).every(k =>
+        Number(ownedShards[k] || 0) >= Number(recipe[k])
+      );
+      const sellPrice = Math.floor(a.price * ratio);
+
+      return `
+        <div class="snake-artifact-card cat-${a.category} ${owned ? 'owned' : ''}">
+          <img class="snake-artifact-img" src="./img/snake/${a.image}" alt="${escape(a.name)}" />
+          <div class="snake-artifact-info">
+            <div class="snake-artifact-name">${escape(a.name)}</div>
+            <div class="snake-artifact-buff">${escape(a.buff_short || '')}</div>
+            <div class="snake-artifact-buff-long">${escape(a.buff_long || '')}</div>
+            <div class="snake-artifact-recipe">${recipeChips}</div>
+          </div>
+          <div class="snake-artifact-actions">
+            ${owned
+              ? `<button class="snake-art-sell" data-art="${a.key}">Продать ${fmtCompact(sellPrice)} 🪙</button>
+                 <div class="snake-art-tag">✨ Активен</div>`
+              : `<button class="snake-art-craft ${canCraft ? '' : 'locked'}" data-art="${a.key}" ${canCraft ? '' : 'disabled'}>
+                  ${canCraft ? '⚒ Скрафтить' : 'Не хватает'}
+                </button>`}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    c.innerHTML = `
+      <div class="snake-cases-section">
+        <div class="snake-section-label">🎁 Кейсы (5)</div>
+        <div class="snake-cases-strip">${casesHtml}</div>
+      </div>
+      <div class="snake-cases-section">
+        <div class="snake-section-label">💎 Осколки (${shardCfg.length})</div>
+        <div class="snake-shards-grid">${shardsHtml}</div>
+      </div>
+      <div class="snake-cases-section">
+        <div class="snake-section-label">🛡 Артефакты (${ownedArtifacts.length}/${artifacts.length})</div>
+        <div class="snake-artifacts-grid">${artHtml}</div>
+      </div>
+    `;
+
+    // Buy a case
+    c.querySelectorAll('.snake-case-buy').forEach(b => {
+      b.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (b.disabled) return;
+        b.disabled = true;
+        try {
+          const r = await api('/api/snake/case/buy', {
+            method: 'POST', body: JSON.stringify({ case_key: b.dataset.case }),
+          });
+          if (!r.ok) { toast(r.error || 'Ошибка'); b.disabled = false; return; }
+          // Update balance/shards locally
+          if (typeof r.new_balance === 'number') {
+            window.state.me.balance = r.new_balance;
+            const balEl = document.getElementById('balance-display');
+            if (balEl) balEl.textContent = fmt(r.new_balance);
+          }
+          SS.state.shards = SS.state.shards || {};
+          SS.state.shards[r.drop.key] = (Number(SS.state.shards[r.drop.key]) || 0) + 1;
+          // Animate
+          await playCaseSpinner(b.dataset.case, r.drop);
+          tg?.HapticFeedback?.notificationOccurred?.('success');
+          paintCasesTab(c);
+        } catch (e) { toast('Ошибка: ' + e.message); b.disabled = false; }
+      });
+    });
+
+    // Sell a shard
+    c.querySelectorAll('.snake-shard-sell:not(.empty)').forEach(b => {
+      b.addEventListener('click', async () => {
+        b.disabled = true;
+        try {
+          const r = await api('/api/snake/shard/sell', {
+            method: 'POST', body: JSON.stringify({ shard_key: b.dataset.shard, amount: 1 }),
+          });
+          if (!r.ok) { toast(r.error || 'Ошибка'); b.disabled = false; return; }
+          if (typeof r.new_balance === 'number') {
+            window.state.me.balance = r.new_balance;
+            const balEl = document.getElementById('balance-display');
+            if (balEl) balEl.textContent = fmt(r.new_balance);
+          }
+          SS.state.shards = r.shards || {};
+          tg?.HapticFeedback?.impactOccurred?.('light');
+          paintCasesTab(c);
+        } catch (e) { toast('Ошибка: ' + e.message); b.disabled = false; }
+      });
+    });
+
+    // Craft an artifact
+    c.querySelectorAll('.snake-art-craft:not(.locked)').forEach(b => {
+      b.addEventListener('click', async () => {
+        b.disabled = true;
+        try {
+          const r = await api('/api/snake/artifact/craft', {
+            method: 'POST', body: JSON.stringify({ artifact_key: b.dataset.art }),
+          });
+          if (!r.ok) { toast(r.error || 'Ошибка'); b.disabled = false; return; }
+          SS.state.shards    = r.shards    || {};
+          SS.state.artifacts = r.artifacts || [];
+          tg?.HapticFeedback?.notificationOccurred?.('success');
+          // Refetch state so artifact_effects refreshes (server computes them)
+          try {
+            const s2 = await api('/api/snake/state');
+            SS.state = s2;
+          } catch (e) {}
+          toast('✨ Артефакт скрафчен!');
+          paintCasesTab(c);
+        } catch (e) { toast('Ошибка: ' + e.message); b.disabled = false; }
+      });
+    });
+
+    // Sell an artifact
+    c.querySelectorAll('.snake-art-sell').forEach(b => {
+      b.addEventListener('click', async () => {
+        if (!confirm('Продать артефакт за 50%? Эффект исчезнет.')) return;
+        b.disabled = true;
+        try {
+          const r = await api('/api/snake/artifact/sell', {
+            method: 'POST', body: JSON.stringify({ artifact_key: b.dataset.art }),
+          });
+          if (!r.ok) { toast(r.error || 'Ошибка'); b.disabled = false; return; }
+          if (typeof r.new_balance === 'number') {
+            window.state.me.balance = r.new_balance;
+            const balEl = document.getElementById('balance-display');
+            if (balEl) balEl.textContent = fmt(r.new_balance);
+          }
+          SS.state.artifacts = r.artifacts || [];
+          // Refetch state so artifact_effects refreshes
+          try {
+            const s2 = await api('/api/snake/state');
+            SS.state = s2;
+          } catch (e) {}
+          tg?.HapticFeedback?.impactOccurred?.('medium');
+          paintCasesTab(c);
+        } catch (e) { toast('Ошибка: ' + e.message); b.disabled = false; }
+      });
+    });
+  }
+
+  // ═════════════════ CASE OPENING SPINNER ═════════════════
+  // CS-style horizontal scrolling spinner. Builds 60 random shard cards,
+  // places the actual drop near the end (~50th), then animates the strip
+  // left so the marker (center) lands on the drop.
+  async function playCaseSpinner(caseKey, drop) {
+    const caseCfg = (SS.cfg.cases || []).find(x => x.key === caseKey);
+    const shardCfg = SS.cfg.shards || [];
+    const shardRarities = SS.cfg.shard_rarities || {};
+    if (!caseCfg || !drop) return;
+
+    // Build pool of possible shards (matching case drop rarities)
+    const pool = shardCfg.filter(s => caseCfg.drops[s.rarity]);
+    const dropMeta = shardCfg.find(s => s.key === drop.key) || drop;
+    const dropRarMeta = shardRarities[dropMeta.rarity] || {};
+
+    const overlay = document.createElement('div');
+    overlay.className = 'snake-case-spinner-overlay';
+    overlay.innerHTML = `
+      <div class="snake-case-spinner-box">
+        <div class="snake-case-spinner-title">${escape(caseCfg.name)}</div>
+        <div class="snake-case-spinner-track-wrap">
+          <div class="snake-case-spinner-marker"></div>
+          <div class="snake-case-spinner-track" id="case-spinner-track"></div>
+        </div>
+        <div class="snake-case-spinner-result" id="case-spinner-result" style="opacity:0">
+          <img src="./img/snake/${dropMeta.image}" alt="" />
+          <div class="snake-case-spinner-result-name" style="color:${dropRarMeta.color || '#fff'}">
+            ${escape(dropMeta.name)}
+          </div>
+          <div class="snake-case-spinner-result-rarity" style="color:${dropRarMeta.color || '#aaa'}">
+            ${escape(dropRarMeta.label || dropMeta.rarity)}
+          </div>
+          <button class="snake-case-spinner-close" id="case-spinner-close">Забрать</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const track = overlay.querySelector('#case-spinner-track');
+    const TOTAL_CARDS = 60;
+    const WIN_INDEX   = 52;
+    const html = [];
+    for (let i = 0; i < TOTAL_CARDS; i++) {
+      const item = (i === WIN_INDEX) ? dropMeta : pool[Math.floor(Math.random() * pool.length)];
+      const meta = shardRarities[item.rarity] || {};
+      html.push(`
+        <div class="snake-case-spinner-card" style="border-color:${meta.color || '#444'}">
+          <img src="./img/snake/${item.image}" alt="" />
+          <div class="snake-case-spinner-card-rarity" style="color:${meta.color || '#aaa'}">
+            ${escape(meta.label || item.rarity)}
+          </div>
+        </div>
+      `);
+    }
+    track.innerHTML = html.join('');
+
+    // Wait one frame for layout, then animate
+    await new Promise(r => requestAnimationFrame(r));
+
+    const cardW = track.firstElementChild.offsetWidth + 8;   // 8px gap
+    const trackWrap = overlay.querySelector('.snake-case-spinner-track-wrap');
+    const wrapW = trackWrap.clientWidth;
+    // Align WIN_INDEX center to wrapW/2
+    const targetX = -(WIN_INDEX * cardW + cardW / 2 - wrapW / 2);
+    // Add a tiny random offset so the marker doesn't land dead-center every time
+    const jitter = (Math.random() - 0.5) * (cardW * 0.4);
+
+    track.style.transition = 'transform 5s cubic-bezier(0.05,0.5,0.2,1.0)';
+    track.style.transform  = `translateX(${targetX + jitter}px)`;
+
+    await new Promise(r => setTimeout(r, 5100));
+
+    // Reveal the result card
+    const result = overlay.querySelector('#case-spinner-result');
+    result.style.transition = 'opacity 0.5s ease-out';
+    result.style.opacity = '1';
+
+    await new Promise(resolve => {
+      overlay.querySelector('#case-spinner-close').addEventListener('click', () => {
+        overlay.style.transition = 'opacity 0.3s';
+        overlay.style.opacity = '0';
+        setTimeout(() => { overlay.remove(); resolve(); }, 300);
       });
     });
   }
