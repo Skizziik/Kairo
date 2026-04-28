@@ -181,6 +181,35 @@ def _next_color(used_colors: set[str]) -> str:
     return random.choice(DEPOSIT_COLORS)
 
 
+async def _pick_deposit_color(conn, round_id: int, user_id: int,
+                              is_bot: bool = False, bot_name: str | None = None) -> str:
+    """Pick the color for a deposit. If THIS depositor (real user by tg_id, or
+    bot by name) already has a row in this round → reuse the same color so
+    spinner tiles and participant rows stay visually consistent."""
+    if is_bot and bot_name:
+        existing = await conn.fetchval(
+            "select color from jackpot_deposits "
+            "where round_id = $1 and is_bot = true and bot_name = $2 limit 1",
+            round_id, bot_name,
+        )
+    else:
+        existing = await conn.fetchval(
+            "select color from jackpot_deposits "
+            "where round_id = $1 and user_id = $2 and is_bot = false limit 1",
+            round_id, user_id,
+        )
+    if existing:
+        return existing
+    # Pick a fresh color avoiding ones currently in use
+    used = set()
+    rows = await conn.fetch(
+        "select color from jackpot_deposits where round_id = $1", round_id,
+    )
+    for r in rows:
+        used.add(r["color"])
+    return _next_color(used)
+
+
 # ============================================================
 # ROUND LIFECYCLE
 # ============================================================
@@ -337,14 +366,7 @@ async def deposit(user_id: int, inventory_ids: list[int] | None = None,
                     user_id, -coins, f"deposit_round_{round_id}", new_bal,
                 )
 
-            # Pick color
-            used_colors = set()
-            color_rows = await conn.fetch(
-                "select color from jackpot_deposits where round_id = $1", round_id,
-            )
-            for cr in color_rows:
-                used_colors.add(cr["color"])
-            color = _next_color(used_colors)
+            color = await _pick_deposit_color(conn, round_id, user_id, is_bot=False)
 
             # Insert deposit
             await conn.execute(
@@ -478,14 +500,9 @@ async def _bot_deposit(round_id: int) -> None:
                     skin_inv_ids, round_id,
                 )
 
-            used_colors = set()
-            color_rows = await conn.fetch(
-                "select color from jackpot_deposits where round_id = $1", round_id,
-            )
-            for cr in color_rows:
-                used_colors.add(cr["color"])
-            color = _next_color(used_colors)
             bot_name = random.choice(BOT_NAMES)
+            color = await _pick_deposit_color(conn, round_id, BOT_USER_ID,
+                                              is_bot=True, bot_name=bot_name)
 
             await conn.execute(
                 """
