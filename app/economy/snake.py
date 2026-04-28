@@ -52,7 +52,7 @@ RARITY_BY_KEY = {r["key"]: r for r in RARITIES}
 # capped raw value. Empirical raw max ~ 50-150K/sec depending on map+luck;
 # we set 200K/sec as a safe ceiling that rejects blatant inflation but lets
 # legitimate stacked runs through.
-MAX_COINS_PER_SECOND = 10_000_000
+MAX_COINS_PER_SECOND = 1_000_000_000_000
 
 
 # ============================================================
@@ -252,40 +252,43 @@ UPGRADE_DEFS: dict[str, dict] = {
     },
 
     # ═════════ 🤖 LIFETIME (постоянные) ═════════
+    # Расширены до 100 уровней (как greed). База цен +80% против исходного
+    # предложения — кривая всё равно мягче старой за счёт меньшего growth_rate.
+    # migrate_lifetime_v3 пересчитывает по сумме потраченных монет.
     "total_multiplier": {
         "branch": "lifetime", "name": "Total Multiplier", "icon": "✨",
         "desc": "Глобальный ×к ВСЕМ источникам монет", "unit": "×",
-        "tiers": _build_tiers(40, lambda L: 1.03 ** L, lambda L: 8000 * (1.40 ** (L - 1))),
+        "tiers": _build_tiers(100, lambda L: 1.02 ** L, lambda L: 14400 * (1.18 ** (L - 1))),
     },
     "daily_bonus": {
         "branch": "lifetime", "name": "Daily Bonus", "icon": "🎁",
         "desc": "+% к первому рану в день", "unit": "%",
-        "tiers": _build_tiers(10, lambda L: L * 10, lambda L: 5000 * (1.55 ** (L - 1))),
+        "tiers": _build_tiers(100, lambda L: L * 2, lambda L: 9000 * (1.18 ** (L - 1))),
     },
     "afk_cap_extender": {
         "branch": "lifetime", "name": "AFK Cap Extender", "icon": "🕰",
         "desc": "+часов к лимиту AFK-фарма", "unit": "ч",
-        "tiers": _build_tiers(10, lambda L: 4 + L, lambda L: 50000 * (1.85 ** (L - 1))),
+        "tiers": _build_tiers(100, lambda L: 4 + L * 0.5, lambda L: 90000 * (1.16 ** (L - 1))),
     },
     "afk_rate_boost": {
         "branch": "lifetime", "name": "AFK Rate Boost", "icon": "⏫",
         "desc": "+% к ставке всех AFK-змеек", "unit": "%",
-        "tiers": _build_tiers(20, lambda L: L * 5, lambda L: 80000 * (1.75 ** (L - 1))),
+        "tiers": _build_tiers(100, lambda L: L * 4, lambda L: 144000 * (1.16 ** (L - 1))),
     },
     "snake_xp_boost": {
         "branch": "lifetime", "name": "Snake XP Boost", "icon": "📚",
         "desc": "+% XP за всё", "unit": "%",
-        "tiers": _build_tiers(10, lambda L: L * 10, lambda L: 12000 * (1.65 ** (L - 1))),
+        "tiers": _build_tiers(100, lambda L: L * 4, lambda L: 21600 * (1.17 ** (L - 1))),
     },
     "skin_drop_plus": {
         "branch": "lifetime", "name": "Rarity Lift", "icon": "⬆️",
         "desc": "Шанс сдвинуть редкость скина вверх (%)", "unit": "%",
-        "tiers": _build_tiers(10, lambda L: L * 1, lambda L: 22000 * (1.70 ** (L - 1))),
+        "tiers": _build_tiers(100, lambda L: L * 0.5, lambda L: 39600 * (1.17 ** (L - 1))),
     },
     "universal_magnet": {
         "branch": "lifetime", "name": "Universal Magnet", "icon": "🌐",
         "desc": "×ко всем мультипликаторам апгрейдов", "unit": "×",
-        "tiers": _build_tiers(10, lambda L: 1.01 ** L, lambda L: 100000 * (2.0 ** (L - 1))),
+        "tiers": _build_tiers(100, lambda L: 1.01 ** L, lambda L: 180000 * (1.16 ** (L - 1))),
     },
 }
 
@@ -735,23 +738,28 @@ async def ensure_schema() -> None:
     async with pool().acquire() as conn:
         await conn.execute(sql)
     log.info("snake schema ensured")
-    # One-shot data migration: rescale players' greed branch to v2 curve
+    # One-shot data migrations: rescale players to new upgrade curves
     try:
         await migrate_greed_v2()
     except Exception:
         log.exception("snake greed v2 migration failed")
+    try:
+        await migrate_lifetime_v3()
+    except Exception:
+        log.exception("snake lifetime v3 migration failed")
 
 
 # ============================================================
 # DATA MIGRATIONS
 # ============================================================
 
-# Snapshot of the OLD greed tier formulas (before 2026-04-29 expansion to
-# 100 levels). Used by migrate_greed_v2 to compute each player's historical
-# spend on a given upgrade and remap their level onto the new cost curve so
-# nobody loses or gains value from the redesign.
+# Snapshots of OLD tier formulas, used to rescale player levels when a branch
+# is expanded. Format: key → (old_max_level, base_cost, growth_factor).
+# A player's historical spend is computed from the OLD formula, then mapped
+# onto the NEW cost curve to find the equivalent level — preserves every
+# coin invested.
+
 _OLD_GREED_PARAMS: dict[str, tuple[int, float, float]] = {
-    # key → (old_max_level, base_cost, growth_factor)
     "greed_boost":       (50,  600,    1.30),
     "combo_chain":       (15,  3000,   1.50),
     "lucky_strike":      (20,  1500,   1.40),
@@ -761,11 +769,20 @@ _OLD_GREED_PARAMS: dict[str, tuple[int, float, float]] = {
     "treasure_pulse":    (5,   30000,  1.85),
 }
 
+_OLD_LIFETIME_PARAMS: dict[str, tuple[int, float, float]] = {
+    "total_multiplier":  (40,  8000,    1.40),
+    "daily_bonus":       (10,  5000,    1.55),
+    "afk_cap_extender":  (10,  50000,   1.85),
+    "afk_rate_boost":    (20,  80000,   1.75),
+    "snake_xp_boost":    (10,  12000,   1.65),
+    "skin_drop_plus":    (10,  22000,   1.70),
+    "universal_magnet":  (10,  100000,  2.0),
+}
 
-def _old_greed_total_spend(key: str, level: int) -> int:
-    """Sum of OLD per-tier costs to reach `level` from 0 (matches what the
-    player actually paid)."""
-    params = _OLD_GREED_PARAMS.get(key)
+
+def _old_total_spend(params_table: dict, key: str, level: int) -> int:
+    """Sum of OLD per-tier costs to reach `level` (what the player paid)."""
+    params = params_table.get(key)
     if not params:
         return 0
     _, base, factor = params
@@ -775,15 +792,13 @@ def _old_greed_total_spend(key: str, level: int) -> int:
     return total
 
 
-def _new_greed_level_for_spend(key: str, spend: int) -> int:
-    """Highest level on the NEW curve whose cumulative cost stays ≤ spend.
-    Lets us find the equivalent level after the rescale."""
+def _new_level_for_spend(key: str, spend: int) -> int:
+    """Highest level on the CURRENT curve whose cumulative cost stays ≤ spend."""
     cfg = UPGRADE_DEFS.get(key)
     if not cfg:
         return 0
     cum = 0
     for entry in cfg["tiers"]:
-        # tiers: list of (level_after_buy, effect, cost)
         next_lvl, _, cost = entry
         if cum + int(cost) > spend:
             return next_lvl - 1
@@ -791,23 +806,29 @@ def _new_greed_level_for_spend(key: str, spend: int) -> int:
     return len(cfg["tiers"])
 
 
-async def migrate_greed_v2() -> None:
-    """Rescale every existing player's greed upgrades onto the new v2 curve.
-    For each (player, greed_upgrade), computes total money they spent on the
-    OLD curve and assigns the equivalent level on the NEW curve. Idempotent
-    via snake_users.upgrades_version."""
+async def _rescale_branch(
+    branch_name: str,
+    target_version: int,
+    old_params: dict[str, tuple[int, float, float]],
+) -> None:
+    """Generic rescale: pick players with version < target_version, remap each
+    upgrade in `old_params` from the snapshot curve to the current curve, then
+    bump version. Idempotent — repeated calls are no-ops once everyone is at
+    target version."""
     async with pool().acquire() as conn:
         rows = await conn.fetch(
-            "select tg_id, upgrades from snake_users where upgrades_version < 2"
+            "select tg_id, upgrades from snake_users where upgrades_version < $1",
+            target_version,
         )
         if not rows:
             return
-        log.info("snake: greed v2 migration — %d players to rescale", len(rows))
+        log.info("snake: %s migration v%d — %d players to process",
+                 branch_name, target_version, len(rows))
         updated = 0
         for r in rows:
             ups = _parse_jsonb(r["upgrades"]) or {}
-            changed_levels: dict[str, tuple[int, int]] = {}  # key → (old, new)
-            for key in _OLD_GREED_PARAMS:
+            changed_levels: dict[str, tuple[int, int]] = {}
+            for key in old_params:
                 if key not in ups:
                     continue
                 try:
@@ -816,26 +837,38 @@ async def migrate_greed_v2() -> None:
                     continue
                 if old_lvl <= 0:
                     continue
-                spend = _old_greed_total_spend(key, old_lvl)
-                new_lvl = _new_greed_level_for_spend(key, spend)
-                # Always store at least old_lvl: if the new curve is cheaper at
-                # equivalent spend, the player gets a free bonus level (the
-                # alternative — capping at old_lvl — would punish loyal players).
-                # In practice new curve is cheaper so new_lvl ≥ old_lvl always.
+                spend = _old_total_spend(old_params, key, old_lvl)
+                new_lvl = _new_level_for_spend(key, spend)
+                # Safeguard: never demote — if the new curve is more expensive
+                # than the old at the same level (e.g. base cost was bumped),
+                # keep their old level. Loyal players should never lose levels.
+                if new_lvl < old_lvl:
+                    new_lvl = old_lvl
                 if new_lvl != old_lvl:
                     ups[key] = new_lvl
                     changed_levels[key] = (old_lvl, new_lvl)
             if changed_levels:
                 updated += 1
-                log.info("snake: tg=%s greed rescale: %s",
-                         r["tg_id"],
+                log.info("snake: tg=%s %s rescale: %s",
+                         r["tg_id"], branch_name,
                          ", ".join(f"{k} {a}→{b}" for k, (a, b) in changed_levels.items()))
             await conn.execute(
-                "update snake_users set upgrades = $2::jsonb, upgrades_version = 2 "
+                "update snake_users set upgrades = $2::jsonb, upgrades_version = $3 "
                 "where tg_id = $1",
-                int(r["tg_id"]), json.dumps(ups),
+                int(r["tg_id"]), json.dumps(ups), target_version,
             )
-        log.info("snake: greed v2 migration complete (%d players actually rescaled)", updated)
+        log.info("snake: %s v%d done (%d actually rescaled)",
+                 branch_name, target_version, updated)
+
+
+async def migrate_greed_v2() -> None:
+    """Bump greed branch to v2 (max 5-50 → 100 each, gentler cost growth)."""
+    await _rescale_branch("greed", target_version=2, old_params=_OLD_GREED_PARAMS)
+
+
+async def migrate_lifetime_v3() -> None:
+    """Bump lifetime branch to v3 (max 10-40 → 100 each, gentler cost growth)."""
+    await _rescale_branch("lifetime", target_version=3, old_params=_OLD_LIFETIME_PARAMS)
 
 
 async def ensure_user(tg_id: int) -> None:
