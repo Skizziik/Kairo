@@ -419,6 +419,14 @@ async def spin(user_id: int, bet: int, bonus_buy: bool = False, bonus_type: str 
                 user_id, net_delta, reason, new_bal,
             )
 
+    # Tax accrual on positive net delta only (real winnings)
+    if net_delta > 0:
+        try:
+            from app.economy import tax as _tax
+            await _tax.accrue_tax(user_id, net_delta, "megaslot")
+        except Exception:
+            pass
+
     try:
         from app.economy import audit as _audit
         await _audit.log_bet(

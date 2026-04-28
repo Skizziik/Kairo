@@ -1003,6 +1003,14 @@ async def _tick_afk(tg_id: int) -> int:
                     "update snake_users set last_afk_tick_at = $2 where tg_id = $1",
                     tg_id, now,
                 )
+    # Tax accrual on AFK farm income (outside the transaction so a failure
+    # here can't roll back the credit).
+    if credited > 0:
+        try:
+            from app.economy import tax as _tax
+            await _tax.accrue_tax(tg_id, credited, "snake_afk")
+        except Exception:
+            pass
     return credited
 
 
@@ -1399,6 +1407,13 @@ async def record_run(
                 """,
                 tg_id,
             )
+
+    # Tax accrual (best-effort, non-blocking)
+    try:
+        from app.economy import tax as _tax
+        await _tax.accrue_tax(tg_id, coins, "snake_run")
+    except Exception:
+        pass
 
     # Audit (best-effort)
     try:

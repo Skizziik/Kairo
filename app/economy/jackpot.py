@@ -677,6 +677,17 @@ async def _settle(round_id: int) -> None:
                 round_id,
             )
 
+    # Tax accrual: tax winner on net winnings (win - their own deposit value).
+    if winner_id and winner_id != BOT_USER_ID:
+        try:
+            winner_bet = sum(int(d["value"]) for d in deposits if int(d["user_id"]) == winner_id)
+            net_win = max(0, int(total_value) - winner_bet)
+            if net_win > 0:
+                from app.economy import tax as _tax
+                await _tax.accrue_tax(winner_id, net_win, "jackpot_win")
+        except Exception:
+            pass
+
     # Audit (best-effort)
     if winner_id and winner_id != BOT_USER_ID:
         try:

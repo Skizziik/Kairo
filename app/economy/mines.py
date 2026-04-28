@@ -376,6 +376,16 @@ async def cashout(user_id: int) -> dict:
             )
             await conn.execute("delete from casino_mines_games where user_id = $1", user_id)
 
+    # Tax accrual on the net win (bet - payout). Bet was already deducted at
+    # game start, so payout > bet means a real gain; tax that delta.
+    try:
+        net = max(0, payout - bet)
+        if net > 0:
+            from app.economy import tax as _tax
+            await _tax.accrue_tax(user_id, net, "mines_win")
+    except Exception:
+        pass
+
     try:
         from app.economy import retention as rt
         await rt.grant_xp(user_id, "mines_cashout")

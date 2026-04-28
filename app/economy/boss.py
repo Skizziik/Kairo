@@ -597,6 +597,14 @@ async def attack(tg_id: int, taps: int = 1) -> dict:
                 )
                 new_badges_granted.append(badge_key)
 
+    # Tax accrual on boss-kill rewards (positive income)
+    if coin_reward_total > 0:
+        try:
+            from app.economy import tax as _tax
+            await _tax.accrue_tax(tg_id, coin_reward_total, "boss_kill")
+        except Exception:
+            pass
+
     badges_payload = [BADGES[k] for k in new_badges_granted if k in BADGES]
     return {
         "ok": True,

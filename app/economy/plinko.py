@@ -114,6 +114,14 @@ async def play_drop(user_id: int, bet: int, mode: str) -> dict:
                 user_id, delta, f"plinko_{mode}_b{bucket}_x{multiplier}", new_bal,
             )
 
+    # Tax accrual on net winnings (only positive delta = real income)
+    if delta > 0:
+        try:
+            from app.economy import tax as _tax
+            await _tax.accrue_tax(user_id, delta, "plinko")
+        except Exception:
+            pass
+
     # Retention hooks (outside the tx)
     leveled = None
     achievements: list[dict] = []

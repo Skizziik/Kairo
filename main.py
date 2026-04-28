@@ -19,6 +19,7 @@ from app.economy import case_rebalance as _case_rebalance
 from app.economy import coinflip_pvp as _cfpvp
 from app.economy import jackpot as _jackpot
 from app.economy import snake as _snake
+from app.economy import tax as _tax
 from app.economy import tiers as _tiers
 from app.economy import gear as _gear
 from app.economy import mines as _mines
@@ -81,6 +82,10 @@ async def lifespan(_: FastAPI):
         await _jackpot.ensure_schema()
     except Exception as e:
         log.warning("jackpot schema migration failed: %s", e)
+    try:
+        await _tax.ensure_schema()
+    except Exception as e:
+        log.warning("tax schema migration failed: %s", e)
     # Trim oversized case pools (idempotent — only changes if current count > cap)
     try:
         await _case_rebalance.rebalance_all()
@@ -124,6 +129,11 @@ async def lifespan(_: FastAPI):
     # Jackpot mini-game — round automation + bots
     scheduler_tasks.append(asyncio.create_task(_jackpot.round_loop()))
     log.info("jackpot round loop started")
+
+    # Tax authority — hourly accrual + midnight SET collection
+    scheduler_tasks.append(asyncio.create_task(_tax.hourly_loop()))
+    scheduler_tasks.append(asyncio.create_task(_tax.midnight_loop()))
+    log.info("tax loops started (hourly + midnight SET)")
 
     try:
         yield

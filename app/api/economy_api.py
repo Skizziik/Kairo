@@ -1276,3 +1276,57 @@ async def api_jackpot_verify(round_id: int, user: dict = Depends(require_user)) 
     if out is None:
         raise HTTPException(status_code=404, detail="round not found")
     return out
+
+
+# ================================================================
+# 🏛 TAX AUTHORITY (Налоговая)
+# ================================================================
+from app.economy import tax as _tax
+
+
+class TaxRegisterReq(BaseModel):
+    target_level: int = Field(..., ge=0, le=5)
+
+
+class TaxUpgradeReq(BaseModel):
+    key: str
+
+
+class TaxPayReq(BaseModel):
+    amount: int | None = None
+
+
+@router.get("/tax/state")
+async def api_tax_state(user: dict = Depends(require_user)) -> dict:
+    return await _tax.get_state(int(user["id"]))
+
+
+@router.get("/tax/config")
+async def api_tax_config(user: dict = Depends(require_user)) -> dict:
+    _ = user
+    return await _tax.get_config()
+
+
+@router.post("/tax/pay")
+async def api_tax_pay(req: TaxPayReq, user: dict = Depends(require_user)) -> dict:
+    return await _tax.pay_tax(int(user["id"]), amount=req.amount)
+
+
+@router.post("/tax/register")
+async def api_tax_register(req: TaxRegisterReq, user: dict = Depends(require_user)) -> dict:
+    return await _tax.register_entity(int(user["id"]), int(req.target_level))
+
+
+@router.post("/tax/upgrade")
+async def api_tax_upgrade(req: TaxUpgradeReq, user: dict = Depends(require_user)) -> dict:
+    return await _tax.buy_upgrade(int(user["id"]), req.key)
+
+
+@router.post("/tax/declare")
+async def api_tax_declare(user: dict = Depends(require_user)) -> dict:
+    return await _tax.declare(int(user["id"]))
+
+
+@router.post("/tax/amnesty")
+async def api_tax_amnesty(user: dict = Depends(require_user)) -> dict:
+    return await _tax.amnesty(int(user["id"]))
