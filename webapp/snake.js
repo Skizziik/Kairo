@@ -1181,6 +1181,7 @@
         mode: G.modeCfg.key,
         map_id: G.mapCfg.key,
         died_to: diedTo,
+        coins_earned: G.coins,    // include actual sum (with crit/combo/streak/etc)
       }),
     }).then(resp => {
       if (!resp) return;

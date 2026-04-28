@@ -695,6 +695,7 @@ async def record_run(
     mode: str,
     map_id: str,
     died_to: str,
+    coins_earned: int = 0,             # client's per-eat sum (lucky/crit/combo/streak/treasure already applied)
 ) -> dict:
     """Validate + apply a run result. Returns coins_credited + new state summary."""
     await ensure_user(tg_id)
@@ -752,22 +753,64 @@ async def record_run(
     if is_first_today and daily_bonus_lvl > 0:
         daily_bonus_mult = 1 + daily_bonus_lvl * 0.10
 
-    # Compute base coins
-    coins = 0
+    # XP по факту скушанных скинов
     xp_total = 0
+    for r in RARITIES:
+        n = cleaned[r["key"]]
+        if n > 0:
+            xp_total += r["xp"] * n
+
+    # === Coin reward ===
+    # Strategy: trust the client's per-eat sum (which already factored in lucky,
+    # crit, combo, streak, treasure_pulse — all visible in the popup numbers
+    # the user saw during play). Validate with an absolute upper bound, then
+    # add server-only run-wide multipliers (greed, total, magnet, daily_bonus).
+    #
+    # Why: previously the server recomputed using statistical averages and
+    # ignored combo/streak/treasure_pulse, leading to ~25-40% underpayment vs
+    # what the client showed. Now the player gets credited what they earned.
+    client_coins = max(0, int(coins_earned or 0))
+
+    # Anti-cheat upper bound: theoretically MAXIMUM possible per skin = coin_max
+    # x lucky(x2) x crit(x10) x combo(x4) x streak(x3) x treasure(x2) ≈ x480.
+    # Sum across all eaten skins. We use a generous cap to allow legitimate
+    # runs while rejecting blatantly inflated reports.
+    max_possible = 0.0
     for r in RARITIES:
         n = cleaned[r["key"]]
         if n <= 0:
             continue
-        # Average value (server uses avg, client showed ranges live)
-        avg_v = (r["coin_min"] + r["coin_max"]) / 2.0
-        # Apply bite-level multipliers (lucky × crit) statistically
-        eff_per_skin = avg_v * (1 + lucky_p) * (1 + crit_p * 9)  # crit 10x = +9x effective
-        coins += eff_per_skin * n
-        xp_total += r["xp"] * n
+        # Per-skin theoretical ceiling with everything proccing simultaneously.
+        # Even with all luck procs this is statistically unreachable in practice.
+        per_skin_max = r["coin_max"] * 2 * 10 * 4 * 3 * 2  # x480
+        max_possible += per_skin_max * n
+    max_possible = int(max_possible)
 
-    coins *= greed_mult * total_mult * um_mult * daily_bonus_mult
-    coins = int(coins)
+    if client_coins > max_possible:
+        # Suspicious — fall back to server-side average calc as a safe default
+        avg_coins = 0.0
+        for r in RARITIES:
+            n = cleaned[r["key"]]
+            if n > 0:
+                avg_v = (r["coin_min"] + r["coin_max"]) / 2.0
+                avg_coins += avg_v * n * (1 + lucky_p) * (1 + crit_p * 9)
+        coins = int(avg_coins)
+    else:
+        # Trust client. If client sent 0 (older clients without coins_earned
+        # field), fall back to server-avg so they still get something.
+        if client_coins == 0:
+            avg_coins = 0.0
+            for r in RARITIES:
+                n = cleaned[r["key"]]
+                if n > 0:
+                    avg_v = (r["coin_min"] + r["coin_max"]) / 2.0
+                    avg_coins += avg_v * n * (1 + lucky_p) * (1 + crit_p * 9)
+            coins = int(avg_coins)
+        else:
+            coins = client_coins
+
+    # Apply RUN-WIDE multipliers (NOT applied client-side):
+    coins = int(coins * greed_mult * total_mult * um_mult * daily_bonus_mult)
 
     # Recovery upgrade — adds back % of run earnings as a death bonus.
     # Description: "% от заработка возвращается после смерти" → flat reward

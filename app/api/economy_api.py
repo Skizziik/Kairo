@@ -1085,6 +1085,7 @@ class SnakeRunReq(BaseModel):
     mode: str
     map_id: str
     died_to: str = "self"
+    coins_earned: int = Field(default=0, ge=0)   # client's per-eat sum (with lucky/crit/combo/streak/treasure already applied)
 
 
 class SnakeUpgradeReq(BaseModel):
@@ -1129,6 +1130,7 @@ async def api_snake_run(req: SnakeRunReq, user: dict = Depends(require_user)) ->
         mode=req.mode,
         map_id=req.map_id,
         died_to=req.died_to,
+        coins_earned=int(req.coins_earned or 0),
     )
 
 
