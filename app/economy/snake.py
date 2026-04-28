@@ -510,9 +510,9 @@ ARTIFACTS: list[dict] = [
         "category": "greed",
         "price": 25_000_000,
         "recipe": {"moon": 10},        # 10x epic moon
-        "buff_short": "+50% common/industrial",
-        "buff_long": "Common и Industrial скины приносят +50% монет — идеально для долгих фарм-сессий.",
-        "effect": {"low_rarity_mult": 1.5},
+        "buff_short": "+10% к общему доходу",
+        "buff_long": "+10% ко всем монетам за каждый ран. Универсальный буст — стакается с другими множителями.",
+        "effect": {"run_total_mult_bonus": 0.10},
     },
     {
         "key": "cauldron",
