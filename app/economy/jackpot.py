@@ -760,6 +760,22 @@ async def _ensure_round_running() -> None:
             asyncio.create_task(_spin_and_settle(int(cur["id"])))
         return
 
+    # Recovery: round stuck in 'spinning' state. This happens if the worker
+    # restarted between marking the round 'spinning' and the post-animation
+    # _settle() call (or if the asyncio.create_task was dropped). _spin_and_settle
+    # normally finishes within SPIN_DURATION_SEC; past 3× that, force a settle.
+    if cur["status"] == "spinning":
+        spun_at = cur.get("spun_at")
+        if spun_at is None:
+            log.warning("jackpot: round #%d in 'spinning' with no spun_at, forcing settle", cur["id"])
+            await _settle(int(cur["id"]))
+            return
+        elapsed = (datetime.now(timezone.utc) - spun_at).total_seconds()
+        if elapsed >= SPIN_DURATION_SEC * 3:
+            log.warning("jackpot: round #%d stuck spinning for %.1fs, forcing settle", cur["id"], elapsed)
+            await _settle(int(cur["id"]))
+        return
+
 
 async def _maybe_drop_bot_deposit() -> None:
     cur = await get_current_round()

@@ -52,7 +52,7 @@ RARITY_BY_KEY = {r["key"]: r for r in RARITIES}
 # capped raw value. Empirical raw max ~ 50-150K/sec depending on map+luck;
 # we set 200K/sec as a safe ceiling that rejects blatant inflation but lets
 # legitimate stacked runs through.
-MAX_COINS_PER_SECOND = 200_000
+MAX_COINS_PER_SECOND = 10_000_000
 
 
 # ============================================================
