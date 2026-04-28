@@ -61,6 +61,7 @@ async def api_me(user: dict = Depends(require_user)) -> dict:
         username=user.get("username"),
         first_name=user.get("first_name"),
         last_name=user.get("last_name"),
+        photo_url=user.get("photo_url"),
     )
     await eco.ensure_user(tg_id)
     row = await eco.get_user(tg_id)

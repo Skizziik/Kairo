@@ -30,14 +30,27 @@ async def upsert_user(
     username: str | None,
     first_name: str | None,
     last_name: str | None,
+    photo_url: str | None = None,
 ) -> None:
     async with pool().acquire() as conn:
-        await conn.execute(
-            "insert into users (tg_id, username, first_name, last_name) values ($1,$2,$3,$4) "
-            "on conflict (tg_id) do update set username=excluded.username, "
-            "first_name=excluded.first_name, last_name=excluded.last_name, seen_at=now()",
-            tg_id, username, first_name, last_name,
-        )
+        # photo_url is sticky — only overwrite when caller actually has a value.
+        # That way bot-message ingestion (no photo) doesn't wipe a Mini App save.
+        if photo_url:
+            await conn.execute(
+                "insert into users (tg_id, username, first_name, last_name, photo_url) "
+                "values ($1,$2,$3,$4,$5) "
+                "on conflict (tg_id) do update set username=excluded.username, "
+                "first_name=excluded.first_name, last_name=excluded.last_name, "
+                "photo_url=excluded.photo_url, seen_at=now()",
+                tg_id, username, first_name, last_name, photo_url,
+            )
+        else:
+            await conn.execute(
+                "insert into users (tg_id, username, first_name, last_name) values ($1,$2,$3,$4) "
+                "on conflict (tg_id) do update set username=excluded.username, "
+                "first_name=excluded.first_name, last_name=excluded.last_name, seen_at=now()",
+                tg_id, username, first_name, last_name,
+            )
         await conn.execute(
             "insert into user_profiles (tg_id) values ($1) on conflict (tg_id) do nothing",
             tg_id,

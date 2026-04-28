@@ -144,14 +144,15 @@ async def _get_skin_total_value(conn, inventory_ids: list[int], user_id: int) ->
 
 async def _enrich_deposits(conn, deposits: list[dict]) -> list[dict]:
     """Attach display data (avatar URL, name) for each deposit.
-    Bots use their display name + 🤖 emoji."""
+    Bots use their display name + 🤖 emoji; real users get their saved
+    Telegram photo_url if available."""
     if not deposits:
         return []
     user_ids = list({int(d["user_id"]) for d in deposits if not d["is_bot"]})
     user_map: dict[int, dict] = {}
     if user_ids:
         urows = await conn.fetch(
-            "select tg_id, username, first_name from users where tg_id = any($1::bigint[])",
+            "select tg_id, username, first_name, photo_url from users where tg_id = any($1::bigint[])",
             user_ids,
         )
         for u in urows:
@@ -161,13 +162,14 @@ async def _enrich_deposits(conn, deposits: list[dict]) -> list[dict]:
         d = dict(d)
         if d["is_bot"]:
             display = d.get("bot_name") or "🤖 Bot"
+            avatar = None
         else:
             u = user_map.get(int(d["user_id"]))
             display = (u and (u.get("first_name") or u.get("username"))) or f"user{d['user_id']}"
-        # Set both `name` (what client uses) and `display_name` (legacy alias)
+            avatar = (u and u.get("photo_url")) or None
         d["name"] = display
         d["display_name"] = display
-        d["avatar_url"] = None
+        d["avatar_url"] = avatar
         out.append(d)
     return out
 
@@ -459,10 +461,11 @@ def _build_spin_sequence(deposits: list[dict], total_value: int,
                     break
             d = chosen
         seq.append({
-            "user_id": int(d["user_id"]),
-            "name":    d.get("display_name") or d.get("bot_name") or f"user{d['user_id']}",
-            "color":   d["color"],
-            "is_bot":  bool(d["is_bot"]),
+            "user_id":    int(d["user_id"]),
+            "name":       d.get("display_name") or d.get("bot_name") or f"user{d['user_id']}",
+            "color":      d["color"],
+            "is_bot":     bool(d["is_bot"]),
+            "avatar_url": d.get("avatar_url"),
         })
     return seq
 

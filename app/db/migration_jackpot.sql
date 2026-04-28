@@ -49,3 +49,9 @@ alter table economy_inventory
     add column if not exists jackpot_round_id bigint;
 create index if not exists idx_inventory_jackpot on economy_inventory (jackpot_round_id)
     where jackpot_round_id is not null;
+
+-- Telegram avatar URL — stored on each Mini App open via /api/me. Lets us
+-- render real Telegram avatars on jackpot/coinflip/leaderboard rows instead
+-- of just colored letter circles.
+alter table users
+    add column if not exists photo_url text;

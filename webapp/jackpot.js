@@ -180,9 +180,12 @@
     const initial = name.charAt(0).toUpperCase();
     const isBot = d.is_bot;
     const visibleName = isBot ? name.replace('🤖 ', '') : name;
+    const avatarInner = (!isBot && d.avatar_url)
+      ? `<img src="${d.avatar_url}" alt="" />`
+      : (isBot ? '🤖' : escape(initial));
     return `
       <div class="jp-tile ${isWinner ? 'winner' : ''}" style="--tile-color:${d.color || '#5cc15c'}">
-        <div class="jp-tile-avatar">${isBot ? '🤖' : escape(initial)}</div>
+        <div class="jp-tile-avatar">${avatarInner}</div>
         <div class="jp-tile-name">${escape(visibleName)}</div>
       </div>
     `;
@@ -192,19 +195,48 @@
     if (!deposits || deposits.length === 0) {
       return '<div class="loader" style="font-size:13px; padding:18px">Никто пока не депозитил...</div>';
     }
-    return deposits.map(d => {
-      const name = d.name || d.display_name || '?';
+    // Aggregate: same user_id → ONE row with summed value, skins, coins.
+    // (Server keeps each deposit as a separate row for audit, client rolls up
+    //  for display so a player who deposits twice doesn't appear twice.)
+    const byUser = new Map();
+    for (const d of deposits) {
+      const key = d.user_id;
+      if (!byUser.has(key)) {
+        byUser.set(key, {
+          user_id: d.user_id,
+          name:    d.name || d.display_name || '?',
+          color:   d.color,                   // first deposit's color wins
+          is_bot:  !!d.is_bot,
+          avatar_url: d.avatar_url,
+          value:   0,
+          coins:   0,
+          skins_count: 0,
+          deposits_count: 0,
+        });
+      }
+      const agg = byUser.get(key);
+      agg.value += d.value || 0;
+      agg.coins += d.coins || 0;
+      agg.skins_count += (d.inventory_ids && d.inventory_ids.length) || 0;
+      agg.deposits_count += 1;
+    }
+    const aggregated = Array.from(byUser.values()).sort((a, b) => b.value - a.value);
+
+    return aggregated.map(d => {
+      const name = d.name;
       const pct = totalValue > 0 ? ((d.value / totalValue) * 100).toFixed(1) : '0';
       const initial = name.charAt(0).toUpperCase();
-      const skinsCount = (d.inventory_ids && d.inventory_ids.length) || 0;
-      const coins = d.coins || 0;
-      let breakdown = [];
-      if (skinsCount) breakdown.push(`${skinsCount} скин${skinsCount === 1 ? '' : skinsCount < 5 ? 'а' : 'ов'}`);
-      if (coins)      breakdown.push(`${fmt(coins)} 🪙`);
-      const breakStr = breakdown.length ? breakdown.join(' + ') : '0';
+      const breakdown = [];
+      if (d.skins_count) breakdown.push(`${d.skins_count} скин${d.skins_count === 1 ? '' : d.skins_count < 5 ? 'а' : 'ов'}`);
+      if (d.coins)       breakdown.push(`${fmt(d.coins)} 🪙`);
+      if (d.deposits_count > 1) breakdown.push(`(${d.deposits_count} депозита)`);
+      const breakStr = breakdown.length ? breakdown.join(' · ') : '0';
+      const avatarHtml = (!d.is_bot && d.avatar_url)
+        ? `<img src="${d.avatar_url}" alt="" />`
+        : (d.is_bot ? '🤖' : escape(initial));
       return `
         <div class="jp-participant" style="--p-color:${d.color}">
-          <div class="jp-p-avatar">${d.is_bot ? '🤖' : escape(initial)}</div>
+          <div class="jp-p-avatar">${avatarHtml}</div>
           <div>
             <div class="jp-p-name">${escape(name)}</div>
             <div class="jp-p-skins-count">${escape(breakStr)}</div>
@@ -270,8 +302,11 @@
     const tilesHtml = sequence.map((s, i) => {
       const sname = s.name || '?';
       const visible = s.is_bot ? sname.replace('🤖 ', '') : sname;
+      const inner = (!s.is_bot && s.avatar_url)
+        ? `<img src="${s.avatar_url}" alt="" />`
+        : (s.is_bot ? '🤖' : escape(sname.charAt(0).toUpperCase()));
       return `<div class="jp-tile" style="--tile-color:${s.color}" data-idx="${i}">
-        <div class="jp-tile-avatar">${s.is_bot ? '🤖' : escape(sname.charAt(0).toUpperCase())}</div>
+        <div class="jp-tile-avatar">${inner}</div>
         <div class="jp-tile-name">${escape(visible)}</div>
       </div>`;
     }).join('');
