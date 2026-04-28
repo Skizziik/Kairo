@@ -1170,3 +1170,51 @@ async def api_snake_leaderboard(period: str = "all", user: dict = Depends(requir
     if period not in ("all", "week"):
         period = "all"
     return await _snake.leaderboard(period=period, limit=20)
+
+
+# ================================================================
+# 🎰 JACKPOT — pool-style PvP
+# ================================================================
+from app.economy import jackpot as _jackpot
+
+
+class JackpotDepositReq(BaseModel):
+    inventory_ids: list[int] = Field(default_factory=list)
+    coins: int = Field(default=0, ge=0)
+
+
+@router.get("/jackpot/current")
+async def api_jackpot_current(user: dict = Depends(require_user)) -> dict:
+    _ = user
+    return await _jackpot.api_current()
+
+
+@router.post("/jackpot/deposit")
+async def api_jackpot_deposit(req: JackpotDepositReq, user: dict = Depends(require_user)) -> dict:
+    return await _jackpot.deposit(int(user["id"]),
+                                  inventory_ids=list(req.inventory_ids or []),
+                                  coins=int(req.coins or 0))
+
+
+@router.get("/jackpot/round/{round_id}")
+async def api_jackpot_round(round_id: int, user: dict = Depends(require_user)) -> dict:
+    _ = user
+    out = await _jackpot.api_round_detail(round_id)
+    if out is None:
+        raise HTTPException(status_code=404, detail="round not found")
+    return out
+
+
+@router.get("/jackpot/history")
+async def api_jackpot_history(limit: int = 30, user: dict = Depends(require_user)) -> list[dict]:
+    _ = user
+    return await _jackpot.api_history(limit=max(1, min(100, int(limit))))
+
+
+@router.get("/jackpot/verify/{round_id}")
+async def api_jackpot_verify(round_id: int, user: dict = Depends(require_user)) -> dict:
+    _ = user
+    out = await _jackpot.api_verify(round_id)
+    if out is None:
+        raise HTTPException(status_code=404, detail="round not found")
+    return out

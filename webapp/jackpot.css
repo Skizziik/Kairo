@@ -1,0 +1,495 @@
+/* ═══════════════════════════════════════════════════════════════
+   JACKPOT mini-game styles
+   ═══════════════════════════════════════════════════════════════ */
+
+.jackpot-card {
+  background: linear-gradient(135deg, #2a1a3a 0%, #1f0f1a 100%);
+  border: 1px solid #ffd700;
+  box-shadow: 0 0 20px rgba(255, 215, 0, 0.18);
+}
+.jackpot-card .game-icon { font-size: 38px; }
+.jackpot-card-new {
+  animation: jackpotCardPulse 2.4s ease-in-out infinite;
+}
+@keyframes jackpotCardPulse {
+  0%, 100% { box-shadow: 0 0 20px rgba(255,215,0,0.18); }
+  50%      { box-shadow: 0 0 32px rgba(255,215,0,0.45); }
+}
+.jackpot-new-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  background: linear-gradient(135deg, #ffd700, #ffed4e);
+  color: #0e0f14;
+  vertical-align: middle;
+  box-shadow: 0 0 10px rgba(255,215,0,0.5);
+}
+
+#jackpot-app {
+  padding-bottom: calc(180px + env(safe-area-inset-bottom, 0));
+  position: relative;
+}
+#jackpot-app::before {
+  content: '';
+  position: absolute; inset: -20px -20px auto -20px; height: 320px;
+  background:
+    radial-gradient(circle at 30% 0%, rgba(255,215,0,0.10), transparent 50%),
+    radial-gradient(circle at 70% 30%, rgba(211,44,230,0.08), transparent 40%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.jp-hub { display: flex; flex-direction: column; gap: 14px; position: relative; z-index: 1; }
+
+/* Header strip — round id + countdown + total pot */
+.jp-header {
+  background: linear-gradient(135deg, #2a1a3a 0%, #1a0f24 50%, #2a1a3a 100%);
+  border: 1px solid #ffd700;
+  border-radius: 18px;
+  padding: 14px 16px;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4), inset 0 0 24px rgba(255,215,0,0.08);
+}
+.jp-header::before {
+  content: '';
+  position: absolute;
+  width: 200px; height: 200px;
+  left: 50%; top: 50%; transform: translate(-50%, -50%);
+  background: radial-gradient(circle, rgba(255,215,0,0.18), transparent 70%);
+  pointer-events: none;
+  animation: jpHeaderPulse 4s ease-in-out infinite;
+}
+@keyframes jpHeaderPulse {
+  0%, 100% { opacity: 0.5; transform: translate(-50%, -50%) scale(1); }
+  50%      { opacity: 1;   transform: translate(-50%, -50%) scale(1.1); }
+}
+.jp-round-id {
+  font-size: 11px; color: var(--text-dim);
+  letter-spacing: 1.5px; text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  position: relative; z-index: 1;
+}
+.jp-pool {
+  font-size: 36px; font-weight: 900;
+  background: linear-gradient(135deg, #ffd700, #ffed4e, #ffd700);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 20px rgba(255,215,0,0.3);
+  margin: 4px 0 6px;
+  font-variant-numeric: tabular-nums;
+  animation: jpPoolShimmer 3s linear infinite;
+  position: relative; z-index: 1;
+}
+@keyframes jpPoolShimmer {
+  0%   { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+.jp-pool-label {
+  font-size: 10px; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 1px;
+  position: relative; z-index: 1;
+}
+.jp-timer {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 8px;
+  padding: 6px 14px;
+  background: rgba(0,0,0,0.4);
+  border: 1px solid rgba(255,215,0,0.3);
+  border-radius: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  position: relative; z-index: 1;
+}
+.jp-timer.urgent { border-color: #eb4b4b; color: #ff8866; animation: jpUrgent 0.6s ease-in-out infinite alternate; }
+@keyframes jpUrgent { from { transform: scale(1); } to { transform: scale(1.06); } }
+
+.jp-status-banner {
+  font-size: 11px; color: #ffd700;
+  text-transform: uppercase; letter-spacing: 1.5px;
+  margin-top: 6px; font-weight: 700;
+  position: relative; z-index: 1;
+}
+
+/* CS-case style horizontal spinner */
+.jp-spinner-wrap {
+  position: relative;
+  height: 110px;
+  background: linear-gradient(180deg, #0a0a14 0%, #131323 100%);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: inset 0 0 30px rgba(0,0,0,0.6);
+}
+.jp-spinner-pointer {
+  position: absolute; top: 0; bottom: 0;
+  left: 50%; width: 3px;
+  background: linear-gradient(180deg, #ffd700 0%, #ff5757 100%);
+  transform: translateX(-50%);
+  z-index: 5;
+  box-shadow: 0 0 12px rgba(255,215,0,0.7);
+}
+.jp-spinner-pointer::before, .jp-spinner-pointer::after {
+  content: '';
+  position: absolute;
+  left: 50%; transform: translateX(-50%);
+  width: 0; height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+}
+.jp-spinner-pointer::before {
+  top: 0;
+  border-top: 10px solid #ffd700;
+}
+.jp-spinner-pointer::after {
+  bottom: 0;
+  border-bottom: 10px solid #ff5757;
+}
+.jp-spinner-strip {
+  position: absolute;
+  top: 50%; left: 0;
+  transform: translateY(-50%) translateX(0);
+  height: 90px;
+  display: flex;
+  gap: 4px;
+  padding: 0 4px;
+  will-change: transform;
+}
+.jp-spinner-strip.spinning {
+  transition: transform 5s cubic-bezier(0.05, 0.5, 0.2, 1);
+}
+.jp-tile {
+  flex: 0 0 auto;
+  width: 86px; height: 90px;
+  background: var(--bg-card);
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 4px;
+  padding: 6px;
+  position: relative;
+  --tile-color: #5cc15c;
+}
+.jp-tile-avatar {
+  width: 46px; height: 46px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--tile-color), color-mix(in srgb, var(--tile-color) 60%, #000));
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 900; font-size: 18px;
+  color: #fff;
+  box-shadow: 0 0 12px var(--tile-color);
+}
+.jp-tile-name {
+  font-size: 9px;
+  text-align: center;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+}
+.jp-tile.winner {
+  border-color: #ffd700;
+  box-shadow: 0 0 20px rgba(255,215,0,0.7), inset 0 0 12px rgba(255,215,0,0.3);
+  animation: jpTileWinner 1s ease-in-out infinite;
+}
+@keyframes jpTileWinner {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.05); }
+}
+
+/* Confetti */
+.jp-confetti {
+  position: absolute; top: -20px;
+  width: 8px; height: 14px;
+  pointer-events: none;
+  animation: confettiFall 2s linear forwards;
+}
+@keyframes confettiFall {
+  0%   { transform: translateY(0) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(220px) rotate(720deg); opacity: 0; }
+}
+
+/* Participants list */
+.jp-participants {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.jp-participant {
+  display: grid;
+  grid-template-columns: 36px 1fr auto auto;
+  gap: 10px; align-items: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--p-color, #5cc15c);
+  border-radius: 10px;
+  padding: 8px 12px 8px 10px;
+}
+.jp-p-avatar {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--p-color), color-mix(in srgb, var(--p-color) 60%, #000));
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 900; font-size: 13px;
+  color: #fff;
+  flex-shrink: 0;
+}
+.jp-p-name { font-size: 13px; font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jp-p-value { font-size: 12px; color: #ffd700; font-weight: 800; font-variant-numeric: tabular-nums; }
+.jp-p-pct {
+  font-size: 11px; color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  background: rgba(255,255,255,0.05);
+  padding: 2px 6px; border-radius: 6px;
+  font-weight: 700;
+}
+.jp-p-skins-count {
+  font-size: 9px; color: var(--text-dim);
+  margin-top: 1px;
+}
+
+/* Deposit CTA */
+.jp-deposit-btn {
+  width: 100%;
+  padding: 18px;
+  border: 0; border-radius: 14px;
+  background: linear-gradient(135deg, #ffd700 0%, #ffed4e 50%, #ffd700 100%);
+  background-size: 200% 200%;
+  animation: jpDepositGradient 4s ease-in-out infinite;
+  color: #1a1a1a;
+  font-weight: 900; font-size: 17px;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(255,215,0,0.4), inset 0 1px 0 rgba(255,255,255,0.3);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+  position: relative; overflow: hidden;
+}
+.jp-deposit-btn:active { transform: scale(0.98); }
+.jp-deposit-btn:disabled {
+  background: var(--bg-elev); color: var(--text-dim); cursor: not-allowed;
+  box-shadow: none; animation: none;
+}
+@keyframes jpDepositGradient {
+  0%, 100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+
+/* Tabs row */
+.jp-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  padding: 5px;
+  border-radius: 12px;
+}
+.jp-tab {
+  padding: 9px 8px;
+  border: 0; background: transparent; color: var(--text-dim);
+  border-radius: 8px; font-weight: 700; font-size: 12px;
+  cursor: pointer;
+}
+.jp-tab.active {
+  background: linear-gradient(135deg, #ffd700, #ffb700);
+  color: #0e0f14;
+  box-shadow: 0 4px 12px rgba(255,215,0,0.3);
+}
+
+/* Provably fair pill */
+.jp-fair-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 10px;
+  background: rgba(0,0,0,0.4);
+  border: 1px solid rgba(255,255,255,0.05);
+  color: var(--text-dim);
+  font-family: ui-monospace, monospace;
+  cursor: pointer;
+}
+.jp-fair-pill:hover { color: var(--text); border-color: rgba(255,215,0,0.3); }
+
+/* History */
+.jp-history-list { display: flex; flex-direction: column; gap: 6px; }
+.jp-history-row {
+  display: grid;
+  grid-template-columns: 50px 1fr auto auto;
+  gap: 10px; align-items: center;
+  padding: 9px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  font-size: 12px;
+}
+.jp-history-row.cancelled { opacity: 0.55; }
+.jp-history-id {
+  font-weight: 700; font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+.jp-history-winner {
+  font-weight: 700; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.jp-history-value {
+  color: #ffd700;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.jp-history-verify {
+  padding: 4px 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 10px;
+  cursor: pointer;
+  color: var(--text-dim);
+}
+.jp-history-verify:hover { color: #ffd700; border-color: #ffd700; }
+
+/* Verify modal */
+.jp-verify-modal {
+  position: fixed; inset: 0; z-index: 9100;
+  background: rgba(0,0,0,0.85);
+  backdrop-filter: blur(8px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+  overflow-y: auto;
+}
+.jp-verify-card {
+  background: var(--bg-card);
+  border: 2px solid #ffd700;
+  border-radius: 16px;
+  padding: 18px;
+  width: 100%; max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 0 60px rgba(255,215,0,0.2);
+}
+.jp-verify-card h3 { font-size: 16px; margin-bottom: 12px; }
+.jp-verify-card pre {
+  background: rgba(0,0,0,0.4);
+  border: 1px solid var(--border);
+  padding: 10px; border-radius: 8px;
+  font-size: 10px;
+  font-family: ui-monospace, monospace;
+  word-break: break-all; white-space: pre-wrap;
+  margin: 6px 0;
+}
+.jp-verify-row { font-size: 11px; margin-bottom: 4px; }
+.jp-verify-row b { color: #ffd700; }
+.jp-verify-ok { color: #5cc15c; font-weight: 700; }
+.jp-verify-bad { color: #eb4b4b; font-weight: 700; }
+.jp-verify-close {
+  width: 100%; padding: 12px;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-top: 14px;
+  color: var(--text); font-weight: 700;
+}
+
+/* Deposit modal */
+.jp-deposit-modal {
+  position: fixed; inset: 0; z-index: 9100;
+  background: rgba(0,0,0,0.85);
+  backdrop-filter: blur(8px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
+.jp-deposit-card {
+  background: var(--bg-card);
+  border: 2px solid #ffd700;
+  border-radius: 16px;
+  padding: 18px;
+  width: 100%; max-width: 440px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 0 60px rgba(255,215,0,0.2);
+}
+.jp-deposit-tabs {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 6px; margin-bottom: 14px;
+}
+.jp-deposit-tab {
+  padding: 10px; border: 0;
+  background: var(--bg-elev); color: var(--text-dim);
+  border-radius: 10px; font-weight: 700; cursor: pointer;
+}
+.jp-deposit-tab.active { background: linear-gradient(135deg, #ffd700, #ffb700); color: #0e0f14; }
+.jp-deposit-section { display: none; }
+.jp-deposit-section.active { display: block; }
+
+.jp-coin-input {
+  width: 100%; padding: 14px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 16px; font-weight: 700;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.jp-coin-presets { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.jp-coin-preset {
+  flex: 1; min-width: 60px;
+  padding: 8px 10px;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: 8px; font-size: 11px; cursor: pointer; font-weight: 700;
+}
+.jp-coin-preset:hover { border-color: #ffd700; color: #ffd700; }
+
+.jp-skins-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 4px;
+}
+.jp-skin-tile {
+  background: var(--bg-elev);
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  padding: 6px;
+  cursor: pointer; position: relative;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+}
+.jp-skin-tile.selected {
+  border-color: #ffd700;
+  box-shadow: 0 0 10px rgba(255,215,0,0.4);
+}
+.jp-skin-tile img { width: 100%; height: 50px; object-fit: contain; }
+.jp-skin-tile-price {
+  font-size: 10px; color: #ffd700; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.jp-skin-tile-name {
+  font-size: 9px; color: var(--text-dim);
+  text-align: center; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+  width: 100%;
+}
+
+.jp-deposit-summary {
+  margin: 12px 0;
+  padding: 10px;
+  background: rgba(255,215,0,0.1);
+  border: 1px solid rgba(255,215,0,0.3);
+  border-radius: 10px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+}
+.jp-deposit-summary b { color: #ffd700; font-variant-numeric: tabular-nums; }
+.jp-deposit-actions { display: flex; gap: 8px; }
+.jp-deposit-actions button { flex: 1; padding: 12px; border: 0; border-radius: 10px; font-weight: 700; cursor: pointer; }
+.jp-deposit-cancel { background: var(--bg-elev); color: var(--text); border: 1px solid var(--border); }
+.jp-deposit-confirm {
+  background: linear-gradient(135deg, #ffd700, #ffb700);
+  color: #0e0f14;
+}
+.jp-deposit-confirm:disabled { background: var(--bg-elev); color: var(--text-dim); cursor: not-allowed; }

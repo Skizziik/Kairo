@@ -6,6 +6,7 @@
   <title>RIP Casino</title>
   <link rel="stylesheet" href="./styles.css?v=20260427v" />
   <link rel="stylesheet" href="./snake.css?v=20260428i" />
+  <link rel="stylesheet" href="./jackpot.css?v=20260428a" />
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
@@ -163,6 +164,11 @@
       <section class="view" data-view="games">
         <h2>🎰 Игры</h2>
         <div class="game-grid">
+          <div class="game-card jackpot-card jackpot-card-new" data-game="jackpot">
+            <div class="game-icon">🎰</div>
+            <div class="game-name">Jackpot <span class="jackpot-new-badge">NEW</span></div>
+            <div class="game-desc">Скины+монеты в общий пул — победитель забирает всё. Боты подкидывают каждый раунд.</div>
+          </div>
           <div class="game-card snake-card snake-card-new" data-game="snake">
             <div class="game-icon">🐍</div>
             <div class="game-name">Snake <span class="snake-new-badge">NEW</span></div>
@@ -262,6 +268,13 @@
         <div id="snake-app"></div>
       </section>
 
+      <!-- view: jackpot (pool-style PvP) -->
+      <section class="view" data-view="jackpot">
+        <button class="back-btn" id="jackpot-back">← к играм</button>
+        <h2>🎰 Jackpot</h2>
+        <div id="jackpot-app"></div>
+      </section>
+
       <!-- view: leaderboard -->
       <section class="view" data-view="leaderboard">
         <h2>💎 Лидерборд</h2>
@@ -341,5 +354,6 @@
 
   <script src="./app.js?v=20260428m"></script>
   <script src="./snake.js?v=20260428o"></script>
+  <script src="./jackpot.js?v=20260428a"></script>
 </body>
 </html>

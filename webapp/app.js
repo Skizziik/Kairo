@@ -875,6 +875,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (typeof window.snakeLeave === 'function') window.snakeLeave();
     showView('games');
   });
+  // Jackpot view: back to Games
+  const jb = document.getElementById('jackpot-back');
+  if (jb) jb.addEventListener('click', () => {
+    if (typeof window.jackpotLeave === 'function') window.jackpotLeave();
+    showView('games');
+  });
 });
 
 function openGameScreen(gameKey) {
@@ -883,6 +889,11 @@ function openGameScreen(gameKey) {
   if (gameKey === 'snake') {
     showView('snake');
     if (typeof window.snakeEnter === 'function') window.snakeEnter();
+    return;
+  }
+  if (gameKey === 'jackpot') {
+    showView('jackpot');
+    if (typeof window.jackpotEnter === 'function') window.jackpotEnter();
     return;
   }
   const grid = document.querySelector('.game-grid');

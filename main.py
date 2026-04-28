@@ -17,6 +17,7 @@ from app.economy import audit as _audit
 from app.economy import boss as _boss
 from app.economy import case_rebalance as _case_rebalance
 from app.economy import coinflip_pvp as _cfpvp
+from app.economy import jackpot as _jackpot
 from app.economy import snake as _snake
 from app.economy import tiers as _tiers
 from app.economy import gear as _gear
@@ -76,6 +77,10 @@ async def lifespan(_: FastAPI):
         await _snake.ensure_schema()
     except Exception as e:
         log.warning("snake schema migration failed: %s", e)
+    try:
+        await _jackpot.ensure_schema()
+    except Exception as e:
+        log.warning("jackpot schema migration failed: %s", e)
     # Trim oversized case pools (idempotent — only changes if current count > cap)
     try:
         await _case_rebalance.rebalance_all()
@@ -115,6 +120,10 @@ async def lifespan(_: FastAPI):
     # Snake AFK farm tick — accumulates passive coins for users who own AFK snakes
     scheduler_tasks.append(asyncio.create_task(_snake.afk_loop()))
     log.info("snake AFK loop started")
+
+    # Jackpot mini-game — round automation + bots
+    scheduler_tasks.append(asyncio.create_task(_jackpot.round_loop()))
+    log.info("jackpot round loop started")
 
     try:
         yield
