@@ -1370,6 +1370,44 @@ async def buy_upgrade(tg_id: int, key: str) -> dict:
     }
 
 
+async def reset_upgrade(tg_id: int, key: str) -> dict:
+    """Reset an upgrade to level 0. No refund — money spent is lost. Used
+    when a player wants to respec a build branch (e.g. they over-invested in
+    Combo Chain and want to free their next-cost slot, or just experiment)."""
+    if key not in UPGRADE_DEFS:
+        return {"ok": False, "error": "Unknown upgrade"}
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            srow = await conn.fetchrow(
+                "select upgrades from snake_users where tg_id = $1 for update", tg_id,
+            )
+            if srow is None:
+                return {"ok": False, "error": "No state"}
+            ups = _parse_jsonb(srow["upgrades"]) or {}
+            cur = int(ups.get(key, 0))
+            if cur <= 0:
+                return {"ok": False, "error": "Апгрейд не куплен"}
+            ups.pop(key, None)
+            await conn.execute(
+                "update snake_users set upgrades = $2::jsonb where tg_id = $1",
+                tg_id, json.dumps(ups),
+            )
+            # Audit-only log entry — amount=0 since no balance change.
+            try:
+                bal_row = await conn.fetchrow(
+                    "select balance from economy_users where tg_id = $1", tg_id,
+                )
+                bal = int(bal_row["balance"]) if bal_row else 0
+                await conn.execute(
+                    "insert into economy_transactions (user_id, amount, kind, reason, balance_after) "
+                    "values ($1, 0, 'snake_upgrade_reset', $2, $3)",
+                    tg_id, f"reset_{key}_from_lvl{cur}", bal,
+                )
+            except Exception:
+                pass
+    return {"ok": True, "key": key, "new_level": 0, "old_level": cur}
+
+
 # ============================================================
 # AFK SNAKES
 # ============================================================

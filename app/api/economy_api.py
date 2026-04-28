@@ -1170,6 +1170,11 @@ async def api_snake_upgrade(req: SnakeUpgradeReq, user: dict = Depends(require_u
     return await _snake.buy_upgrade(int(user["id"]), req.key)
 
 
+@router.post("/snake/upgrade/reset")
+async def api_snake_upgrade_reset(req: SnakeUpgradeReq, user: dict = Depends(require_user)) -> dict:
+    return await _snake.reset_upgrade(int(user["id"]), req.key)
+
+
 @router.post("/snake/afk/buy")
 async def api_snake_afk_buy(req: SnakeBuyAfkReq, user: dict = Depends(require_user)) -> dict:
     return await _snake.buy_afk_snake(int(user["id"]), req.snake_key)

@@ -1345,6 +1345,9 @@
           ${isMax
             ? `<button class="snake-upgrade-buy maxed" disabled>MAX</button>`
             : `<button class="snake-upgrade-buy" data-key="${u.key}" ${canAfford ? '' : 'disabled'}>${fmt(cost)} 🪙</button>`}
+          ${cur > 0
+            ? `<button class="snake-upgrade-reset" data-reset-key="${u.key}" data-reset-name="${escape(u.name)}" title="Сбросить апгрейд">↺</button>`
+            : ''}
         </div>
       `;
     }).join('');
@@ -1378,6 +1381,58 @@
           paintUpgradesTab(c);
         } catch (e) { toast('Ошибка: ' + e.message); }
       });
+    });
+
+    // Reset (downgrade) handler — clicked the ↺ icon
+    c.querySelectorAll('[data-reset-key]').forEach(b => {
+      b.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const name = b.dataset.resetName || 'этот апгрейд';
+        const ok = await confirmReset(name);
+        if (!ok) return;
+        b.disabled = true;
+        try {
+          const r = await api('/api/snake/upgrade/reset', {
+            method: 'POST', body: JSON.stringify({ key: b.dataset.resetKey }),
+          });
+          if (!r.ok) { toast(r.error || 'Ошибка'); b.disabled = false; return; }
+          SS.state.upgrades = SS.state.upgrades || {};
+          delete SS.state.upgrades[r.key];
+          tg?.HapticFeedback?.impactOccurred?.('medium');
+          toast('Апгрейд сброшен');
+          paintUpgradesTab(c);
+        } catch (e) { toast('Ошибка: ' + e.message); b.disabled = false; }
+      });
+    });
+  }
+
+  // Pretty in-app confirmation for upgrade reset (CSS-styled, not native confirm)
+  function confirmReset(upgradeName) {
+    return new Promise(resolve => {
+      const overlay = document.createElement('div');
+      overlay.className = 'snake-confirm-overlay';
+      overlay.innerHTML = `
+        <div class="snake-confirm-box">
+          <div class="snake-confirm-icon">⚠</div>
+          <div class="snake-confirm-title">Сбросить «${upgradeName}»?</div>
+          <div class="snake-confirm-text">
+            Уровень обнулится. <b>Потраченные монеты НЕ вернутся.</b>
+          </div>
+          <div class="snake-confirm-actions">
+            <button class="snake-confirm-cancel">Отмена</button>
+            <button class="snake-confirm-ok">Сбросить</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+      const close = (val) => {
+        overlay.style.transition = 'opacity 0.18s';
+        overlay.style.opacity = '0';
+        setTimeout(() => { overlay.remove(); resolve(val); }, 180);
+      };
+      overlay.querySelector('.snake-confirm-cancel').addEventListener('click', () => close(false));
+      overlay.querySelector('.snake-confirm-ok').addEventListener('click', () => close(true));
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
     });
   }
 
