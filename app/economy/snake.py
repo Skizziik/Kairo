@@ -45,9 +45,14 @@ RARITIES: list[dict] = [
 ]
 RARITY_BY_KEY = {r["key"]: r for r in RARITIES}
 
-# Anti-cheat: hard ceiling on coin rate (per second of run).
-# Empirical max with all upgrades + best luck on smallest map ~ 35K/sec → cap at 50K.
-MAX_COINS_PER_SECOND = 50_000
+# Anti-cheat: hard ceiling on RAW (pre-multiplier) coin rate per second.
+# Applied to client's `coins_earned` (per-eat sum with lucky/crit/combo/streak/
+# treasure/cauldron/lightning already in). Run-wide multipliers (greed/total/
+# crown/engine) are SERVER-CONTROLLED and trusted — they apply on top of the
+# capped raw value. Empirical raw max ~ 50-150K/sec depending on map+luck;
+# we set 200K/sec as a safe ceiling that rejects blatant inflation but lets
+# legitimate stacked runs through.
+MAX_COINS_PER_SECOND = 200_000
 
 
 # ============================================================
@@ -1161,6 +1166,14 @@ async def record_run(
         else:
             coins = client_coins
 
+    # Anti-cheat: cap RAW per-second rate BEFORE applying run-wide multipliers.
+    # The cap targets client claims (which can be inflated); run-wide mults
+    # come from server-validated upgrade/artifact levels, so multiplying after
+    # the cap is safe and lets stacked builds keep their full value.
+    max_allowed_raw = int(MAX_COINS_PER_SECOND * max(1, duration_sec))
+    if coins > max_allowed_raw:
+        coins = max_allowed_raw
+
     # Apply RUN-WIDE multipliers (NOT applied client-side):
     coins = int(coins * greed_mult * total_mult * um_mult * daily_bonus_mult)
 
@@ -1185,11 +1198,6 @@ async def record_run(
     recovery_lvl = int(upgrades.get("recovery", 0))
     if recovery_lvl > 0 and died_to != "manual":
         coins = int(coins * (1 + recovery_lvl * 0.05))
-
-    # Anti-cheat: max coins per second
-    max_allowed = int(MAX_COINS_PER_SECOND * max(1, duration_sec))
-    if coins > max_allowed:
-        coins = max_allowed
 
     # XP multiplier
     xp_mult_lvl = int(upgrades.get("snake_xp_boost", 0))
