@@ -31,7 +31,9 @@
       // Auto-refresh AFK panel every 30s while user is on snake page
       if (SS.afkRefreshTimer) clearInterval(SS.afkRefreshTimer);
       SS.afkRefreshTimer = setInterval(async () => {
-        if (!document.querySelector('.snake-hub')) return;  // user navigated away
+        // Only run when Snake view is ACTUALLY active. DOM node always
+        // exists (CSS hides other views), so .snake-hub check wasn't strict.
+        if (!document.querySelector('.view[data-view="snake"].active')) return;
         if (document.querySelector('.snake-game-overlay')) return; // mid-run, don't poke
         try {
           const fresh = await api('/api/snake/state');

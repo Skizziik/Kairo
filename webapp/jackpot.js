@@ -22,7 +22,10 @@
     await refresh(true);
     if (JS_.pollTimer) clearInterval(JS_.pollTimer);
     JS_.pollTimer = setInterval(() => {
-      if (!document.querySelector('#jackpot-app')) return;
+      // Only run when Jackpot view is ACTUALLY active. The DOM node always
+      // exists (other views just get display:none), so checking #jackpot-app
+      // wasn't enough — toasts were firing for users browsing Inventory etc.
+      if (!document.querySelector('.view[data-view="jackpot"].active')) return;
       // Pause polling while a deposit modal or verify modal is open
       if (document.querySelector('.jp-deposit-modal') ||
           document.querySelector('.jp-verify-modal')) return;
