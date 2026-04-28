@@ -198,12 +198,14 @@
     if (!deposits || deposits.length === 0) {
       return '<div class="loader" style="font-size:13px; padding:18px">Никто пока не депозитил...</div>';
     }
-    // Aggregate: same user_id → ONE row with summed value, skins, coins.
-    // (Server keeps each deposit as a separate row for audit, client rolls up
-    //  for display so a player who deposits twice doesn't appear twice.)
+    // Aggregate: real users by user_id; bots by user_id + bot_name (because
+    // ALL bots share BOT_USER_ID=1, but Hydra/Cobra/Mamba are different
+    // personalities — without name in key they all merged into one row).
     const byUser = new Map();
     for (const d of deposits) {
-      const key = d.user_id;
+      const key = d.is_bot
+        ? `bot:${d.bot_name || d.name || 'unknown'}`
+        : `user:${d.user_id}`;
       if (!byUser.has(key)) {
         byUser.set(key, {
           user_id: d.user_id,
