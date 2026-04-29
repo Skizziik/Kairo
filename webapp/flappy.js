@@ -597,10 +597,16 @@
       const dt = Math.min(50, t - G.lastT) / 16.6667;  // normalized 60fps
       G.lastT = t;
 
-      // Auto-magnet from artifact
+      // Magnet radius — base from power-up + artifact + UPGRADE bonus.
+      // magnet_range upgrade: +2% per level → ×3 at L=100.
+      const magnetUpLvl = Number(upgrades.magnet_range || 0);
+      const magnetUpMult = 1 + magnetUpLvl * 0.02;
+      // City map bonus: +50% magnet radius
+      const cityBonus = (map.bonus?.magnet_radius_bonus || 1.0);
       const passiveMagnetR = artifacts.has('coin_magnet') ? 80 : 0;
       const magnetActive = t < G.magnetUntil;
-      const magnetRadius = (magnetActive ? 250 : 0) + passiveMagnetR;
+      const baseRadius = (magnetActive ? 250 : 0) + passiveMagnetR;
+      const magnetRadius = Math.floor(baseRadius * magnetUpMult * cityBonus);
       const slowmo = t < G.slowmoUntil ? 0.5 : 1.0;
       const rocketActive = t < G.rocketUntil;
 
