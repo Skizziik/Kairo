@@ -130,10 +130,11 @@ async def lifespan(_: FastAPI):
     scheduler_tasks.append(asyncio.create_task(_jackpot.round_loop()))
     log.info("jackpot round loop started")
 
-    # Tax authority — hourly accrual + midnight SET collection
+    # Tax authority — hourly accrual + midnight SET collection + raid sweeper
     scheduler_tasks.append(asyncio.create_task(_tax.hourly_loop()))
     scheduler_tasks.append(asyncio.create_task(_tax.midnight_loop()))
-    log.info("tax loops started (hourly + midnight SET)")
+    scheduler_tasks.append(asyncio.create_task(_tax.raid_loop()))
+    log.info("tax loops started (hourly + midnight SET + raid sweeper)")
 
     try:
         yield

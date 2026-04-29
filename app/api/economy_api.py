@@ -1330,3 +1330,29 @@ async def api_tax_declare(user: dict = Depends(require_user)) -> dict:
 @router.post("/tax/amnesty")
 async def api_tax_amnesty(user: dict = Depends(require_user)) -> dict:
     return await _tax.amnesty(int(user["id"]))
+
+
+# ── RAID ────────────────────────────────────────────────────────
+
+class TaxRaidDonateReq(BaseModel):
+    raid_id: int
+    count: int = Field(..., ge=1, le=100)
+
+
+@router.get("/tax/raid")
+async def api_tax_raid(user: dict = Depends(require_user)) -> dict:
+    _ = user
+    raid = await _tax.get_active_raid()
+    if raid is None:
+        return {"active": False}
+    return {"active": True, **raid}
+
+
+@router.post("/tax/raid/start")
+async def api_tax_raid_start(user: dict = Depends(require_user)) -> dict:
+    return await _tax.start_raid(int(user["id"]))
+
+
+@router.post("/tax/raid/donate")
+async def api_tax_raid_donate(req: TaxRaidDonateReq, user: dict = Depends(require_user)) -> dict:
+    return await _tax.donate_skins_to_raid(int(user["id"]), int(req.raid_id), int(req.count))

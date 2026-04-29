@@ -4,6 +4,7 @@
   const TS = {
     state: null,
     cfg: null,
+    raid: null,           // active raid (or null)
     inited: false,
     pollTimer: null,
   };
@@ -19,12 +20,14 @@
     }
     TS.inited = true;
     try {
-      const [cfg, state] = await Promise.all([
+      const [cfg, state, raid] = await Promise.all([
         api('/api/tax/config'),
         api('/api/tax/state'),
+        api('/api/tax/raid'),
       ]);
       TS.cfg = cfg;
       TS.state = state;
+      TS.raid = raid && raid.active ? raid : null;
     } catch (e) {
       const r = root(); if (r) r.innerHTML = '<div class="loader">Ошибка: ' + escape(e.message) + '</div>';
       return;
@@ -47,7 +50,12 @@
 
   async function refresh() {
     try {
-      TS.state = await api('/api/tax/state');
+      const [state, raid] = await Promise.all([
+        api('/api/tax/state'),
+        api('/api/tax/raid'),
+      ]);
+      TS.state = state;
+      TS.raid = raid && raid.active ? raid : null;
       paint();
     } catch (e) {}
   }
@@ -57,12 +65,11 @@
     if (!r || !TS.state || !TS.cfg) return;
     const s = TS.state;
 
-    const owedTotal = (s.pending_tax_due || 0) + (s.tax_debt || 0);
-    const debt = s.tax_debt || 0;
+    const owedTotal = s.pending_tax_due || 0;
 
     // ── 1. ENTITY HEADER ────────────────────────────────────
     const entityHtml = `
-      <div class="tax-entity-card ${debt > 0 ? 'debt' : ''}">
+      <div class="tax-entity-card">
         <div class="tax-entity-icon">${escape(s.entity_icon || '👤')}</div>
         <div class="tax-entity-info">
           <div class="tax-entity-label">Текущая форма</div>
@@ -87,18 +94,6 @@
         <span class="tax-rate-value" style="color:${it.color || ''}">${escape(it.value)}</span>
       </div>
     `).join('');
-
-    // ── 2. PAY-DUE BANNER ────────────────────────────────────
-    const debtBanner = debt > 0 ? `
-      <div class="tax-debt-banner">
-        <div class="tax-debt-icon">⚠</div>
-        <div>
-          <div class="tax-debt-title">У вас долг по налогам</div>
-          <div class="tax-debt-amount">${fmt(debt)} 🪙</div>
-          <div class="tax-debt-note">Растёт +${(s.debt_penalty_per_day * 100).toFixed(0)}%/день. Блокирует покупки.</div>
-        </div>
-      </div>
-    ` : '';
 
     const paradiseBanner = s.paradise_active ? `
       <div class="tax-paradise-banner">
@@ -147,40 +142,33 @@
           </div>
         </div>`;
 
-    const dueHtml = (owedTotal > 0 || debt > 0) ? `
+    const dueHtml = owedTotal > 0 ? `
       <div class="tax-due-card">
-        <div class="tax-due-row">
-          <span>К оплате (накоплено)</span>
-          <b>${fmt(s.pending_tax_due || 0)} 🪙</b>
-        </div>
-        ${debt > 0 ? `<div class="tax-due-row debt">
-          <span>Долг (с ×${(1 + s.debt_penalty_per_day).toFixed(2)}/день)</span>
-          <b>${fmt(debt)} 🪙</b>
-        </div>` : ''}
         <div class="tax-due-row total">
-          <span>Итого</span>
+          <span>Накоплено к списанию в полночь UTC</span>
           <b>${fmt(owedTotal)} 🪙</b>
         </div>
-        <button class="tax-pay-btn" id="tax-pay-btn">💳 Заплатить ${fmt(owedTotal)} 🪙</button>
+        <button class="tax-pay-btn" id="tax-pay-btn">💳 Заплатить сейчас ${fmt(owedTotal)} 🪙</button>
+        <div class="tax-due-note">Если не платить вручную — спишется автоматом в 00:00 UTC. Если на балансе не хватит — баланс уйдёт в минус.</div>
         ${nextTickBlock}
       </div>
     ` : `
       <div class="tax-due-card clean">
-        <div class="tax-due-clean">✅ Все налоги уплачены. Доход за час обнулится при следующем тике.</div>
+        <div class="tax-due-clean">✅ Налогов к списанию нет.</div>
         ${nextTickBlock}
       </div>
     `;
+
+    // ── 2.5 RAID ────────────────────────────────────────────
+    const raidHtml = buildRaidHtml();
 
     // ── 3. ACTIONS ───────────────────────────────────────────
     const declareBtn = s.declared_today
       ? '<button class="tax-action declared" disabled>📋 Декларация подана сегодня (−1%)</button>'
       : '<button class="tax-action" id="tax-declare-btn">📋 Подать декларацию (−1% к ставке)</button>';
 
-    const amnestyBtn = (debt > 0 && s.amnesty_available)
-      ? `<button class="tax-action amnesty" id="tax-amnesty-btn">💼 Амнистия — погасить за ${fmt(Math.floor(debt / 2))} 🪙</button>`
-      : (debt > 0
-          ? '<button class="tax-action amnesty" disabled>💼 Амнистия (раз в месяц, на cooldown)</button>'
-          : '');
+    // Amnesty removed — no debt system anymore.
+    const amnestyBtn = '';
 
     // ── 4. ENTITY UPGRADES (registration tiers) ──────────────
     const entitiesHtml = TS.cfg.entities.map(e => {
@@ -266,7 +254,7 @@
       ${entityHtml}
       ${newbieBanner}
       ${paradiseBanner}
-      ${debtBanner}
+      ${raidHtml}
       ${dueHtml}
       <div class="tax-rate-breakdown">
         <div class="tax-section-title">📊 Расчёт ставки</div>
@@ -322,7 +310,142 @@
     r.querySelectorAll('[data-perk]').forEach(b => {
       b.addEventListener('click', () => doUpgrade(b.dataset.perk));
     });
+
+    const raidStart = r.querySelector('#tax-raid-start');
+    if (raidStart) raidStart.addEventListener('click', startRaid);
+    r.querySelectorAll('[data-raid-donate]').forEach(b => {
+      b.addEventListener('click', () => donateRaid(Number(b.dataset.raidDonate), Number(b.dataset.amount)));
+    });
   }
+
+  // ─── RAID UI ─────────────────────────────────────────────
+  function buildRaidHtml() {
+    const raid = TS.raid;
+    if (!raid) {
+      // No active raid — show "start" CTA
+      return `
+        <div class="tax-raid-card start">
+          <div class="tax-raid-head">
+            <div class="tax-raid-title">🎯 Рейд на налоговую</div>
+            <div class="tax-raid-cooldown">1 раз в 24ч</div>
+          </div>
+          <div class="tax-raid-text">
+            Собери рейд — все игроки могут пожертвовать <b>500 скинов</b> за 10 минут подготовки.
+            Если успеете — налоговая <b>не работает 2 часа</b> (никто не платит).
+          </div>
+          <button class="tax-raid-btn" id="tax-raid-start">⚔ Собрать рейд</button>
+        </div>
+      `;
+    }
+
+    const status = raid.status;
+
+    if (status === 'preparing') {
+      const deadline = new Date(raid.deadline).getTime();
+      const remainSec = Math.max(0, Math.floor((deadline - Date.now()) / 1000));
+      const mm = Math.floor(remainSec / 60);
+      const ss = remainSec % 60;
+      const remainText = `${mm}:${String(ss).padStart(2, '0')}`;
+      const pct = Math.min(100, Math.round((raid.skins_donated / raid.skins_required) * 100));
+      const donations = raid.donations || [];
+      const donorList = donations.slice(0, 8).map(d => {
+        const name = d.username ? '@' + d.username : (d.first_name || `tg${d.user_id}`);
+        return `<div class="tax-raid-donor"><span>${escape(name)}</span><b>${d.skins} скинов</b></div>`;
+      }).join('');
+
+      return `
+        <div class="tax-raid-card preparing">
+          <div class="tax-raid-head">
+            <div class="tax-raid-title">⚔ ИДЁТ СБОР НА РЕЙД!</div>
+            <div class="tax-raid-timer" data-raid-deadline="${escape(raid.deadline)}">${remainText}</div>
+          </div>
+          <div class="tax-raid-progress-block">
+            <div class="tax-raid-numbers">
+              <b>${raid.skins_donated}</b> / ${raid.skins_required} скинов
+              <span class="tax-raid-pct">${pct}%</span>
+            </div>
+            <div class="tax-raid-bar"><div class="tax-raid-bar-fill" style="width:${pct}%"></div></div>
+          </div>
+          <div class="tax-raid-donate-row">
+            <button class="tax-raid-mini" data-raid-donate="${raid.id}" data-amount="10">+10 скинов</button>
+            <button class="tax-raid-mini" data-raid-donate="${raid.id}" data-amount="50">+50</button>
+            <button class="tax-raid-mini" data-raid-donate="${raid.id}" data-amount="100">+100</button>
+          </div>
+          ${donorList ? `<div class="tax-raid-donors">${donorList}</div>` : '<div class="tax-raid-text" style="text-align:center">Нет пожертвований. Будь первым!</div>'}
+        </div>
+      `;
+    }
+
+    if (status === 'success' && raid.raid_until) {
+      const until = new Date(raid.raid_until).getTime();
+      const remainSec = Math.max(0, Math.floor((until - Date.now()) / 1000));
+      const hh = Math.floor(remainSec / 3600);
+      const mm = Math.floor((remainSec % 3600) / 60);
+      const ss = remainSec % 60;
+      const remainText = `${hh}:${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+      return `
+        <div class="tax-raid-card success">
+          <div class="tax-raid-success-icon">🔥</div>
+          <div class="tax-raid-success-title">НАЛОГОВАЯ РАЗБИТА!</div>
+          <div class="tax-raid-success-sub">Доход не облагается налогом ещё <b data-raid-until="${escape(raid.raid_until)}">${remainText}</b></div>
+        </div>
+      `;
+    }
+    return '';
+  }
+
+  async function startRaid() {
+    if (!confirm('Собрать рейд на налоговую? У тебя будет 10 минут чтобы все вместе нанесли 500 скинов.')) return;
+    try {
+      const r = await api('/api/tax/raid/start', { method: 'POST', body: JSON.stringify({}) });
+      if (!r.ok) { toast(r.error || 'Ошибка'); return; }
+      toast('⚔ Рейд начат! Зови всех донатить скины');
+      tg?.HapticFeedback?.notificationOccurred?.('success');
+      await refresh();
+    } catch (e) { toast('Ошибка: ' + e.message); }
+  }
+
+  async function donateRaid(raidId, count) {
+    if (!confirm(`Пожертвовать ${count} скинов в рейд? Они будут потрачены безвозвратно.`)) return;
+    try {
+      const r = await api('/api/tax/raid/donate', {
+        method: 'POST',
+        body: JSON.stringify({ raid_id: raidId, count }),
+      });
+      if (!r.ok) { toast(r.error || 'Ошибка'); return; }
+      toast(`💥 +${r.donated} скинов в атаку! Всего: ${r.raid_total}/${r.required}`);
+      tg?.HapticFeedback?.impactOccurred?.('medium');
+      await refresh();
+    } catch (e) { toast('Ошибка: ' + e.message); }
+  }
+
+  // Tick the raid timer every second when visible (without re-fetching)
+  setInterval(() => {
+    if (!TS.raid) return;
+    const isActive = document.querySelector('.view[data-view="tax"].active');
+    if (!isActive) return;
+    const r = root();
+    if (!r) return;
+    const timer = r.querySelector('[data-raid-deadline]');
+    if (timer) {
+      const deadline = new Date(timer.dataset.raidDeadline).getTime();
+      const remainSec = Math.max(0, Math.floor((deadline - Date.now()) / 1000));
+      const mm = Math.floor(remainSec / 60);
+      const ss = remainSec % 60;
+      timer.textContent = `${mm}:${String(ss).padStart(2,'0')}`;
+      if (remainSec <= 0) refresh();    // resolve to result on timeout
+    }
+    const until = r.querySelector('[data-raid-until]');
+    if (until) {
+      const t = new Date(until.dataset.raidUntil).getTime();
+      const remainSec = Math.max(0, Math.floor((t - Date.now()) / 1000));
+      if (remainSec <= 0) { refresh(); return; }
+      const hh = Math.floor(remainSec / 3600);
+      const mm = Math.floor((remainSec % 3600) / 60);
+      const ss = remainSec % 60;
+      until.textContent = `${hh}:${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+    }
+  }, 1000);
 
   async function payAll() {
     try {

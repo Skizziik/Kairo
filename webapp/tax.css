@@ -202,6 +202,151 @@
   box-shadow: 0 4px 16px rgba(45,95,163,0.25);
 }
 
+/* RAID CARD */
+.tax-raid-card {
+  background: linear-gradient(135deg, #2b1010 0%, #1a0808 100%);
+  border: 1px solid rgba(235,75,75,0.3);
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 12px;
+  position: relative; overflow: hidden;
+}
+.tax-raid-card.start {
+  background: linear-gradient(135deg, #2b1010 0%, #1f1416 100%);
+  border-color: rgba(235,75,75,0.25);
+}
+.tax-raid-card.preparing {
+  background: linear-gradient(135deg, #3a1818 0%, #1f0a0a 100%);
+  border-color: rgba(255,150,80,0.5);
+  box-shadow: 0 0 30px rgba(235,75,75,0.15);
+  animation: raidPulse 2.6s ease-in-out infinite;
+}
+@keyframes raidPulse {
+  0%, 100% { box-shadow: 0 0 30px rgba(235,75,75,0.15); }
+  50%      { box-shadow: 0 0 38px rgba(255,150,80,0.3); }
+}
+.tax-raid-card.success {
+  background: linear-gradient(135deg, #1a3a1a 0%, #0a1f0a 100%);
+  border-color: rgba(92,193,92,0.6);
+  box-shadow: 0 0 30px rgba(92,193,92,0.2);
+  text-align: center;
+}
+.tax-raid-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 10px; margin-bottom: 8px;
+}
+.tax-raid-title {
+  font-size: 15px; font-weight: 800;
+  color: #ff8866;
+  text-transform: uppercase; letter-spacing: 0.6px;
+}
+.tax-raid-card.preparing .tax-raid-title {
+  color: #ffd700;
+}
+.tax-raid-cooldown {
+  font-size: 10px; color: rgba(255,255,255,0.5);
+  background: rgba(0,0,0,0.3);
+  padding: 3px 8px; border-radius: 999px;
+}
+.tax-raid-timer {
+  font-size: 22px; font-weight: 800;
+  color: #ffd700;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 10px rgba(255,215,0,0.4);
+}
+.tax-raid-text {
+  font-size: 12px; color: rgba(255,255,255,0.75);
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+.tax-raid-text b { color: #ffd700; }
+.tax-raid-btn {
+  width: 100%; padding: 12px;
+  background: linear-gradient(180deg, #eb4b4b, #c03737);
+  border: 0; border-radius: 10px;
+  color: #fff; font-weight: 800; font-size: 14px;
+  cursor: pointer; transition: filter 0.15s, transform 0.1s;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.tax-raid-btn:active { transform: scale(0.98); filter: brightness(0.9); }
+
+.tax-raid-progress-block { margin-bottom: 10px; }
+.tax-raid-numbers {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 12px; color: rgba(255,255,255,0.7);
+  margin-bottom: 5px;
+}
+.tax-raid-numbers b {
+  color: #fff; font-size: 16px; font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.tax-raid-pct {
+  color: #ffd700; font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.tax-raid-bar {
+  height: 8px; background: rgba(0,0,0,0.5);
+  border-radius: 4px; overflow: hidden;
+  border: 1px solid rgba(0,0,0,0.6);
+}
+.tax-raid-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #eb4b4b, #ff9c1a, #ffd700);
+  transition: width 0.6s ease;
+  box-shadow: 0 0 12px rgba(255,150,80,0.5);
+}
+.tax-raid-donate-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px; margin-bottom: 10px;
+}
+.tax-raid-mini {
+  padding: 8px;
+  background: rgba(235,75,75,0.18);
+  border: 1px solid rgba(235,75,75,0.4);
+  color: #ff8866;
+  border-radius: 8px;
+  font-weight: 700; font-size: 12px;
+  cursor: pointer; transition: all 0.15s;
+}
+.tax-raid-mini:hover { background: rgba(235,75,75,0.28); }
+.tax-raid-mini:active { transform: scale(0.97); }
+.tax-raid-donors {
+  display: flex; flex-direction: column; gap: 3px;
+  background: rgba(0,0,0,0.25);
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+.tax-raid-donor {
+  display: flex; justify-content: space-between;
+  font-size: 11px; color: rgba(255,255,255,0.7);
+}
+.tax-raid-donor b { color: #ff8866; font-weight: 700; }
+
+.tax-raid-success-icon {
+  font-size: 48px; line-height: 1;
+  filter: drop-shadow(0 0 20px rgba(92,193,92,0.6));
+  margin-bottom: 6px;
+  animation: raidWin 1s ease-out;
+}
+@keyframes raidWin {
+  from { transform: scale(0.3); opacity: 0; }
+  to   { transform: scale(1);   opacity: 1; }
+}
+.tax-raid-success-title {
+  font-size: 18px; font-weight: 800;
+  color: #5cc15c;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin-bottom: 4px;
+}
+.tax-raid-success-sub {
+  font-size: 12px; color: rgba(255,255,255,0.75);
+}
+.tax-raid-success-sub b {
+  color: #ffd700; font-variant-numeric: tabular-nums;
+  font-size: 14px; font-weight: 800;
+}
+
 /* DUE CARD */
 .tax-due-card {
   background: var(--bg-card, #181a23);
@@ -232,6 +377,11 @@
 .tax-due-clean {
   text-align: center; color: #5cc15c; font-weight: 600; font-size: 13px;
   padding: 4px 0;
+}
+.tax-due-note {
+  font-size: 10px; color: var(--text-dim, #888);
+  line-height: 1.5; text-align: center;
+  margin-top: 6px;
 }
 .tax-due-pending {
   text-align: center; color: var(--text-dim, #888);

@@ -58,3 +58,37 @@ create table if not exists tax_users (
 
 -- Fast lookup of indebted players (for warning banners + nightly cron).
 create index if not exists idx_tax_debt_active on tax_users (tax_debt) where tax_debt > 0;
+
+
+-- ============================================================
+-- TAX RAIDS — coop event where players sacrifice 500 skins to
+-- shut down the tax office for 2 hours (server-wide).
+-- ============================================================
+
+create table if not exists tax_raids (
+    id              bigserial primary key,
+    initiator_id    bigint references users(tg_id) on delete set null,
+    -- 'preparing' (10-min collection window)
+    -- 'success'   (raid succeeded; tax office is offline until raid_until)
+    -- 'failed'    (deadline passed without enough skins; no effect)
+    -- 'expired'   (success window closed — tax office is back online)
+    status          text not null default 'preparing',
+    started_at      timestamptz not null default now(),
+    deadline        timestamptz not null,           -- preparing-phase ends here
+    succeeded_at    timestamptz,
+    raid_until      timestamptz,                    -- if success: tax disabled until this
+    skins_donated   int  not null default 0,
+    skins_required  int  not null default 500
+);
+create index if not exists idx_tax_raids_active on tax_raids (status)
+    where status in ('preparing', 'success');
+create index if not exists idx_tax_raids_started on tax_raids (started_at desc);
+
+
+create table if not exists tax_raid_donations (
+    raid_id     bigint not null references tax_raids(id) on delete cascade,
+    user_id     bigint not null references users(tg_id) on delete cascade,
+    skins       int    not null default 0,
+    donated_at  timestamptz not null default now(),
+    primary key (raid_id, user_id)
+);

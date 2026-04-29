@@ -44,33 +44,33 @@ log = logging.getLogger(__name__)
 ENTITIES: list[dict] = [
     {
         "level": 0, "key": "individual", "name": "Физ. лицо",     "icon": "👤",
-        "rate": 0.40, "reg_fee": 0,
-        "desc": "Стандартный режим. Налог 40% — ощутимо. Зарегайся куда повыше при первой возможности.",
+        "rate": 0.30, "reg_fee": 0,
+        "desc": "Стандартный режим. Налог 30%. Зарегайся куда повыше при первой возможности.",
     },
     {
         "level": 1, "key": "selfemployed", "name": "Самозанятый", "icon": "🧑‍💻",
-        "rate": 0.30, "reg_fee": 50_000_000_000,
-        "desc": "Простой режим для одиночных мастеров. −10% к ставке.",
+        "rate": 0.25, "reg_fee": 50_000_000_000,
+        "desc": "Простой режим для одиночных мастеров. Ставка 25%.",
     },
     {
         "level": 2, "key": "ip", "name": "ИП",                    "icon": "💼",
-        "rate": 0.22, "reg_fee": 100_000_000_000,
-        "desc": "Индивидуальный предприниматель. Ставка ниже + перк «Льготы малого бизнеса» даёт ещё −2%.",
+        "rate": 0.16, "reg_fee": 100_000_000_000,
+        "desc": "Индивидуальный предприниматель. Ставка 16% + перк «Льготы малого бизнеса» даёт ещё −2%.",
     },
     {
         "level": 3, "key": "ooo", "name": "ООО",                  "icon": "🏢",
-        "rate": 0.16, "reg_fee": 250_000_000_000,
-        "desc": "Юридическое лицо. Ставка 16% + работают льготы малого бизнеса.",
+        "rate": 0.12, "reg_fee": 250_000_000_000,
+        "desc": "Юридическое лицо. Ставка 12% + работают льготы малого бизнеса.",
     },
     {
         "level": 4, "key": "holding", "name": "Холдинг",          "icon": "🏛",
-        "rate": 0.12, "reg_fee": 500_000_000_000,
-        "desc": "Сложная корпоративная структура. Включается перк «Оффшорные связи» (доп −3%).",
+        "rate": 0.06, "reg_fee": 500_000_000_000,
+        "desc": "Сложная корпоративная структура. 6%. Включается перк «Оффшорные связи» (доп −3%).",
     },
     {
         "level": 5, "key": "offshore", "name": "Офшор",           "icon": "🌴",
-        "rate": 0.08, "reg_fee": 1_000_000_000_000,
-        "desc": "Кипр, BVI, Каймановы. Минимальная ставка — 8%. Финальный шаг.",
+        "rate": 0.04, "reg_fee": 1_000_000_000_000,
+        "desc": "Кипр, BVI, Каймановы. Минимальная ставка — 4%. Финальный шаг.",
     },
 ]
 ENTITY_BY_LEVEL = {e["level"]: e for e in ENTITIES}
@@ -155,6 +155,14 @@ HONEST_CITIZEN_DAYS = 30
 # tax drag in their first sessions.
 NEWBIE_EXEMPTION_THRESHOLD = 1_000_000_000  # 1B lifetime earnings
 
+# RAIDS — coop event to shut down the tax office.
+RAID_PREP_SECONDS         = 10 * 60         # 10 minutes preparation window
+RAID_SUCCESS_DURATION_SEC = 2 * 60 * 60     # 2 hours of zero-tax on success
+RAID_REQUIRED_SKINS       = 500             # total donations needed
+RAID_COOLDOWN_HOURS       = 24              # max 1 raid per 24h server-wide
+RAID_MIN_DONATION         = 1
+RAID_MAX_DONATION_PER_TX  = 100             # safety per single donate call
+
 
 # ============================================================
 # DB / SCHEMA
@@ -168,6 +176,17 @@ async def ensure_schema() -> None:
     sql = sql_path.read_text(encoding="utf-8")
     async with pool().acquire() as conn:
         await conn.execute(sql)
+        # Wipe legacy tax_debt — debt system was removed in favor of "balance
+        # can go negative" simplification. Idempotent — running twice is a
+        # no-op since all rows are already 0.
+        wiped = await conn.fetchval(
+            "select count(*) from tax_users where tax_debt > 0"
+        )
+        if wiped and int(wiped) > 0:
+            log.info("tax: clearing legacy tax_debt for %d players", wiped)
+            await conn.execute(
+                "update tax_users set tax_debt = 0, debt_since = NULL where tax_debt > 0"
+            )
     log.info("tax schema ensured")
 
 
@@ -374,19 +393,28 @@ async def get_config() -> dict:
 
 async def accrue_tax(tg_id: int, amount: int, kind: str) -> None:
     """Add `amount` to player's pending_taxable_income. Called from snake/jackpot/etc.
-    Defers all rate computation to the hourly tick — keeps source-side code simple."""
+    Defers all rate computation to the hourly tick — keeps source-side code simple.
+    Skipped entirely when a successful raid is currently shutting down the office."""
     if amount <= 0:
         return
     try:
+        # Single combined query: only insert/update if the tax office is open.
+        # Cheaper than a separate is_tax_office_open() round-trip.
         await ensure_user(tg_id)
         async with pool().acquire() as conn:
             await conn.execute(
-                "update tax_users set pending_taxable_income = pending_taxable_income + $2 "
-                "where tg_id = $1",
+                """
+                update tax_users
+                set pending_taxable_income = pending_taxable_income + $2
+                where tg_id = $1
+                  and not exists (
+                    select 1 from tax_raids
+                    where status = 'success' and raid_until > now()
+                  )
+                """,
                 tg_id, int(amount),
             )
     except Exception as e:
-        # Never block the earning path — tax accounting can recover later.
         log.warning("tax accrue failed for tg=%s amount=%s kind=%s: %s",
                     tg_id, amount, kind, e)
 
@@ -511,12 +539,14 @@ async def hourly_tick_all() -> None:
 # ============================================================
 
 async def midnight_collect_user(tg_id: int) -> dict:
-    """Force-deduct pending_tax_due from balance. Spillover → tax_debt.
-    Also compounds existing tax_debt by daily penalty rate. Updates streak.
-    Returns a report for diagnostics/notifications."""
+    """Forced-collection at midnight UTC. Simple: deduct pending_tax_due from
+    balance. Balance is allowed to go negative — no debt tracking, no penalty,
+    no blocking. Player just has to climb back to 0+ via earnings to play
+    paid actions again (game bets check balance >= cost, so negative balance
+    blocks paid bets naturally)."""
     now = datetime.now(timezone.utc)
     today = now.date()
-    report = {"collected": 0, "spilled_to_debt": 0, "debt_grew_by": 0,
+    report = {"collected": 0, "new_balance": None,
               "honest_citizen_unlocked": False, "punctual_cashback": 0}
 
     async with pool().acquire() as conn:
@@ -529,70 +559,43 @@ async def midnight_collect_user(tg_id: int) -> dict:
 
             upgrades = _parse_jsonb(row["upgrades"]) or {}
             pending = int(row["pending_tax_due"])
-            existing_debt = int(row["tax_debt"])
 
-            # 1. Compound existing debt by daily penalty (Адвокат softens it).
-            penalty_rate = _debt_penalty_rate(upgrades)
-            if existing_debt > 0:
-                grew = int(existing_debt * penalty_rate)
-                existing_debt += grew
-                report["debt_grew_by"] = grew
-
-            # 2. Try to drain pending from balance.
+            # Deduct unconditionally — let balance go negative if needed.
             if pending > 0:
                 bal_row = await conn.fetchrow(
-                    "select balance from economy_users where tg_id = $1 for update", tg_id,
+                    "update economy_users set balance = balance - $2, "
+                    "total_spent = total_spent + $2 "
+                    "where tg_id = $1 returning balance",
+                    tg_id, pending,
                 )
-                bal = int(bal_row["balance"]) if bal_row else 0
-                pay = min(bal, pending)
-                spill = pending - pay
-                if pay > 0:
+                new_bal = int(bal_row["balance"]) if bal_row else 0
+                report["collected"] = pending
+                report["new_balance"] = new_bal
+                try:
                     await conn.execute(
-                        "update economy_users set balance = balance - $2, "
-                        "total_spent = total_spent + $2 where tg_id = $1",
-                        tg_id, pay,
+                        "insert into economy_transactions (user_id, amount, kind, reason, balance_after) "
+                        "values ($1, $2, 'tax_set', 'midnight_set_collection', $3)",
+                        tg_id, -pending, new_bal,
                     )
-                    new_bal = bal - pay
-                    try:
-                        await conn.execute(
-                            "insert into economy_transactions (user_id, amount, kind, reason, balance_after) "
-                            "values ($1, $2, 'tax_set', 'midnight_set_collection', $3)",
-                            tg_id, -pay, new_bal,
-                        )
-                    except Exception:
-                        pass
-                    report["collected"] = pay
-                if spill > 0:
-                    existing_debt += spill
-                    report["spilled_to_debt"] = spill
+                except Exception:
+                    pass
 
-            # 3. Streak update — clean day = no debt at end of day.
-            had_debt_today = (existing_debt > 0)
+            # Streak: every day is a "clean day" now (no debt concept). Just
+            # advance counter once per UTC day.
             new_streak = int(row["streak_punctual_days"])
-            if not had_debt_today:
-                # Only bump if last_streak_check is yesterday (or null) — guard against
-                # multi-runs on the same day.
-                last_check = row["last_streak_check"]
-                if last_check is None or last_check < today:
-                    new_streak += 1
-            else:
-                new_streak = 0
+            last_check = row["last_streak_check"]
+            if last_check is None or last_check < today:
+                new_streak += 1
 
-            # 4. Honest Citizen unlock
             new_honest = bool(row["honest_citizen"])
             if new_streak >= HONEST_CITIZEN_DAYS and not new_honest:
                 new_honest = True
                 report["honest_citizen_unlocked"] = True
 
-            # 5. Кэшбэк за пунктуальность — 7 days clean → 10% of week's taxes
-            # (one-shot trigger every 7 clean days while perk owned).
+            # Кэшбэк за пунктуальность — every 7 clean days, perk owners get a small bonus.
             cashback_lvl = int(upgrades.get("punctual_cashback", 0))
             if cashback_lvl >= 1 and new_streak > 0 and new_streak % 7 == 0:
-                # 10% of taxes paid in the last 7 days. We approximate by 10% of
-                # the most recent week's `total_taxes_paid` delta — but we don't
-                # store weekly history, so use 10% of pending+collected today as
-                # a proxy approximation (small but real reward).
-                cb = int(report["collected"] * 0.7)  # rough heuristic
+                cb = int(report["collected"] * 0.7)
                 if cb > 0:
                     await conn.execute(
                         "update economy_users set balance = balance + $2 where tg_id = $1",
@@ -600,28 +603,20 @@ async def midnight_collect_user(tg_id: int) -> dict:
                     )
                     report["punctual_cashback"] = cb
 
-            # 6. Persist
-            debt_since = row["debt_since"]
-            if existing_debt > 0 and debt_since is None:
-                debt_since = now
-            elif existing_debt <= 0:
-                debt_since = None
-
             await conn.execute(
                 """
                 update tax_users set
                   pending_tax_due = 0,
-                  tax_debt = $2,
-                  debt_since = $3,
-                  total_taxes_paid = total_taxes_paid + $4,
-                  last_collected_at = $5,
-                  streak_punctual_days = $6,
-                  last_streak_check = $7,
-                  honest_citizen = $8
+                  tax_debt = 0,
+                  debt_since = NULL,
+                  total_taxes_paid = total_taxes_paid + $2,
+                  last_collected_at = $3,
+                  streak_punctual_days = $4,
+                  last_streak_check = $5,
+                  honest_citizen = $6
                 where tg_id = $1
                 """,
-                tg_id, existing_debt, debt_since, report["collected"],
-                now, new_streak, today, new_honest,
+                tg_id, report["collected"], now, new_streak, today, new_honest,
             )
     return report
 
@@ -719,14 +714,12 @@ async def register_entity(tg_id: int, target_level: int) -> dict:
     async with pool().acquire() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
-                "select entity_level, tax_debt from tax_users where tg_id = $1 for update",
+                "select entity_level from tax_users where tg_id = $1 for update",
                 tg_id,
             )
             if row is None:
                 return {"ok": False, "error": "Нет состояния"}
             cur_level = int(row["entity_level"])
-            if int(row["tax_debt"]) > 0:
-                return {"ok": False, "error": "Сначала погаси налоговый долг"}
             if target_level <= cur_level:
                 return {"ok": False, "error": "Уже зарегистрирован на этом или выше уровне"}
 
@@ -768,13 +761,11 @@ async def buy_upgrade(tg_id: int, key: str) -> dict:
     async with pool().acquire() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
-                "select upgrades, tax_debt, paradise_until, last_paradise_at "
+                "select upgrades, paradise_until, last_paradise_at "
                 "from tax_users where tg_id = $1 for update", tg_id,
             )
             if row is None:
                 return {"ok": False, "error": "Нет состояния"}
-            if int(row["tax_debt"]) > 0:
-                return {"ok": False, "error": "Сначала погаси долг"}
             ups = _parse_jsonb(row["upgrades"]) or {}
             cur = int(ups.get(key, 0))
             if cur >= max_lvl:
@@ -908,6 +899,255 @@ async def has_debt(tg_id: int) -> bool:
 
 
 # ============================================================
+# RAID ON THE TAX OFFICE (coop event)
+# ============================================================
+# A player initiates a raid → 10-min prep window → other players donate skins
+# from inventory → if 500+ skins donated by deadline, raid succeeds → tax
+# office is offline for 2 hours server-wide (no `accrue_tax` calls take effect).
+# 1 raid per 24h cap. Donated skins are CONSUMED (always, win or lose).
+
+async def is_tax_office_open() -> bool:
+    """True if no successful raid is currently shutting down the office."""
+    async with pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "select raid_until from tax_raids "
+            "where status = 'success' and raid_until > now() "
+            "order by raid_until desc limit 1"
+        )
+    return row is None
+
+
+async def get_active_raid() -> dict | None:
+    """Return the current preparing raid, OR an active successful raid (within
+    its 2h window). Used by UI to show raid banner/progress."""
+    async with pool().acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            select * from tax_raids
+            where status = 'preparing'
+               or (status = 'success' and raid_until > now())
+            order by id desc limit 1
+            """
+        )
+        if row is None:
+            return None
+        # Pull donations for display
+        donations = await conn.fetch(
+            """
+            select d.user_id, d.skins, d.donated_at,
+                   u.username, u.first_name, u.photo_url
+            from tax_raid_donations d
+            left join users u on u.tg_id = d.user_id
+            where d.raid_id = $1
+            order by d.skins desc, d.donated_at asc
+            limit 50
+            """, int(row["id"]),
+        )
+    return {
+        "id":             int(row["id"]),
+        "initiator_id":   int(row["initiator_id"]) if row["initiator_id"] else None,
+        "status":         row["status"],
+        "started_at":     row["started_at"].isoformat() if row["started_at"] else None,
+        "deadline":       row["deadline"].isoformat() if row["deadline"] else None,
+        "succeeded_at":   row["succeeded_at"].isoformat() if row["succeeded_at"] else None,
+        "raid_until":     row["raid_until"].isoformat() if row["raid_until"] else None,
+        "skins_donated":  int(row["skins_donated"]),
+        "skins_required": int(row["skins_required"]),
+        "donations": [
+            {
+                "user_id":    int(d["user_id"]),
+                "skins":      int(d["skins"]),
+                "username":   d["username"],
+                "first_name": d["first_name"],
+                "photo_url":  d["photo_url"],
+                "donated_at": d["donated_at"].isoformat() if d["donated_at"] else None,
+            } for d in donations
+        ],
+    }
+
+
+async def start_raid(tg_id: int) -> dict:
+    """Initiate a raid. Server-wide cooldown of RAID_COOLDOWN_HOURS since the
+    last raid started, regardless of outcome. Only one raid can be active."""
+    now = datetime.now(timezone.utc)
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            # Block if any raid is preparing OR successful-and-active
+            active = await conn.fetchrow(
+                "select id, status from tax_raids "
+                "where status = 'preparing' or "
+                "      (status = 'success' and raid_until > now()) "
+                "order by id desc limit 1"
+            )
+            if active is not None:
+                return {"ok": False, "error": "Рейд уже идёт"}
+
+            # Cooldown — 24h since the last raid's started_at
+            last = await conn.fetchrow(
+                "select started_at from tax_raids order by id desc limit 1"
+            )
+            if last is not None and last["started_at"] is not None:
+                elapsed = (now - last["started_at"]).total_seconds()
+                if elapsed < RAID_COOLDOWN_HOURS * 3600:
+                    next_at = last["started_at"] + timedelta(hours=RAID_COOLDOWN_HOURS)
+                    return {
+                        "ok": False,
+                        "error": f"Рейд можно созвать раз в {RAID_COOLDOWN_HOURS}ч",
+                        "next_at": next_at.isoformat(),
+                    }
+
+            deadline = now + timedelta(seconds=RAID_PREP_SECONDS)
+            row = await conn.fetchrow(
+                """
+                insert into tax_raids
+                  (initiator_id, status, started_at, deadline, skins_required)
+                values ($1, 'preparing', $2, $3, $4)
+                returning id
+                """,
+                tg_id, now, deadline, RAID_REQUIRED_SKINS,
+            )
+    log.info("tax raid #%s started by tg=%s, deadline=%s", row["id"], tg_id, deadline)
+    return {"ok": True, "raid_id": int(row["id"]), "deadline": deadline.isoformat()}
+
+
+async def donate_skins_to_raid(tg_id: int, raid_id: int, count: int) -> dict:
+    """Take `count` skins from player's inventory and donate to the active
+    preparing raid. Skins are CONSUMED — deleted from inventory regardless
+    of raid outcome (they're "ammunition" for the attack)."""
+    count = max(RAID_MIN_DONATION, min(int(count or 0), RAID_MAX_DONATION_PER_TX))
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            raid = await conn.fetchrow(
+                "select * from tax_raids where id = $1 for update", raid_id,
+            )
+            if raid is None:
+                return {"ok": False, "error": "Рейд не найден"}
+            if raid["status"] != "preparing":
+                return {"ok": False, "error": "Рейд уже не принимает пожертвования"}
+            now = datetime.now(timezone.utc)
+            if raid["deadline"] is not None and raid["deadline"] <= now:
+                return {"ok": False, "error": "Время сборов истекло"}
+
+            already = int(raid["skins_donated"])
+            need = int(raid["skins_required"]) - already
+            if need <= 0:
+                return {"ok": False, "error": "Уже собрано достаточно скинов"}
+            count = min(count, need)
+
+            # Find `count` skins in inventory (any non-locked items)
+            ids = await conn.fetch(
+                """
+                select id from economy_inventory
+                where user_id = $1
+                  and (jackpot_round_id is null)
+                limit $2
+                for update
+                """, tg_id, count,
+            )
+            if len(ids) < count:
+                return {
+                    "ok": False,
+                    "error": f"Не хватает скинов в инвентаре ({len(ids)}/{count})",
+                    "have": len(ids),
+                }
+            skin_ids = [int(r["id"]) for r in ids]
+            await conn.execute(
+                "delete from economy_inventory where id = any($1::bigint[])", skin_ids,
+            )
+
+            # Update raid + donations
+            new_total = already + count
+            await conn.execute(
+                "update tax_raids set skins_donated = $2 where id = $1",
+                raid_id, new_total,
+            )
+            await conn.execute(
+                """
+                insert into tax_raid_donations (raid_id, user_id, skins, donated_at)
+                values ($1, $2, $3, now())
+                on conflict (raid_id, user_id) do update
+                set skins = tax_raid_donations.skins + excluded.skins,
+                    donated_at = now()
+                """,
+                raid_id, tg_id, count,
+            )
+
+            # Auto-finalize if quota reached
+            if new_total >= int(raid["skins_required"]):
+                await _finalize_raid_locked(conn, raid_id)
+
+    return {"ok": True, "donated": count, "raid_total": new_total,
+            "required": int(raid["skins_required"])}
+
+
+async def _finalize_raid_locked(conn, raid_id: int) -> dict:
+    """Resolve a raid (called inside a held transaction). Marks success or
+    failed based on whether quota was hit. On success, sets raid_until to
+    now + 2h."""
+    now = datetime.now(timezone.utc)
+    raid = await conn.fetchrow(
+        "select status, skins_donated, skins_required from tax_raids "
+        "where id = $1 for update", raid_id,
+    )
+    if raid is None or raid["status"] != "preparing":
+        return {"ok": False, "already_done": True}
+    if int(raid["skins_donated"]) >= int(raid["skins_required"]):
+        raid_until = now + timedelta(seconds=RAID_SUCCESS_DURATION_SEC)
+        await conn.execute(
+            "update tax_raids set status = 'success', succeeded_at = $2, raid_until = $3 "
+            "where id = $1", raid_id, now, raid_until,
+        )
+        log.info("tax raid #%s SUCCESS — tax office offline until %s", raid_id, raid_until)
+        return {"ok": True, "outcome": "success", "raid_until": raid_until.isoformat()}
+    else:
+        await conn.execute(
+            "update tax_raids set status = 'failed' where id = $1", raid_id,
+        )
+        log.info("tax raid #%s FAILED — only %s/%s skins", raid_id,
+                 raid["skins_donated"], raid["skins_required"])
+        return {"ok": True, "outcome": "failed",
+                "donated": int(raid["skins_donated"]),
+                "required": int(raid["skins_required"])}
+
+
+async def finalize_expired_raids() -> None:
+    """Background sweeper — finds preparing raids past deadline and resolves
+    them. Also flips successful raids whose 2h window expired to 'expired'
+    (cosmetic, doesn't affect tax behavior since we already check raid_until)."""
+    now = datetime.now(timezone.utc)
+    async with pool().acquire() as conn:
+        # Resolve expired prep raids
+        expired = await conn.fetch(
+            "select id from tax_raids where status = 'preparing' and deadline <= $1",
+            now,
+        )
+        for r in expired:
+            try:
+                async with conn.transaction():
+                    await _finalize_raid_locked(conn, int(r["id"]))
+            except Exception:
+                log.exception("finalize_raid failed for %s", r["id"])
+        # Mark old successes as expired (housekeeping)
+        await conn.execute(
+            "update tax_raids set status = 'expired' "
+            "where status = 'success' and raid_until <= $1",
+            now,
+        )
+
+
+# ============================================================
+# DEBT GUARD — used by other modules to block actions while indebted
+# ============================================================
+
+async def has_debt(tg_id: int) -> bool:
+    async with pool().acquire() as conn:
+        v = await conn.fetchval(
+            "select tax_debt from tax_users where tg_id = $1", tg_id,
+        )
+    return v is not None and int(v) > 0
+
+
+# ============================================================
 # BACKGROUND LOOPS
 # ============================================================
 
@@ -922,6 +1162,18 @@ async def hourly_loop() -> None:
             await hourly_tick_all()
         except Exception:
             log.exception("tax hourly_loop tick failed")
+
+
+async def raid_loop() -> None:
+    """Periodic sweeper for raid lifecycle — resolves expired prep windows
+    and flips done success windows to 'expired'. Runs every 20 seconds."""
+    import asyncio
+    while True:
+        try:
+            await asyncio.sleep(20)
+            await finalize_expired_raids()
+        except Exception:
+            log.exception("tax raid_loop tick failed")
 
 
 async def midnight_loop() -> None:
