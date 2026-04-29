@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="./snake.css?v=20260428l" />
   <link rel="stylesheet" href="./jackpot.css?v=20260428c" />
   <link rel="stylesheet" href="./tax.css?v=20260429e" />
+  <link rel="stylesheet" href="./flappy.css?v=20260429a" />
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
@@ -171,6 +172,11 @@
       <section class="view" data-view="games">
         <h2>🎰 Игры</h2>
         <div class="game-grid">
+          <div class="game-card flappy-card" data-game="flappy" style="background:linear-gradient(135deg,#5aa9ff 0%,#1a3a6e 100%)">
+            <div class="game-icon">🐦</div>
+            <div class="game-name">Взлёт <span class="snake-new-badge" style="background:#ffd700;color:#000">NEW</span></div>
+            <div class="game-desc">Flappy Bird с прокачкой, кейсами и cash-out'ом. Pluma → 🪙 1:1.</div>
+          </div>
           <div class="game-card jackpot-card jackpot-card-new" data-game="jackpot">
             <div class="game-icon">🤑</div>
             <div class="game-name">Jackpot <span class="jackpot-new-badge">NEW</span></div>
@@ -290,6 +296,14 @@
         </div>
       </section>
 
+      <!-- view: flappy bird (Взлёт) -->
+      <section class="view" data-view="flappy">
+        <h2>🐦 Взлёт</h2>
+        <div id="flappy-app">
+          <div class="loader">Загрузка...</div>
+        </div>
+      </section>
+
       <!-- view: leaderboard -->
       <section class="view" data-view="leaderboard">
         <h2>💎 Лидерборд</h2>
@@ -371,5 +385,6 @@
   <script src="./snake.js?v=20260428u"></script>
   <script src="./jackpot.js?v=20260428f"></script>
   <script src="./tax.js?v=20260429e"></script>
+  <script src="./flappy.js?v=20260429a"></script>
 </body>
 </html>

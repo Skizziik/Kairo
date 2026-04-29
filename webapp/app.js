@@ -912,6 +912,10 @@ function openGameScreen(gameKey) {
     if (typeof window.jackpotEnter === 'function') window.jackpotEnter();
     return;
   }
+  if (gameKey === 'flappy') {
+    showView('flappy');
+    return;
+  }
   const grid = document.querySelector('.game-grid');
   if (grid) grid.style.display = 'none';
   const area = document.getElementById('game-play-area');
@@ -1000,6 +1004,8 @@ function renderGamePlay(game, target) {
     // Snake has its own full view + sub-tabs; switch to dedicated section
     showView('snake');
     if (typeof window.snakeEnter === 'function') window.snakeEnter();
+  } else if (game === 'flappy') {
+    showView('flappy');
   }
 }
 

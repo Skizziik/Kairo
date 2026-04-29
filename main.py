@@ -20,6 +20,7 @@ from app.economy import coinflip_pvp as _cfpvp
 from app.economy import jackpot as _jackpot
 from app.economy import snake as _snake
 from app.economy import tax as _tax
+from app.economy import flappy as _flappy
 from app.economy import tiers as _tiers
 from app.economy import gear as _gear
 from app.economy import mines as _mines
@@ -86,6 +87,10 @@ async def lifespan(_: FastAPI):
         await _tax.ensure_schema()
     except Exception as e:
         log.warning("tax schema migration failed: %s", e)
+    try:
+        await _flappy.ensure_schema()
+    except Exception as e:
+        log.warning("flappy schema migration failed: %s", e)
     # Trim oversized case pools (idempotent — only changes if current count > cap)
     try:
         await _case_rebalance.rebalance_all()

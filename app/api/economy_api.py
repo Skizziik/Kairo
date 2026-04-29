@@ -1356,3 +1356,101 @@ async def api_tax_raid_start(user: dict = Depends(require_user)) -> dict:
 @router.post("/tax/raid/donate")
 async def api_tax_raid_donate(req: TaxRaidDonateReq, user: dict = Depends(require_user)) -> dict:
     return await _tax.donate_skins_to_raid(int(user["id"]), int(req.raid_id), int(req.count))
+
+
+# ================================================================
+# 🐦 FLAPPY BIRD — «Взлёт»
+# ================================================================
+from app.economy import flappy as _flappy
+
+
+class FlappyRunReq(BaseModel):
+    distance:      int = Field(..., ge=0, le=100000)
+    pluma_earned:  int = Field(..., ge=0)
+    coin_pickups:  dict[str, int] = Field(default_factory=dict)
+    duration_sec:  int = Field(..., ge=0, le=1800)
+    map_id:        str
+    bird_id:       str
+    best_combo:    int = Field(default=0, ge=0)
+    cashed_out:    bool = False
+    cashout_mult:  float = Field(default=1.0, ge=1.0, le=10.0)
+    died_to:       str = "pipe"
+
+
+class FlappyKeyReq(BaseModel):
+    key: str
+
+
+class FlappyExchangeReq(BaseModel):
+    amount: int = Field(..., ge=1)
+
+
+@router.get("/flappy/state")
+async def api_flappy_state(user: dict = Depends(require_user)) -> dict:
+    return await _flappy.get_state(int(user["id"]))
+
+
+@router.get("/flappy/config")
+async def api_flappy_config(user: dict = Depends(require_user)) -> dict:
+    _ = user
+    return await _flappy.get_config()
+
+
+@router.post("/flappy/run")
+async def api_flappy_run(req: FlappyRunReq, user: dict = Depends(require_user)) -> dict:
+    return await _flappy.record_run(
+        int(user["id"]),
+        distance=req.distance,
+        pluma_earned=req.pluma_earned,
+        coin_pickups=req.coin_pickups,
+        duration_sec=req.duration_sec,
+        map_id=req.map_id,
+        bird_id=req.bird_id,
+        best_combo=req.best_combo,
+        cashed_out=req.cashed_out,
+        cashout_mult=req.cashout_mult,
+        died_to=req.died_to,
+    )
+
+
+@router.post("/flappy/exchange")
+async def api_flappy_exchange(req: FlappyExchangeReq, user: dict = Depends(require_user)) -> dict:
+    return await _flappy.exchange_pluma(int(user["id"]), int(req.amount))
+
+
+@router.post("/flappy/bird/buy")
+async def api_flappy_bird_buy(req: FlappyKeyReq, user: dict = Depends(require_user)) -> dict:
+    return await _flappy.buy_bird(int(user["id"]), req.key)
+
+
+@router.post("/flappy/bird/equip")
+async def api_flappy_bird_equip(req: FlappyKeyReq, user: dict = Depends(require_user)) -> dict:
+    return await _flappy.equip_bird(int(user["id"]), req.key)
+
+
+@router.post("/flappy/map/unlock")
+async def api_flappy_map_unlock(req: FlappyKeyReq, user: dict = Depends(require_user)) -> dict:
+    return await _flappy.unlock_map(int(user["id"]), req.key)
+
+
+@router.post("/flappy/map/select")
+async def api_flappy_map_select(req: FlappyKeyReq, user: dict = Depends(require_user)) -> dict:
+    return await _flappy.select_map(int(user["id"]), req.key)
+
+
+@router.post("/flappy/upgrade")
+async def api_flappy_upgrade(req: FlappyKeyReq, user: dict = Depends(require_user)) -> dict:
+    return await _flappy.buy_upgrade(int(user["id"]), req.key)
+
+
+@router.post("/flappy/case/buy")
+async def api_flappy_case_buy(req: FlappyKeyReq, user: dict = Depends(require_user)) -> dict:
+    return await _flappy.buy_case(int(user["id"]), req.key)
+
+
+@router.get("/flappy/leaderboard")
+async def api_flappy_leaderboard(period: str = "all", user: dict = Depends(require_user)) -> list[dict]:
+    _ = user
+    if period not in ("all", "week"):
+        period = "all"
+    return await _flappy.leaderboard(period=period, limit=20)
