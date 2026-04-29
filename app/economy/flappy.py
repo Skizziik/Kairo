@@ -611,14 +611,17 @@ async def record_run(
                     tg_id, pluma_earned, max_allowed)
         pluma_earned = max_allowed
 
-    # Pull state to apply server-side multipliers
+    # Pull full state — we need xp, best_*, etc. for the UPDATE below.
+    # Earlier this only fetched level/upgrades/artifacts/last_run_at and the
+    # later code KeyError'd on row["best_run_pluma"], crashing the endpoint.
     async with pool().acquire() as conn:
         row = await conn.fetchrow(
-            "select level, upgrades, artifacts, last_run_at from flappy_users "
-            "where tg_id = $1 for update", tg_id,
+            "select * from flappy_users where tg_id = $1", tg_id,
         )
-    upgrades = _parse_jsonb((row or {}).get("upgrades")) or {}
-    artifacts = _parse_jsonb((row or {}).get("artifacts")) or []
+    if row is None:
+        return {"ok": False, "error": "Нет состояния"}
+    upgrades = _parse_jsonb(row["upgrades"]) or {}
+    artifacts = _parse_jsonb(row["artifacts"]) or []
     art_eff = aggregate_artifact_effects(artifacts)
 
     # Run-wide multipliers (server-controlled — trusted)
@@ -635,7 +638,7 @@ async def record_run(
 
     # Daily first-run bonus
     today = datetime.now(timezone.utc).date()
-    last_run_at = (row or {}).get("last_run_at")
+    last_run_at = row["last_run_at"]
     is_first_today = (last_run_at is None) or (last_run_at.date() < today)
     if is_first_today:
         first_lvl = int(upgrades.get("daily_first_run", 0))
@@ -644,7 +647,7 @@ async def record_run(
 
     # Crown artifact — ×1.05^level total
     if art_eff["crown_level_mult"]:
-        cur_lvl_now = int((row or {}).get("level", 1))
+        cur_lvl_now = int(row["level"] or 1)
         pluma = int(pluma * (1.05 ** cur_lvl_now))
 
     # Cash-out multiplier (player chose to lock in safely)
@@ -657,13 +660,13 @@ async def record_run(
     if xp_lvl > 0:
         xp = int(xp * (1.0 + xp_lvl * 0.01))
 
-    # Persist
+    # Persist — accumulate XP from existing total, max for bests.
+    cur_xp = int(row["xp"] or 0) + xp
+    cur_best_dist      = max(int(row["best_run_distance"] or 0), distance)
+    cur_best_pluma_run = max(int(row["best_run_pluma"] or 0), pluma)
+    cur_best_combo     = max(int(row["best_combo"] or 0), best_combo)
     async with pool().acquire() as conn:
         async with conn.transaction():
-            cur_xp = int((row or {}).get("xp", 0)) + xp
-            cur_best_dist = max(int((row or {}).get("best_run_distance", 0)), distance)
-            cur_best_pluma_run = max(int(row["best_run_pluma"]) if row else 0, pluma)
-            cur_best_combo = max(int(row["best_combo"]) if row else 0, best_combo)
             await conn.execute(
                 """
                 update flappy_users set

@@ -451,7 +451,10 @@
                        + (artifacts.has('starter_shield') ? 1 : 0);
 
     const G = {
-      bird:    { x: W * 0.25, y: H * 0.5, vy: 0, r: 28 },
+      // Bird hitbox is intentionally smaller than the visual sprite (64×56,
+      // visual radius ~32). r=18 gives ~14px of forgiveness so it FEELS fair —
+      // grazing the pipe doesn't kill you. Earlier r=28 felt unfair.
+      bird:    { x: W * 0.25, y: H * 0.5, vy: 0, r: 18 },
       pipes:   [],
       coins:   [],
       powerups:[],
@@ -610,9 +613,10 @@
             updCashout();
             tg?.HapticFeedback?.selectionChanged?.();
           }
-          // Collision
-          if (!rocketActive && circleRect(G.bird, p.x, 0, 60, p.gapY)) hit();
-          if (!rocketActive && circleRect(G.bird, p.x, p.gapY + p.gapH, 60, H - p.gapY - p.gapH)) hit();
+          // Collision (5px inset on pipe rect — visual 60px, hit zone 50px,
+          // matches the bird's smaller hitbox for a forgiving feel)
+          if (!rocketActive && circleRect(G.bird, p.x + 5, 0, 50, p.gapY - 4)) hit();
+          if (!rocketActive && circleRect(G.bird, p.x + 5, p.gapY + p.gapH + 4, 50, H - p.gapY - p.gapH - 4)) hit();
         }
 
         // Coins pickup
@@ -801,12 +805,17 @@
   }
 
   function showResult(overlay, G, res, cashoutMult, deathReason) {
-    const credited = (res && res.ok) ? res.pluma_credited : G.pluma;
+    const ok = res && res.ok;
+    const credited = ok ? res.pluma_credited : 0;
+    const errorMsg = (!ok && res && res.error) ? res.error : '';
     overlay.innerHTML = `
       <div class="flappy-result">
         <div class="flappy-result-head">${deathReason === 'cashout' ? '💰 ЗАФИКСИЛ!' : 'УПАЛ'}</div>
-        <div class="flappy-result-pluma">+${fmt(credited)}</div>
-        <div class="flappy-result-pluma-l">Pluma на счёт</div>
+        ${ok
+          ? `<div class="flappy-result-pluma">+${fmt(credited)}</div>
+             <div class="flappy-result-pluma-l">Pluma на счёт</div>`
+          : `<div class="flappy-result-pluma" style="color:#eb4b4b;font-size:24px">⚠ Не сохранён</div>
+             <div class="flappy-result-pluma-l" style="color:#eb4b4b">${escape(errorMsg)}</div>`}
         <div class="flappy-result-stats">
           <div><b>${G.score}</b> truck'ов</div>
           <div><b>${G.bestCombo}</b> combo</div>

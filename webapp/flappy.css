@@ -2,6 +2,40 @@
    FLAPPY BIRD — «Взлёт» — sky/gold cartoonish aesthetic
    ════════════════════════════════════════════════════════════════ */
 
+/* Game-grid card (matches snake/jackpot pattern: dark bg + glowing accent
+   border). Earlier the inline blue gradient drowned the body text. Now
+   solid dark background with sky-blue accent ring + readable text. */
+.flappy-card {
+  background: linear-gradient(135deg, #0a1830 0%, #1a3a6e 100%);
+  border: 1px solid #5aa9ff;
+  box-shadow: 0 0 20px rgba(90, 169, 255, 0.18);
+  color: #fff;
+}
+.flappy-card .game-icon { font-size: 38px; }
+.flappy-card .game-name { color: #fff; font-weight: 800; }
+.flappy-card .game-desc { color: rgba(255,255,255,0.75); }
+
+.flappy-card-new {
+  animation: flappyCardPulse 2.6s ease-in-out infinite;
+}
+@keyframes flappyCardPulse {
+  0%, 100% { box-shadow: 0 0 20px rgba(90, 169, 255, 0.18); }
+  50%      { box-shadow: 0 0 32px rgba(255, 215, 0, 0.45); }
+}
+.flappy-new-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  background: linear-gradient(135deg, #ffd700, #ffe066);
+  color: #0e0f14;
+  vertical-align: middle;
+  box-shadow: 0 0 10px rgba(255, 215, 0, 0.4);
+}
+
 #flappy-app { padding-bottom: 100px; }
 
 /* Hub layout */
