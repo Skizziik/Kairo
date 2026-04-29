@@ -1449,8 +1449,8 @@ async def api_flappy_case_buy(req: FlappyKeyReq, user: dict = Depends(require_us
 
 
 @router.get("/flappy/leaderboard")
-async def api_flappy_leaderboard(period: str = "all", user: dict = Depends(require_user)) -> list[dict]:
+async def api_flappy_leaderboard(sort_by: str = "lifetime", user: dict = Depends(require_user)) -> list[dict]:
     _ = user
-    if period not in ("all", "week"):
-        period = "all"
-    return await _flappy.leaderboard(period=period, limit=20)
+    if sort_by not in ("lifetime", "best_run"):
+        sort_by = "lifetime"
+    return await _flappy.leaderboard(sort_by=sort_by, limit=20)

@@ -994,32 +994,40 @@ async def buy_case(tg_id: int, key: str) -> dict:
 # LEADERBOARD
 # ============================================================
 
-async def leaderboard(period: str = "all", limit: int = 20) -> list[dict]:
+async def leaderboard(sort_by: str = "lifetime", limit: int = 20) -> list[dict]:
+    """Two boards in one shape:
+    - sort_by='lifetime' → ranked by pluma_lifetime (total farmed)
+    - sort_by='best_run' → ranked by best_run_pluma (single best run)
+    Each row includes both metrics so the client can show either column."""
+    if sort_by not in ("lifetime", "best_run"):
+        sort_by = "lifetime"
+    order_col = "f.pluma_lifetime" if sort_by == "lifetime" else "f.best_run_pluma"
+
     async with pool().acquire() as conn:
-        if period == "week":
-            since = datetime.now(timezone.utc) - timedelta(days=7)
-            rows = await conn.fetch(
-                """
-                select r.user_id, max(r.pluma) as best_pluma, max(r.distance) as best_distance,
-                       count(*) as runs, u.username, u.first_name, u.photo_url
-                from flappy_runs r
-                left join users u on u.tg_id = r.user_id
-                where r.created_at >= $1
-                group by r.user_id, u.username, u.first_name, u.photo_url
-                order by best_pluma desc nulls last
-                limit $2
-                """, since, limit,
-            )
-        else:
-            rows = await conn.fetch(
-                """
-                select f.tg_id, f.pluma_lifetime, f.runs_count, f.level,
-                       f.best_run_distance, f.best_run_pluma,
-                       u.username, u.first_name, u.photo_url
-                from flappy_users f
-                left join users u on u.tg_id = f.tg_id
-                order by f.pluma_lifetime desc
-                limit $1
-                """, limit,
-            )
-    return [dict(r) for r in rows]
+        rows = await conn.fetch(
+            f"""
+            select f.tg_id, f.pluma_lifetime, f.runs_count, f.level,
+                   f.best_run_distance, f.best_run_pluma, f.best_combo,
+                   u.username, u.first_name, u.photo_url
+            from flappy_users f
+            left join users u on u.tg_id = f.tg_id
+            where f.pluma_lifetime > 0 or f.runs_count > 0
+            order by {order_col} desc nulls last
+            limit $1
+            """, limit,
+        )
+    return [
+        {
+            "tg_id":             int(r["tg_id"]),
+            "username":          r["username"],
+            "first_name":        r["first_name"],
+            "photo_url":         r["photo_url"],
+            "level":             int(r["level"] or 1),
+            "pluma_lifetime":    int(r["pluma_lifetime"] or 0),
+            "best_run_pluma":    int(r["best_run_pluma"] or 0),
+            "best_run_distance": int(r["best_run_distance"] or 0),
+            "best_combo":        int(r["best_combo"] or 0),
+            "runs_count":        int(r["runs_count"] or 0),
+        }
+        for r in rows
+    ]

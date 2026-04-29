@@ -88,6 +88,7 @@
           <button class="flappy-tab" data-tab="maps"><span>🗺</span><span>Карты</span></button>
           <button class="flappy-tab" data-tab="cases"><span>🎁</span><span>Кейсы</span></button>
           <button class="flappy-tab" data-tab="exchange"><span>💱</span><span>Обмен</span></button>
+          <button class="flappy-tab" data-tab="lb"><span>🏆</span><span>Топ</span></button>
         </div>
         <div class="flappy-tab-content" id="flappy-tab-content"></div>
       </div>
@@ -109,6 +110,7 @@
     if (tab === 'maps')     paintMaps(c);
     if (tab === 'cases')    paintCases(c);
     if (tab === 'exchange') paintExchange(c);
+    if (tab === 'lb')       paintLeaderboard(c);
   }
 
   // ─────── PLAY ───────
@@ -403,6 +405,81 @@
         await refresh();
       } catch (e) { toast(e.message); }
     });
+  }
+
+  // ─────── LEADERBOARD ───────
+  let lbCache = { best_run: null, lifetime: null };
+  let lbActiveSort = 'best_run';   // default — most exciting metric
+
+  function paintLeaderboard(c) {
+    c.innerHTML = `
+      <div class="flappy-lb-toggle">
+        <button class="flappy-lb-toggle-btn ${lbActiveSort === 'best_run' ? 'active' : ''}" data-sort="best_run">
+          🏆 За один ран
+        </button>
+        <button class="flappy-lb-toggle-btn ${lbActiveSort === 'lifetime' ? 'active' : ''}" data-sort="lifetime">
+          💰 Всего нафармлено
+        </button>
+      </div>
+      <div id="flappy-lb-list" class="flappy-lb-list">
+        <div class="loader">Загрузка...</div>
+      </div>
+    `;
+    c.querySelectorAll('[data-sort]').forEach(b => {
+      b.addEventListener('click', () => {
+        lbActiveSort = b.dataset.sort;
+        paintLeaderboard(c);
+      });
+    });
+    fetchAndRenderLb(lbActiveSort);
+  }
+
+  async function fetchAndRenderLb(sort) {
+    const list = document.getElementById('flappy-lb-list');
+    if (!list) return;
+    try {
+      const rows = await api(`/api/flappy/leaderboard?sort_by=${encodeURIComponent(sort)}`);
+      lbCache[sort] = rows;
+      list.innerHTML = renderLbRows(rows, sort);
+    } catch (e) {
+      list.innerHTML = `<div class="loader">Ошибка: ${escape(e.message)}</div>`;
+    }
+  }
+
+  function renderLbRows(rows, sort) {
+    if (!rows || rows.length === 0) {
+      return '<div class="flappy-lb-empty">Никто ещё не играл — стань первым 🐦</div>';
+    }
+    const myTgId = window.state?.me?.tg_id;
+    return rows.map((r, i) => {
+      const rank = i + 1;
+      const isMe = myTgId && Number(myTgId) === Number(r.tg_id);
+      const name = r.first_name || r.username || `tg${r.tg_id}`;
+      const sub  = r.username ? `@${r.username}` : `lvl ${r.level}`;
+      const main = sort === 'best_run' ? r.best_run_pluma : r.pluma_lifetime;
+      const mainLabel = sort === 'best_run' ? 'best run' : 'всего';
+      const subStat = sort === 'best_run'
+        ? `<span>${fmt(r.best_run_distance)} truck'ов</span>`
+        : `<span>${fmt(r.runs_count)} ранов</span>`;
+      const avatar = r.photo_url
+        ? `<img src="${escape(r.photo_url)}" alt="" />`
+        : '<span>🐦</span>';
+      const rankClass = rank === 1 ? 'top1' : rank === 2 ? 'top2' : rank === 3 ? 'top3' : '';
+      return `
+        <div class="flappy-lb-row ${isMe ? 'me' : ''}">
+          <div class="flappy-lb-rank ${rankClass}">${rank}</div>
+          <div class="flappy-lb-avatar">${avatar}</div>
+          <div class="flappy-lb-info">
+            <div class="flappy-lb-name">${escape(name)} ${isMe ? '<span class="flappy-lb-you">ТЫ</span>' : ''}</div>
+            <div class="flappy-lb-sub">${escape(sub)} · ${subStat}</div>
+          </div>
+          <div class="flappy-lb-pluma">
+            <div class="flappy-lb-pluma-v">${fmtCompact(main)}</div>
+            <div class="flappy-lb-pluma-l">${mainLabel}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
   }
 
   // ═════════════════ GAME LOOP ═════════════════
