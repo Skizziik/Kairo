@@ -68,9 +68,17 @@
     const owedTotal = s.pending_tax_due || 0;
 
     // ── 1. ENTITY HEADER ────────────────────────────────────
+    // Avatar: prefer the player's Telegram photo. Fall back to the entity icon
+    // emoji (e.g. 👤 / 💼 / 🌴) if no photo. Keeps the card personal — every
+    // player sees their own face above their tax form.
+    const photoUrl = window.state?.me?.photo_url || '';
+    const avatarInner = photoUrl
+      ? `<img src="${escape(photoUrl)}" alt="" />`
+      : escape(s.entity_icon || '👤');
+
     const entityHtml = `
       <div class="tax-entity-card">
-        <div class="tax-entity-icon">${escape(s.entity_icon || '👤')}</div>
+        <div class="tax-entity-icon ${photoUrl ? 'has-photo' : ''}">${avatarInner}</div>
         <div class="tax-entity-info">
           <div class="tax-entity-label">Текущая форма</div>
           <div class="tax-entity-name">${escape(s.entity_name || 'Физ. лицо')}</div>
