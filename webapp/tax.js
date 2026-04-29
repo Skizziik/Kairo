@@ -65,7 +65,9 @@
     if (!r || !TS.state || !TS.cfg) return;
     const s = TS.state;
 
-    const owedTotal = s.pending_tax_due || 0;
+    // In the daily-tick world, "owed" is computed on the fly from accrued
+    // income × effective rate. The estimate that will be charged at 00:00 UTC.
+    const owedTotal = s.next_tick_tax_estimate || 0;
 
     // ── 1. ENTITY HEADER ────────────────────────────────────
     // Avatar: prefer the player's Telegram photo. Fall back to the entity icon
@@ -141,11 +143,11 @@
           : '')
       : `<div class="tax-next-tick">
           <div class="tax-next-tick-row">
-            <span>Накоплено дохода</span>
+            <span>Доход за день</span>
             <b>${fmt(s.pending_taxable_income)} 🪙</b>
           </div>
           <div class="tax-next-tick-row tick-tax">
-            <span>Будет налог через ≤1 час (${(s.effective_rate * 100).toFixed(1)}%)</span>
+            <span>Налог в полночь UTC (${(s.effective_rate * 100).toFixed(1)}%)</span>
             <b>+${fmt(nextTickEstimate)} 🪙</b>
           </div>
         </div>`;
@@ -153,11 +155,11 @@
     const dueHtml = owedTotal > 0 ? `
       <div class="tax-due-card">
         <div class="tax-due-row total">
-          <span>Накоплено к списанию в полночь UTC</span>
+          <span>К списанию в полночь UTC</span>
           <b>${fmt(owedTotal)} 🪙</b>
         </div>
         <button class="tax-pay-btn" id="tax-pay-btn">💳 Заплатить сейчас ${fmt(owedTotal)} 🪙</button>
-        <div class="tax-due-note">Если не платить вручную — спишется автоматом в 00:00 UTC. Если на балансе не хватит — баланс уйдёт в минус.</div>
+        <div class="tax-due-note">Спишется автоматом раз в сутки в 00:00 UTC. Если на балансе не хватит — баланс уйдёт в минус.</div>
         ${nextTickBlock}
       </div>
     ` : `
@@ -335,11 +337,11 @@
         <div class="tax-raid-card start">
           <div class="tax-raid-head">
             <div class="tax-raid-title">🎯 Рейд на налоговую</div>
-            <div class="tax-raid-cooldown">1 раз в 24ч</div>
+            <div class="tax-raid-cooldown">1 раз в 48ч</div>
           </div>
           <div class="tax-raid-text">
             Собери рейд — все игроки могут пожертвовать <b>500 скинов</b> за 10 минут подготовки.
-            Если успеете — налоговая <b>не работает 2 часа</b> (никто не платит).
+            Если успеете — налоговая <b>не работает 25 часов</b> (один полный день без налогов для всех).
           </div>
           <button class="tax-raid-btn" id="tax-raid-start">⚔ Собрать рейд</button>
         </div>

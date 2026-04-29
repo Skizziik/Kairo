@@ -1,26 +1,28 @@
-"""Tax Authority (Налоговая) — hourly income tax on every earning source.
+"""Tax Authority (Налоговая) — daily income tax at 00:00 UTC.
 
 Players register a legal entity (Физ.лицо / Самозанятый / ИП / ООО / Холдинг /
-Офшор) which sets their base tax rate. They can stack 8 upgradeable perks that
-lower the rate, raise the income exemption, soften late-payment penalties, and
-unlock special actions (амнистия, налоговый рай).
+Офшор) which sets their base tax rate. They can stack perks that lower the
+rate, raise the daily income exemption, and unlock special actions
+(декларация, налоговый рай, рейд на налоговую).
 
 Earnings flow:
-1. Every credit to balance from a taxable source calls `accrue_tax(tg_id, amt, kind)`.
-2. Hourly background tick converts `pending_taxable_income × effective_rate` into
-   `pending_tax_due` (then resets the income accumulator).
-3. Player pays manually OR midnight SET (Forced collection) drains pending_tax_due.
-4. Insufficient balance at SET → spills into `tax_debt`, which compounds at
-   +10%/day (softened by Адвокат perk). Indebted players are blocked from
-   buying upgrades/cases/artifacts until cleared.
+1. Every credit to balance from a taxable source calls `accrue_tax(tg_id, amt, kind)`
+   which appends to `pending_taxable_income`.
+2. At 00:00 UTC each day, `daily_tick_user(tg_id)` runs:
+   - Compute tax = (income − exemption) × effective_rate
+   - Roll black-books / random audit
+   - Deduct directly from balance (allowed to go NEGATIVE)
+   - Zero the income accumulator, advance streak
+3. Players can pay manually anytime (`pay_tax`) — same logic, just on demand.
 
 Creative mechanics:
-- 🕵 Random audit (1% per hourly tick): if you have debt, penalty ×2; if clean,
-  small cashback from total taxes paid.
-- 💼 Amnesty (once/month): wipe full debt for 50% of debt amount.
-- 📋 Daily declaration: −1% rate for the next day. Streak-tracked.
+- 🕵 Random audit (15% per daily tick): clean record → 5% cashback from total
+  taxes paid (capped at 100M).
+- 📋 Daily declaration: −1% rate for the day.
 - 🏖 Налоговый рай: 7 days of 0% tax (1× / real month).
-- 🏆 Honest Citizen: 30 days streak without debt → permanent −1% rate badge.
+- 🏆 Honest Citizen: 30 clean days streak → permanent −1% rate badge.
+- 🎯 RAID ON THE TAX OFFICE: coop event — 500 skins donated within 10 min prep
+  shuts down accrue_tax for 25h server-wide (one full daily cycle).
 """
 from __future__ import annotations
 
@@ -96,9 +98,10 @@ UPGRADE_DEFS: dict[str, dict] = {
     },
     "tax_deduction": {
         "name": "🧾 Налоговый вычет", "icon": "🧾",
-        "desc": "Первые X 🪙/час не облагаются", "unit": "🪙/ч",
-        # 100K at lvl 1 → ~50M at lvl 10
-        "tiers": _build_tiers(10, lambda L: int(100_000 * (1.85 ** (L - 1))),
+        "desc": "Первые X 🪙/день не облагаются", "unit": "🪙/день",
+        # Bumped 24× since the window is now daily not hourly:
+        # 2.4M at lvl 1 → ~1.2B at lvl 10
+        "tiers": _build_tiers(10, lambda L: int(2_400_000 * (1.85 ** (L - 1))),
                               lambda L: 5_000_000_000 * (1.65 ** (L - 1))),
     },
     "lawyer": {
@@ -109,7 +112,7 @@ UPGRADE_DEFS: dict[str, dict] = {
     },
     "black_books": {
         "name": "🕶 Чёрная бухгалтерия", "icon": "🕶",
-        "desc": "Шанс что налог за час «сольётся»", "unit": "%",
+        "desc": "Шанс что налог за день «сольётся»", "unit": "%",
         # 1% per level, max 5% at lvl 5
         "tiers": _build_tiers(5, lambda L: L, lambda L: 20_000_000_000 * (2.0 ** (L - 1))),
     },
@@ -138,14 +141,16 @@ UPGRADE_DEFS: dict[str, dict] = {
 
 
 # Default base penalty rate (per day on outstanding tax_debt). Reduced by Адвокат.
+# (Kept for legacy; debt system was removed. Still referenced by old UI fields.)
 BASE_DEBT_PENALTY_PER_DAY = 0.10
 
-# Hourly tick window (seconds). Tick is idempotent — running more often than
-# this is a no-op for already-ticked players.
-HOURLY_TICK_SECONDS = 3_600
+# Daily tick — tax is computed and collected ONCE per day at 00:00 UTC. The
+# midnight_loop fires daily_collect_all; a maintenance loop also catches
+# stragglers (players whose last collection is more than 23h old) every 30 min.
+DAILY_TICK_SECONDS = 24 * 3600
 
-# Random-audit chance per hourly tick (1%).
-AUDIT_CHANCE_PER_TICK = 0.01
+# Random-audit chance per daily tick (15% — was 1% × ~24 ticks/day previously).
+AUDIT_CHANCE_PER_TICK = 0.15
 
 # Honest Citizen: how many consecutive clean days unlock the permanent badge.
 HONEST_CITIZEN_DAYS = 30
@@ -156,10 +161,12 @@ HONEST_CITIZEN_DAYS = 30
 NEWBIE_EXEMPTION_THRESHOLD = 1_000_000_000  # 1B lifetime earnings
 
 # RAIDS — coop event to shut down the tax office.
+# Tuned for the daily-tick world: 25h success window guarantees exactly one
+# daily tax cycle gets skipped. Cooldown 48h prevents perpetual evasion.
 RAID_PREP_SECONDS         = 10 * 60         # 10 minutes preparation window
-RAID_SUCCESS_DURATION_SEC = 2 * 60 * 60     # 2 hours of zero-tax on success
+RAID_SUCCESS_DURATION_SEC = 25 * 60 * 60    # 25 hours — covers one full daily tick
 RAID_REQUIRED_SKINS       = 500             # total donations needed
-RAID_COOLDOWN_HOURS       = 24              # max 1 raid per 24h server-wide
+RAID_COOLDOWN_HOURS       = 48              # 1 raid per 48h server-wide
 RAID_MIN_DONATION         = 1
 RAID_MAX_DONATION_PER_TX  = 100             # safety per single donate call
 
@@ -246,11 +253,11 @@ def _effective_rate(entity_level: int, upgrades: dict, declared_today: bool,
 
 
 def _income_exemption(upgrades: dict) -> int:
-    """Налоговый вычет — first X 🪙/hour are exempted."""
+    """Налоговый вычет — first X 🪙/day are exempted from taxation."""
     lvl = int((upgrades or {}).get("tax_deduction", 0))
     if lvl <= 0:
         return 0
-    return int(100_000 * (1.85 ** (lvl - 1)))
+    return int(2_400_000 * (1.85 ** (lvl - 1)))
 
 
 def _debt_penalty_rate(upgrades: dict) -> float:
@@ -300,8 +307,8 @@ async def get_state(tg_id: int) -> dict:
     if is_newbie:
         rate = 0.0
 
-    # Estimate of how much tax will be charged at the NEXT hourly tick.
-    # Useful for UI: "к списанию через час: X 🪙".
+    # Estimate of how much tax will be charged at the NEXT daily tick (00:00 UTC).
+    # UI shows: "К списанию в полночь UTC: X 🪙".
     pending_income = int(row["pending_taxable_income"])
     exemption = _income_exemption(upgrades)
     taxable_now = max(0, pending_income - exemption)
@@ -339,6 +346,8 @@ async def get_state(tg_id: int) -> dict:
         "paradise_until":         paradise_until.isoformat() if paradise_until else None,
         "honest_citizen":         bool(row["honest_citizen"]),
         "streak_punctual_days":   int(row["streak_punctual_days"]),
+        "income_exemption_per_day": _income_exemption(upgrades),
+        # Backward-compat alias for older clients
         "income_exemption_per_hour": _income_exemption(upgrades),
         "debt_penalty_per_day":     _debt_penalty_rate(upgrades),
         "black_books_chance":       _black_books_chance(upgrades),
@@ -423,15 +432,19 @@ async def accrue_tax(tg_id: int, amount: int, kind: str) -> None:
 # HOURLY TICK
 # ============================================================
 
-async def hourly_tick_user(tg_id: int) -> dict:
-    """Convert this player's accumulated income into pending_tax_due.
-    Idempotent — won't double-charge if called twice in the same hour.
-    Returns a small report (charged, audited, black_books_proc, etc.)."""
+async def daily_tick_user(tg_id: int) -> dict:
+    """Single combined operation: compute tax on the day's income and DEDUCT
+    DIRECTLY from balance (allowed to go negative). Replaces the old
+    hourly_tick + midnight_collect two-phase flow.
+
+    Idempotent within DAILY_TICK_SECONDS — calling twice within ~23h is a no-op.
+    Audit/black-books/streak/honest-citizen all roll once per daily tick."""
     now = datetime.now(timezone.utc)
     today = now.date()
     report = {"charged": 0, "exempted": 0, "income": 0,
-              "black_books_proc": False, "audited": False, "audit_penalty": 0,
-              "audit_cashback": 0}
+              "black_books_proc": False, "audited": False, "audit_cashback": 0,
+              "honest_citizen_unlocked": False, "punctual_cashback": 0,
+              "new_balance": None}
 
     async with pool().acquire() as conn:
         async with conn.transaction():
@@ -441,10 +454,10 @@ async def hourly_tick_user(tg_id: int) -> dict:
             if row is None:
                 return report
 
-            # Skip if last tick was within the last hour (prevent double-charge
-            # if two ticks fire close together).
-            if (row["last_tick_at"] is not None and
-                (now - row["last_tick_at"]).total_seconds() < HOURLY_TICK_SECONDS - 60):
+            # Skip if we already collected within the last 23h — guard against
+            # midnight + maintenance loops both firing on the same player.
+            if (row["last_collected_at"] is not None and
+                (now - row["last_collected_at"]).total_seconds() < DAILY_TICK_SECONDS - 3600):
                 return report
 
             income = int(row["pending_taxable_income"])
@@ -457,15 +470,24 @@ async def hourly_tick_user(tg_id: int) -> dict:
             honest = bool(row["honest_citizen"])
 
             # Newbie exemption: lifetime earnings under threshold → 0% tax.
-            # Just clear the income accumulator and bail.
             eu = await conn.fetchrow(
                 "select total_earned from economy_users where tg_id = $1", tg_id,
             )
             total_earned = int(eu["total_earned"]) if eu else 0
             if total_earned < NEWBIE_EXEMPTION_THRESHOLD:
+                # Newbie — clear income accumulator, advance streak, bail.
+                new_streak_newbie = _streak_advance(row, today)
                 await conn.execute(
-                    "update tax_users set pending_taxable_income = 0, last_tick_at = $2 "
-                    "where tg_id = $1", tg_id, now,
+                    """
+                    update tax_users set
+                      pending_taxable_income = 0,
+                      last_tick_at = $2,
+                      last_collected_at = $2,
+                      streak_punctual_days = $3,
+                      last_streak_check = $4
+                    where tg_id = $1
+                    """,
+                    tg_id, now, new_streak_newbie, today,
                 )
                 return report
 
@@ -474,114 +496,44 @@ async def hourly_tick_user(tg_id: int) -> dict:
             taxable = max(0, income - exemption)
             tax_owed = int(taxable * rate)
 
-            # Чёрная бухгалтерия — chance to wipe this hour's tax
-            if random.random() < _black_books_chance(upgrades):
+            # Чёрная бухгалтерия — chance to wipe this day's tax entirely.
+            if tax_owed > 0 and random.random() < _black_books_chance(upgrades):
                 tax_owed = 0
                 report["black_books_proc"] = True
 
-            # Random audit
+            # Random audit (clean-only cashback now — debt system was removed)
             if random.random() < AUDIT_CHANCE_PER_TICK:
                 report["audited"] = True
-                if int(row["tax_debt"]) > 0:
-                    # Penalty: tax_debt × 2 — accumulates further
-                    penalty = int(row["tax_debt"])
+                cashback = min(100_000_000, int(int(row["total_taxes_paid"]) * 0.05))
+                if cashback > 0:
                     await conn.execute(
-                        "update tax_users set tax_debt = tax_debt + $2 where tg_id = $1",
-                        tg_id, penalty,
+                        "update economy_users set balance = balance + $2 where tg_id = $1",
+                        tg_id, cashback,
                     )
-                    report["audit_penalty"] = penalty
-                else:
-                    # Clean record — 5% cashback of total taxes paid (one-shot reward,
-                    # capped at 100M to avoid abuse).
-                    cashback = min(100_000_000, int(int(row["total_taxes_paid"]) * 0.05))
-                    if cashback > 0:
-                        await conn.execute(
-                            "update economy_users set balance = balance + $2 where tg_id = $1",
-                            tg_id, cashback,
-                        )
-                        report["audit_cashback"] = cashback
+                    report["audit_cashback"] = cashback
 
-            await conn.execute(
-                """
-                update tax_users set
-                  pending_taxable_income = 0,
-                  pending_tax_due = pending_tax_due + $2,
-                  last_tick_at = $3,
-                  total_audits = total_audits + $4
-                where tg_id = $1
-                """,
-                tg_id, tax_owed, now, 1 if report["audited"] else 0,
-            )
-            report["charged"] = tax_owed
-            report["exempted"] = min(income, exemption)
-            report["income"] = income
-
-    return report
-
-
-async def hourly_tick_all() -> None:
-    """Run hourly_tick_user for every player who has either pending income or
-    accrued tax — small fan-out, fine to do serially."""
-    async with pool().acquire() as conn:
-        rows = await conn.fetch(
-            "select tg_id from tax_users "
-            "where pending_taxable_income > 0 or pending_tax_due > 0 or tax_debt > 0"
-        )
-    for r in rows:
-        try:
-            await hourly_tick_user(int(r["tg_id"]))
-        except Exception:
-            log.exception("tax hourly tick failed for tg=%s", r["tg_id"])
-
-
-# ============================================================
-# MIDNIGHT SET (Forced collection) + debt compounding
-# ============================================================
-
-async def midnight_collect_user(tg_id: int) -> dict:
-    """Forced-collection at midnight UTC. Simple: deduct pending_tax_due from
-    balance. Balance is allowed to go negative — no debt tracking, no penalty,
-    no blocking. Player just has to climb back to 0+ via earnings to play
-    paid actions again (game bets check balance >= cost, so negative balance
-    blocks paid bets naturally)."""
-    now = datetime.now(timezone.utc)
-    today = now.date()
-    report = {"collected": 0, "new_balance": None,
-              "honest_citizen_unlocked": False, "punctual_cashback": 0}
-
-    async with pool().acquire() as conn:
-        async with conn.transaction():
-            row = await conn.fetchrow(
-                "select * from tax_users where tg_id = $1 for update", tg_id,
-            )
-            if row is None:
-                return report
-
-            upgrades = _parse_jsonb(row["upgrades"]) or {}
-            pending = int(row["pending_tax_due"])
-
-            # Deduct unconditionally — let balance go negative if needed.
-            if pending > 0:
+            # Deduct tax directly from balance — allow negative.
+            new_bal = None
+            if tax_owed > 0:
                 bal_row = await conn.fetchrow(
                     "update economy_users set balance = balance - $2, "
                     "total_spent = total_spent + $2 "
                     "where tg_id = $1 returning balance",
-                    tg_id, pending,
+                    tg_id, tax_owed,
                 )
                 new_bal = int(bal_row["balance"]) if bal_row else 0
-                report["collected"] = pending
                 report["new_balance"] = new_bal
                 try:
                     await conn.execute(
                         "insert into economy_transactions (user_id, amount, kind, reason, balance_after) "
-                        "values ($1, $2, 'tax_set', 'midnight_set_collection', $3)",
-                        tg_id, -pending, new_bal,
+                        "values ($1, $2, 'tax_set', 'daily_set_collection', $3)",
+                        tg_id, -tax_owed, new_bal,
                     )
                 except Exception:
                     pass
 
-            # Streak: every day is a "clean day" now (no debt concept). Just
-            # advance counter once per UTC day.
+            # Streak: every clean day (no debt) bumps. With debt removed, every
+            # day is "clean" by definition — counter just counts daily ticks.
             new_streak = int(row["streak_punctual_days"])
             last_check = row["last_streak_check"]
             if last_check is None or last_check < today:
@@ -592,10 +544,11 @@ async def midnight_collect_user(tg_id: int) -> dict:
                 new_honest = True
                 report["honest_citizen_unlocked"] = True
 
-            # Кэшбэк за пунктуальность — every 7 clean days, perk owners get a small bonus.
+            # Кэшбэк за пунктуальность — every 7 clean days, perk owners get
+            # a small bonus equal to ~70% of today's tax.
             cashback_lvl = int(upgrades.get("punctual_cashback", 0))
             if cashback_lvl >= 1 and new_streak > 0 and new_streak % 7 == 0:
-                cb = int(report["collected"] * 0.7)
+                cb = int(tax_owed * 0.7)
                 if cb > 0:
                     await conn.execute(
                         "update economy_users set balance = balance + $2 where tg_id = $1",
@@ -606,33 +559,74 @@ async def midnight_collect_user(tg_id: int) -> dict:
             await conn.execute(
                 """
                 update tax_users set
+                  pending_taxable_income = 0,
                   pending_tax_due = 0,
                   tax_debt = 0,
                   debt_since = NULL,
-                  total_taxes_paid = total_taxes_paid + $2,
-                  last_collected_at = $3,
-                  streak_punctual_days = $4,
-                  last_streak_check = $5,
-                  honest_citizen = $6
+                  last_tick_at = $2,
+                  last_collected_at = $2,
+                  total_taxes_paid = total_taxes_paid + $3,
+                  total_audits = total_audits + $4,
+                  streak_punctual_days = $5,
+                  last_streak_check = $6,
+                  honest_citizen = $7
                 where tg_id = $1
                 """,
-                tg_id, report["collected"], now, new_streak, today, new_honest,
+                tg_id, now, tax_owed,
+                1 if report["audited"] else 0,
+                new_streak, today, new_honest,
             )
+            report["charged"] = tax_owed
+            report["exempted"] = min(income, exemption)
+            report["income"] = income
+
     return report
 
 
-async def midnight_collect_all() -> None:
-    """Run for every player with pending tax or existing debt."""
+def _streak_advance(row, today) -> int:
+    """Helper: bump streak counter once per UTC day (idempotent)."""
+    cur = int(row["streak_punctual_days"])
+    last_check = row["last_streak_check"]
+    if last_check is None or last_check < today:
+        return cur + 1
+    return cur
+
+
+async def daily_tick_all() -> None:
+    """Sweep every player whose accumulated income or last_collected_at warrants
+    a daily tick. Cheap query, idempotent per-user."""
     async with pool().acquire() as conn:
         rows = await conn.fetch(
             "select tg_id from tax_users "
-            "where pending_tax_due > 0 or tax_debt > 0"
+            "where pending_taxable_income > 0 "
+            "   or last_collected_at is null "
+            "   or last_collected_at < now() - interval '23 hours'"
         )
     for r in rows:
         try:
-            await midnight_collect_user(int(r["tg_id"]))
+            await daily_tick_user(int(r["tg_id"]))
         except Exception:
-            log.exception("tax midnight collect failed for tg=%s", r["tg_id"])
+            log.exception("tax daily tick failed for tg=%s", r["tg_id"])
+
+
+# Backward-compat aliases — older code paths may still reference these.
+hourly_tick_user = daily_tick_user
+hourly_tick_all  = daily_tick_all
+
+
+# ============================================================
+# MIDNIGHT SET — single combined daily collection (alias to daily_tick_*)
+# ============================================================
+
+async def midnight_collect_user(tg_id: int) -> dict:
+    """Backward-compat alias: in the daily-tick world, midnight collection IS
+    the daily tick — single combined operation."""
+    return await daily_tick_user(tg_id)
+
+
+async def midnight_collect_all() -> None:
+    """Backward-compat: the daily 00:00 UTC sweep delegated to daily_tick_all."""
+    await daily_tick_all()
 
 
 # ============================================================
@@ -640,67 +634,84 @@ async def midnight_collect_all() -> None:
 # ============================================================
 
 async def pay_tax(tg_id: int, amount: int | None = None) -> dict:
-    """Manually pay all (or partial) pending_tax_due + tax_debt. Drains in
-    that order — pending first, then debt."""
+    """Manually pay the day's tax NOW (instead of waiting for the daily SET).
+    Computes tax on-the-fly from pending_taxable_income × current effective
+    rate, applying exemption / paradise / newbie checks identical to the
+    automatic daily tick. Balance allowed to go negative."""
     await ensure_user(tg_id)
+    now = datetime.now(timezone.utc)
+    today = now.date()
     async with pool().acquire() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
-                "select pending_tax_due, tax_debt from tax_users where tg_id = $1 for update",
-                tg_id,
+                "select * from tax_users where tg_id = $1 for update", tg_id,
             )
             if row is None:
                 return {"ok": False, "error": "Нет состояния"}
-            pending = int(row["pending_tax_due"])
-            debt    = int(row["tax_debt"])
-            total_owed = pending + debt
-            if total_owed <= 0:
+
+            income = int(row["pending_taxable_income"])
+            if income <= 0:
                 return {"ok": False, "error": "Налогов к оплате нет"}
 
-            pay = total_owed if amount is None else min(int(amount), total_owed)
+            upgrades = _parse_jsonb(row["upgrades"]) or {}
+            entity_level = int(row["entity_level"])
+            paradise_until = row["paradise_until"]
+            paradise_active = paradise_until is not None and paradise_until > now
+            declared_today = (row["last_declared_at"] is not None and
+                              row["last_declared_at"].date() == today)
+            honest = bool(row["honest_citizen"])
 
-            bal_row = await conn.fetchrow(
-                "select balance from economy_users where tg_id = $1 for update", tg_id,
+            # Newbie? No tax owed.
+            eu = await conn.fetchrow(
+                "select total_earned from economy_users where tg_id = $1", tg_id,
             )
-            bal = int(bal_row["balance"]) if bal_row else 0
-            if bal < pay:
-                return {"ok": False, "error": "Не хватает монет", "have": bal, "need": pay}
+            total_earned = int(eu["total_earned"]) if eu else 0
+            if total_earned < NEWBIE_EXEMPTION_THRESHOLD:
+                await conn.execute(
+                    "update tax_users set pending_taxable_income = 0 where tg_id = $1",
+                    tg_id,
+                )
+                return {"ok": True, "paid": 0, "new_balance": None,
+                        "note": "Налогов нет — вы в каникулах"}
 
-            await conn.execute(
+            rate = _effective_rate(entity_level, upgrades, declared_today, honest, paradise_active)
+            exemption = _income_exemption(upgrades)
+            taxable = max(0, income - exemption)
+            tax_owed = int(taxable * rate)
+            if tax_owed <= 0:
+                await conn.execute(
+                    "update tax_users set pending_taxable_income = 0 where tg_id = $1",
+                    tg_id,
+                )
+                return {"ok": True, "paid": 0, "new_balance": None,
+                        "note": "Доход полностью покрыт вычетом"}
+
+            new_bal_row = await conn.fetchrow(
                 "update economy_users set balance = balance - $2, total_spent = total_spent + $2 "
-                "where tg_id = $1", tg_id, pay,
+                "where tg_id = $1 returning balance",
+                tg_id, tax_owed,
             )
-            new_bal = bal - pay
-
-            # Drain pending first, debt after.
-            pay_pending = min(pay, pending)
-            pay_debt    = pay - pay_pending
-            new_pending = pending - pay_pending
-            new_debt    = debt - pay_debt
-            debt_since  = None if new_debt <= 0 else "keep"
-
-            if debt_since == "keep":
-                await conn.execute(
-                    "update tax_users set pending_tax_due = $2, tax_debt = $3, "
-                    "total_taxes_paid = total_taxes_paid + $4 where tg_id = $1",
-                    tg_id, new_pending, new_debt, pay,
-                )
-            else:
-                await conn.execute(
-                    "update tax_users set pending_tax_due = $2, tax_debt = $3, debt_since = NULL, "
-                    "total_taxes_paid = total_taxes_paid + $4 where tg_id = $1",
-                    tg_id, new_pending, new_debt, pay,
-                )
+            new_bal = int(new_bal_row["balance"]) if new_bal_row else 0
+            await conn.execute(
+                """
+                update tax_users set
+                  pending_taxable_income = 0,
+                  pending_tax_due = 0,
+                  total_taxes_paid = total_taxes_paid + $2,
+                  last_collected_at = $3
+                where tg_id = $1
+                """,
+                tg_id, tax_owed, now,
+            )
             try:
                 await conn.execute(
                     "insert into economy_transactions (user_id, amount, kind, reason, balance_after) "
                     "values ($1, $2, 'tax_pay', 'manual_pay', $3)",
-                    tg_id, -pay, new_bal,
+                    tg_id, -tax_owed, new_bal,
                 )
             except Exception:
                 pass
-    return {"ok": True, "paid": pay, "new_balance": new_bal,
-            "pending_left": new_pending, "debt_left": new_debt}
+    return {"ok": True, "paid": tax_owed, "new_balance": new_bal}
 
 
 async def register_entity(tg_id: int, target_level: int) -> dict:
@@ -1152,16 +1163,16 @@ async def has_debt(tg_id: int) -> bool:
 # ============================================================
 
 async def hourly_loop() -> None:
+    """Maintenance sweep — runs every 30 minutes. The daily tick is idempotent
+    within ~23h, so this catches stragglers (e.g. server restarts during the
+    midnight window). Cheap when there's nothing to do."""
     import asyncio
-    # Tick every 5 minutes — hourly_tick_user is idempotent within the hour,
-    # so frequent calls just check the gate. This lets us catch newly-online
-    # players quickly without waiting a full hour from server start.
     while True:
         try:
-            await asyncio.sleep(300)
-            await hourly_tick_all()
+            await asyncio.sleep(1800)
+            await daily_tick_all()
         except Exception:
-            log.exception("tax hourly_loop tick failed")
+            log.exception("tax maintenance loop tick failed")
 
 
 async def raid_loop() -> None:
