@@ -96,15 +96,18 @@
       const isActive = document.querySelector('.view[data-view="market"].active');
       if (!isActive) return;
       try {
-        const [state, assets] = await Promise.all([
+        const [state, assets, news] = await Promise.all([
           api('/api/market/state'),
           api('/api/market/assets'),
+          api('/api/market/news?limit=20'),
         ]);
-        MS.state = state; MS.assets = assets;
+        const prevTopNewsId = MS.news && MS.news[0] && MS.news[0].id;
+        const newTopNewsId  = news    && news[0]    && news[0].id;
+        MS.state = state; MS.assets = assets; MS.news = news;
         // In-place value updates only — НЕ полный ре-рендер. Иначе сбивается
         // скрол в списке/полосе категорий и фокус в поиске каждые 5 сек.
         if (!document.querySelector('.market-trade-modal')) {
-          liveRefresh();
+          liveRefresh(prevTopNewsId !== newTopNewsId);
         } else {
           updateTradeModalPrice();
         }
@@ -113,11 +116,17 @@
   }
 
   // ─── Live polling refresh — обновляем только цифры, без перерисовки DOM ───
-  function liveRefresh() {
+  function liveRefresh(newsChanged = false) {
     updateTopBar();
     if (MS.activeTab === 'market')    updateMarketPrices();
     if (MS.activeTab === 'portfolio') updatePortfolioPrices();
-    // news/lb/bank/convert — top bar достаточно
+    if (MS.activeTab === 'news' && newsChanged) {
+      // Новая новость пришла — перерисовать список. Если тот же top — не трогаем
+      // чтобы не дёргать скрол пока юзер читает.
+      const c = document.getElementById('market-tab-content');
+      if (c) paintNews(c);
+    }
+    // lb/bank/convert — top bar достаточно
   }
 
   function updateTopBar() {
