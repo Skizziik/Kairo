@@ -40,8 +40,8 @@ RARITIES: list[dict] = [
     {"key": "milspec",          "weight": 15, "coin_min":   200, "coin_max":    500, "xp": 4,  "color": "#4b69ff", "emoji": "💙"},
     {"key": "restricted",       "weight": 10, "coin_min":  1000, "coin_max":   2500, "xp": 8,  "color": "#8847ff", "emoji": "💜"},
     {"key": "classified",       "weight":  6, "coin_min":  5000, "coin_max":  15000, "xp": 16, "color": "#d32ce6", "emoji": "💗"},
-    {"key": "covert",           "weight":  3, "coin_min": 20000, "coin_max":  20000, "xp": 32, "color": "#eb4b4b", "emoji": "❤️"},
-    {"key": "exceedingly_rare", "weight":  1, "coin_min": 30000, "coin_max": 100000, "xp": 96, "color": "#e4ae39", "emoji": "🟡"},
+    {"key": "covert",           "weight":  3, "coin_min": 16000, "coin_max":  16000, "xp": 32, "color": "#eb4b4b", "emoji": "❤️"},
+    {"key": "exceedingly_rare", "weight":  1, "coin_min": 24000, "coin_max":  80000, "xp": 96, "color": "#e4ae39", "emoji": "🟡"},
 ]
 RARITY_BY_KEY = {r["key"]: r for r in RARITIES}
 

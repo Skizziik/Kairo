@@ -367,18 +367,33 @@ def _rate_breakdown(entity_level: int, upgrades: dict, declared_today: bool,
     if paradise_active:
         return [{"label": "🏖 Налоговый рай", "value": "0%", "color": "#5cc15c"}]
     entity = ENTITY_BY_LEVEL.get(entity_level, ENTITIES[0])
+    raw = float(entity["rate"])
     out = [{"label": f"{entity['icon']} {entity['name']}", "value": f"{entity['rate']*100:.0f}%"}]
     accountant = int((upgrades or {}).get("accountant", 0))
     if accountant > 0:
         out.append({"label": "📒 Бухгалтер", "value": f"−{accountant * 0.5:.1f}%"})
+        raw -= accountant * 0.005
     if int((upgrades or {}).get("small_biz_relief", 0)) >= 1 and entity_level in (2, 3):
         out.append({"label": "🏪 Льготы малого бизнеса", "value": "−2%"})
+        raw -= 0.02
     if int((upgrades or {}).get("offshore_links", 0)) >= 1 and entity_level in (4, 5):
         out.append({"label": "🌐 Оффшорные связи", "value": "−3%"})
+        raw -= 0.03
     if declared_today:
         out.append({"label": "📋 Декларация подана", "value": "−1%"})
+        raw -= 0.01
     if honest_citizen:
         out.append({"label": "🏆 Honest Citizen (30 дней без долгов)", "value": "−1%"})
+        raw -= 0.01
+    # Floor: 1% по закону. Если математика уходит ниже — показываем явно
+    # сколько прибавляется обратно, чтобы игрок видел, что налог не уходит в минус.
+    if raw < 0.01:
+        gap = 0.01 - raw
+        out.append({
+            "label": "🛡 Минимум по закону",
+            "value": f"+{gap*100:.1f}%",
+            "color": "#ffd700",
+        })
     return out
 
 
