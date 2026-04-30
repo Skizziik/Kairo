@@ -1464,7 +1464,9 @@ from app.economy import market as _market
 
 class MarketBuyReq(BaseModel):
     asset_key: str
-    cash_amount: int = Field(..., ge=1)
+    # Один из двух — либо сумма в TRYLLA центах, либо желаемое кол-во в микро-юнитах
+    cash_amount:    int | None = Field(default=None, ge=1)
+    quantity_micro: int | None = Field(default=None, ge=1)
 
 
 class MarketSellReq(BaseModel):
@@ -1496,10 +1498,12 @@ async def api_market_assets(user: dict = Depends(require_user)) -> list[dict]:
 
 
 @router.get("/market/chart/{asset_key}")
-async def api_market_chart(asset_key: str, points: int = 100,
+async def api_market_chart(asset_key: str, tf: str = "10m",
                             user: dict = Depends(require_user)) -> dict:
     _ = user
-    return await _market.get_chart(asset_key, points=max(20, min(500, points)))
+    if tf not in ("10m", "1h", "12h", "24h"):
+        tf = "10m"
+    return await _market.get_chart(asset_key, tf=tf)
 
 
 @router.get("/market/news")
@@ -1517,7 +1521,11 @@ async def api_market_leaderboard(sort_by: str = "total_value",
 
 @router.post("/market/buy")
 async def api_market_buy(req: MarketBuyReq, user: dict = Depends(require_user)) -> dict:
-    return await _market.buy_asset(int(user["id"]), req.asset_key, int(req.cash_amount))
+    return await _market.buy_asset(
+        int(user["id"]), req.asset_key,
+        cash_amount=req.cash_amount,
+        quantity_micro=req.quantity_micro,
+    )
 
 
 @router.post("/market/sell")

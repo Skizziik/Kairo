@@ -43,7 +43,8 @@ STARTING_CASH  = 100_000_00    # 100K TRYLLA (×100 cents)
 PRICE_TICK_SECONDS = 5         # симуляция цен каждые 5 сек
 NEWS_SPAWN_MIN_SEC = 60        # новости каждые 1-3 мин
 NEWS_SPAWN_MAX_SEC = 180
-SNAPSHOT_KEEP      = 1000      # последних свечей на актив
+SNAPSHOT_KEEP      = 1000      # legacy (count-based fallback)
+SNAPSHOT_RETENTION_SEC = 24 * 3600   # храним 24 часа сырых тиков (для tf=24h)
 
 # Market mood — global multiplier on volatility
 MARKET_MOOD_BASE = 1.0
@@ -255,12 +256,17 @@ async def price_tick() -> None:
     asset_order = list(assets)
     asset_order.sort(key=lambda a: 0 if a["key"] in ("btc", "gold") else 1)
 
+    # Абсолютный пол на цену: 1 цент = 0.01 TRYLLA. Иначе мемкоины
+    # с base_price=1 уезжают в int(0.02)=0 и multiplicative модель
+    # больше не может оттуда вытянуть.
+    PRICE_FLOOR = 1.0
+
     for a in asset_order:
         key = a["key"]
         cat = a["category"]
         sub = a["subcategory"] or ""
         base = float(a["base_price"])
-        cur  = float(a["current_price"])
+        cur  = max(PRICE_FLOOR, float(a["current_price"]))   # heal stuck-at-zero
         vol  = float(a["volatility"])
         liq  = max(0.1, float(a["liquidity"]))
         tags = _parse_jsonb(a["tags"]) or []
@@ -344,7 +350,7 @@ async def price_tick() -> None:
 
         # ── New price with hard floor/ceiling
         new_price = cur * (1.0 + delta)
-        new_price = max(base * 0.02, min(base * 100, new_price))
+        new_price = max(PRICE_FLOOR, base * 0.02, min(base * 100, new_price))
 
         # Capture BTC/gold deltas for correlation cascade
         if key == "btc":
@@ -390,17 +396,12 @@ async def price_tick() -> None:
                         *bargs,
                     )
 
-            # Trim old snapshots — keep last SNAPSHOT_KEEP per asset
+            # Trim old snapshots by time — храним последние SNAPSHOT_RETENTION_SEC
+            # секунд (по умолчанию 24ч), хватает для tf=24h. Index (asset_key, ts)
+            # позволяет удалению быть дешёвым.
             await conn.execute(
-                """
-                delete from market_price_snapshots
-                where id in (
-                    select id from (
-                        select id, row_number() over (partition by asset_key order by ts desc) as rn
-                        from market_price_snapshots
-                    ) t where rn > $1
-                )
-                """, SNAPSHOT_KEEP,
+                "delete from market_price_snapshots where ts < now() - "
+                f"interval '{SNAPSHOT_RETENTION_SEC} seconds'"
             )
 
 
@@ -555,11 +556,18 @@ async def whale_tick() -> None:
 # TRADING
 # ============================================================
 
-async def buy_asset(tg_id: int, asset_key: str, cash_amount: int) -> dict:
-    """Buy `asset_key` for `cash_amount` TRYLLA cents. Apply commission + spread.
-    Returns dict with quantity, fill_price, commission, etc."""
-    if cash_amount <= 0:
-        return {"ok": False, "error": "Сумма должна быть > 0"}
+async def buy_asset(
+    tg_id: int,
+    asset_key: str,
+    cash_amount: int | None = None,
+    quantity_micro: int | None = None,
+) -> dict:
+    """Купить `asset_key` либо на сумму `cash_amount` (в центах TRYLLA),
+    либо на конкретное кол-во `quantity_micro` (микро-юниты ×1e6).
+    Один из двух обязателен."""
+    if (cash_amount is None or cash_amount <= 0) and \
+       (quantity_micro is None or quantity_micro <= 0):
+        return {"ok": False, "error": "Укажи сумму или количество"}
     await ensure_user(tg_id)
     async with pool().acquire() as conn:
         async with conn.transaction():
@@ -573,9 +581,6 @@ async def buy_asset(tg_id: int, asset_key: str, cash_amount: int) -> dict:
             )
             if user is None:
                 return {"ok": False, "error": "Нет состояния"}
-            if int(user["trylla"]) < cash_amount:
-                return {"ok": False, "error": "Не хватает TRYLLA",
-                        "have": int(user["trylla"]), "need": cash_amount}
 
             # Effective commission (skill discount)
             skills = _parse_jsonb(user["skills"]) or {}
@@ -585,6 +590,17 @@ async def buy_asset(tg_id: int, asset_key: str, cash_amount: int) -> dict:
             # Buy at spread-adjusted price
             base_price = int(asset["current_price"])
             fill_price = int(base_price * (1.0 + SPREAD_PCT / 2))
+
+            # Если задано quantity_micro — пересчитываем нужный cash_amount.
+            # cost = qty_micro * fill_price / 1e6 ; cash * (1-cm) >= cost
+            if quantity_micro is not None and quantity_micro > 0:
+                cost_no_comm = (quantity_micro * fill_price + 999_999) // 1_000_000  # ceil
+                cash_amount = int(math.ceil(cost_no_comm / max(0.0001, 1.0 - cm)))
+
+            if int(user["trylla"]) < cash_amount:
+                return {"ok": False, "error": "Не хватает TRYLLA",
+                        "have": int(user["trylla"]), "need": cash_amount}
+
             commission = int(cash_amount * cm)
             available = cash_amount - commission
             if available <= 0:
@@ -898,8 +914,46 @@ async def get_assets() -> list[dict]:
     ]
 
 
-async def get_chart(asset_key: str, points: int = 100) -> dict:
-    """Last N price snapshots for chart rendering."""
+# Таймфреймы графика: окно (сек) → сколько точек отдавать в UI.
+# Бакетим в ~120 точек чтобы canvas рисовал плавно.
+_CHART_TF: dict[str, dict] = {
+    "10m": {"window_sec": 600,    "buckets": 120},   # native 5s
+    "1h":  {"window_sec": 3600,   "buckets": 120},   # ~30s
+    "12h": {"window_sec": 43200,  "buckets": 120},   # ~6m
+    "24h": {"window_sec": 86400,  "buckets": 120},   # ~12m
+}
+
+
+def _downsample_snaps(snaps: list, n_buckets: int) -> list[dict]:
+    """Equal-time bucketing: avg price per bucket. snaps must be ts-asc."""
+    if not snaps:
+        return []
+    if len(snaps) <= n_buckets:
+        return [{"price": int(s["price"]), "ts": s["ts"].isoformat()} for s in snaps]
+    t0 = snaps[0]["ts"].timestamp()
+    t1 = snaps[-1]["ts"].timestamp()
+    if t1 <= t0:
+        return [{"price": int(snaps[-1]["price"]), "ts": snaps[-1]["ts"].isoformat()}]
+    bsz = (t1 - t0) / n_buckets
+    buckets: list[list] = [[] for _ in range(n_buckets)]
+    for s in snaps:
+        idx = int((s["ts"].timestamp() - t0) / bsz)
+        if idx >= n_buckets: idx = n_buckets - 1
+        buckets[idx].append(s)
+    out: list[dict] = []
+    for b in buckets:
+        if not b:
+            continue
+        avg = sum(int(s["price"]) for s in b) // len(b)
+        out.append({"price": avg, "ts": b[-1]["ts"].isoformat()})
+    return out
+
+
+async def get_chart(asset_key: str, tf: str = "10m", points: int = 0) -> dict:
+    """Снимки цен в окне tf, бакетные в ~120 точек."""
+    cfg = _CHART_TF.get(tf, _CHART_TF["10m"])
+    window = cfg["window_sec"]
+    n_buckets = cfg["buckets"]
     async with pool().acquire() as conn:
         asset = await conn.fetchrow(
             "select * from market_assets where key = $1", asset_key,
@@ -907,13 +961,26 @@ async def get_chart(asset_key: str, points: int = 100) -> dict:
         if asset is None:
             return {"ok": False, "error": "Не найдено"}
         snaps = await conn.fetch(
-            "select price, ts from market_price_snapshots where asset_key = $1 "
-            "order by ts desc limit $2",
-            asset_key, points,
+            "select price, ts from market_price_snapshots "
+            "where asset_key = $1 and ts >= now() - "
+            f"interval '{window} seconds' "
+            "order by ts asc",
+            asset_key,
         )
-    snaps_rev = list(reversed(snaps))
+    pts = _downsample_snaps(list(snaps), n_buckets)
+    # Canvas нужно >=2 точки. Если истории за окно нет (фрешный деплой,
+    # длинный tf) — рисуем плоскую линию из open_24h → current_price.
+    if len(pts) < 2:
+        now_ts = datetime.now(timezone.utc)
+        open_p = int(asset["open_24h"]) or int(asset["current_price"])
+        pts = [
+            {"price": open_p, "ts": (now_ts - timedelta(seconds=window)).isoformat()},
+            {"price": int(asset["current_price"]),
+             "ts": (asset["last_tick_at"] or now_ts).isoformat()},
+        ]
     return {
         "ok": True,
+        "tf": tf,
         "asset": {
             "key": asset["key"], "name": asset["name"], "symbol": asset["symbol"],
             "current_price": int(asset["current_price"]),
@@ -925,7 +992,7 @@ async def get_chart(asset_key: str, points: int = 100) -> dict:
             "category": asset["category"], "rarity": asset["rarity"],
             "subcategory": asset["subcategory"],
         },
-        "points": [{"price": int(s["price"]), "ts": s["ts"].isoformat()} for s in snaps_rev],
+        "points": pts,
     }
 
 

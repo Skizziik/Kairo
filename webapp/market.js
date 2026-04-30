@@ -15,6 +15,7 @@
     chartTimer: null,
     pollTimer: null,
     activeAsset: null,
+    chartTf: '10m',          // timeframe: 10m | 1h | 12h | 24h
   };
   const root = () => document.getElementById('market-app');
   const tg   = window.Telegram?.WebApp;
@@ -95,21 +96,101 @@
       const isActive = document.querySelector('.view[data-view="market"].active');
       if (!isActive) return;
       try {
-        // Light refresh: just assets + state (chart already polls separately)
         const [state, assets] = await Promise.all([
           api('/api/market/state'),
           api('/api/market/assets'),
         ]);
         MS.state = state; MS.assets = assets;
-        // Repaint only if not in trade modal
+        // In-place value updates only — НЕ полный ре-рендер. Иначе сбивается
+        // скрол в списке/полосе категорий и фокус в поиске каждые 5 сек.
         if (!document.querySelector('.market-trade-modal')) {
-          repaintCurrentTab();
+          liveRefresh();
         } else {
-          // Just update the modal price display
           updateTradeModalPrice();
         }
       } catch (e) {}
     }, 5000);
+  }
+
+  // ─── Live polling refresh — обновляем только цифры, без перерисовки DOM ───
+  function liveRefresh() {
+    updateTopBar();
+    if (MS.activeTab === 'market')    updateMarketPrices();
+    if (MS.activeTab === 'portfolio') updatePortfolioPrices();
+    // news/lb/bank/convert — top bar достаточно
+  }
+
+  function updateTopBar() {
+    const s = MS.state;
+    if (!s) return;
+    const setText = (sel, txt) => {
+      const el = document.querySelector(sel);
+      if (el && el.textContent !== txt) el.textContent = txt;
+    };
+    setText('.market-balance .market-balance-v', fmtTCompact(s.trylla));
+    setText('.market-portfolio .market-balance-v', fmtTCompact(s.portfolio_value));
+    setText('.market-total .market-balance-v', fmtTCompact(s.total_value));
+  }
+
+  function updateMarketPrices() {
+    if (!MS.assets) return;
+    const map = new Map(MS.assets.map(a => [a.key, a]));
+    document.querySelectorAll('.market-asset-row').forEach(row => {
+      const a = map.get(row.dataset.asset);
+      if (!a) return;
+      const pv = row.querySelector('.market-price-v');
+      if (pv) {
+        const txt = priceFmt(a.current_price);
+        if (pv.textContent !== txt) pv.textContent = txt;
+      }
+      const pc = row.querySelector('.market-price-change');
+      if (pc) {
+        const change = a.change_24h_pct;
+        const cls = change > 0.5 ? 'up' : change < -0.5 ? 'down' : 'flat';
+        if (!pc.classList.contains(cls)) {
+          pc.classList.remove('up','down','flat');
+          pc.classList.add(cls);
+        }
+        const txt = (change > 0 ? '+' : '') + change.toFixed(2) + '%';
+        if (pc.textContent !== txt) pc.textContent = txt;
+      }
+    });
+  }
+
+  function updatePortfolioPrices() {
+    const s = MS.state;
+    if (!s) return;
+    const holdings = s.holdings || [];
+    // Если кол-во позиций изменилось (купил/продал) — нужен полный ре-рендер
+    const rows = document.querySelectorAll('.market-port-row');
+    if (rows.length !== holdings.length) {
+      const c = document.getElementById('market-tab-content');
+      if (c) paintPortfolio(c);
+      return;
+    }
+    const totalValue = holdings.reduce((acc, h) => acc + h.value, 0);
+    const map = new Map(holdings.map(h => [h.asset_key, h]));
+    rows.forEach(row => {
+      const h = map.get(row.dataset.asset);
+      if (!h) return;
+      const sharePct = totalValue > 0 ? (h.value / totalValue * 100) : 0;
+      const setText = (sel, txt) => {
+        const el = row.querySelector(sel);
+        if (el && el.textContent !== txt) el.textContent = txt;
+      };
+      setText('.market-port-value', fmtTCompact(h.value));
+      const plEl = row.querySelector('.market-port-pl');
+      if (plEl) {
+        const cls = h.pl >= 0 ? 'gain' : 'loss';
+        if (!plEl.classList.contains(cls)) {
+          plEl.classList.remove('gain','loss');
+          plEl.classList.add(cls);
+        }
+        const txt = `${fmtTSign(h.pl)} (${h.pl_pct.toFixed(2)}%)`;
+        if (plEl.textContent !== txt) plEl.textContent = txt;
+      }
+      setText('.market-port-share', `${sharePct.toFixed(1)}% портфеля`);
+    });
   }
 
   async function refresh() {
@@ -185,21 +266,13 @@
   function repaintCurrentTab() {
     const c = document.getElementById('market-tab-content');
     if (!c) return;
-    paintTopBar();
+    updateTopBar();
     if (MS.activeTab === 'market')    paintMarket(c);
     if (MS.activeTab === 'portfolio') paintPortfolio(c);
     if (MS.activeTab === 'news')      paintNews(c);
     if (MS.activeTab === 'lb')        paintLeaderboard(c);
     if (MS.activeTab === 'bank')      paintBank(c);
     if (MS.activeTab === 'convert')   paintConvert(c);
-  }
-
-  function paintTopBar() {
-    const s = MS.state;
-    if (!s) return;
-    // Update top numbers without full repaint
-    const balV = document.querySelector('.market-balance-v');
-    if (balV) balV.textContent = fmtTCompact(s.trylla);
   }
 
   function switchTab(tab) {
@@ -306,14 +379,46 @@
   }
 
   // ─────── ASSET DETAIL (overlay) ───────
+  // Polling cadence per timeframe — для 12ч/24ч смысла дёргать каждые 3с нет.
+  const TF_POLL_MS = { '10m': 3000, '1h': 5000, '12h': 30000, '24h': 60000 };
+
+  function renderHoldingRow(assetKey, asset) {
+    const h = MS.state?.holdings?.find(x => x.asset_key === assetKey);
+    if (!h || h.quantity <= 0) {
+      return '<div class="market-holding-empty">📦 Нет в портфеле</div>';
+    }
+    // Пересчитываем стоимость по свежей цене актива (state может отставать)
+    const valueCents = Math.floor(h.quantity * asset.current_price / 1_000_000);
+    const cost = h.cost;
+    const pl = valueCents - cost;
+    const plPct = cost > 0 ? (pl / cost * 100) : 0;
+    const cls = pl >= 0 ? 'gain' : 'loss';
+    const sign = pl >= 0 ? '+' : '';
+    return `
+      <div class="market-holding-row">
+        <div class="market-holding-line">
+          <span class="market-holding-l">У тебя</span>
+          <b class="market-holding-qty">${(h.quantity / 1_000_000).toFixed(6)}</b>
+          <span class="market-holding-sym">${escape(asset.symbol)}</span>
+        </div>
+        <div class="market-holding-line dim">
+          ≈ <b>${fmtTCompact(valueCents)}</b> TRYLLA
+          <span class="market-holding-pl ${cls}">${sign}${fmtTCompact(pl)} (${plPct.toFixed(1)}%)</span>
+        </div>
+      </div>
+    `;
+  }
+
   async function openAssetDetail(assetKey) {
     MS.activeAsset = assetKey;
     let chart;
     try {
-      chart = await api(`/api/market/chart/${assetKey}?points=120`);
+      chart = await api(`/api/market/chart/${assetKey}?tf=${MS.chartTf}`);
       if (!chart.ok) { toast(chart.error || 'Ошибка'); return; }
     } catch (e) { toast(e.message); return; }
     MS.chart = chart;
+
+    const tfBtn = (k, lbl) => `<button class="market-tf-btn ${MS.chartTf === k ? 'active' : ''}" data-tf="${k}">${lbl}</button>`;
 
     const overlay = document.createElement('div');
     overlay.className = 'market-detail-overlay';
@@ -333,9 +438,16 @@
             </div>
           </div>
         </div>
+        <div class="market-tf-bar" id="md-tf">
+          ${tfBtn('10m', '10м')}
+          ${tfBtn('1h', '1ч')}
+          ${tfBtn('12h', '12ч')}
+          ${tfBtn('24h', '24ч')}
+        </div>
         <div class="market-chart-wrap">
           <canvas id="md-canvas"></canvas>
         </div>
+        <div class="market-detail-holding" id="md-holding">${renderHoldingRow(assetKey, chart.asset)}</div>
         <div class="market-detail-actions">
           <button class="market-buy-btn" id="md-buy">⇪ КУПИТЬ</button>
           <button class="market-sell-btn" id="md-sell">⇩ ПРОДАТЬ</button>
@@ -359,25 +471,49 @@
     document.getElementById('md-buy').addEventListener('click', () => openTradeModal(chart.asset, 'buy'));
     document.getElementById('md-sell').addEventListener('click', () => openTradeModal(chart.asset, 'sell'));
 
-    // Live refresh chart every 3 seconds
-    if (MS.chartTimer) clearInterval(MS.chartTimer);
-    MS.chartTimer = setInterval(async () => {
-      if (!MS.activeAsset || MS.activeAsset !== assetKey) {
-        clearInterval(MS.chartTimer); MS.chartTimer = null; return;
-      }
+    const fetchChart = async () => {
+      if (!MS.activeAsset || MS.activeAsset !== assetKey) return null;
       try {
-        const upd = await api(`/api/market/chart/${assetKey}?points=120`);
-        if (upd.ok) {
-          MS.chart = upd;
-          const canvas2 = document.getElementById('md-canvas');
-          if (canvas2) drawChart(canvas2, upd.points, upd.asset);
-          const pv = document.getElementById('md-price');
-          if (pv) pv.textContent = priceFmt(upd.asset.current_price);
-          const stats = document.getElementById('md-stats');
-          if (stats) stats.innerHTML = `H: <b>${priceFmt(upd.asset.high_24h)}</b> · L: <b>${priceFmt(upd.asset.low_24h)}</b>`;
+        const upd = await api(`/api/market/chart/${assetKey}?tf=${MS.chartTf}`);
+        if (!upd.ok) return null;
+        MS.chart = upd;
+        const canvas2 = document.getElementById('md-canvas');
+        if (canvas2) drawChart(canvas2, upd.points, upd.asset);
+        const pv = document.getElementById('md-price');
+        if (pv) pv.textContent = priceFmt(upd.asset.current_price);
+        const stats = document.getElementById('md-stats');
+        if (stats) stats.innerHTML = `H: <b>${priceFmt(upd.asset.high_24h)}</b> · L: <b>${priceFmt(upd.asset.low_24h)}</b>`;
+        const hold = document.getElementById('md-holding');
+        if (hold) hold.innerHTML = renderHoldingRow(assetKey, upd.asset);
+        return upd;
+      } catch (e) { return null; }
+    };
+
+    const startTimer = () => {
+      if (MS.chartTimer) clearInterval(MS.chartTimer);
+      const ms = TF_POLL_MS[MS.chartTf] || 3000;
+      MS.chartTimer = setInterval(() => {
+        if (!MS.activeAsset || MS.activeAsset !== assetKey) {
+          clearInterval(MS.chartTimer); MS.chartTimer = null; return;
         }
-      } catch (e) {}
-    }, 3000);
+        fetchChart();
+      }, ms);
+    };
+
+    document.querySelectorAll('#md-tf .market-tf-btn').forEach(b => {
+      b.addEventListener('click', async () => {
+        const newTf = b.dataset.tf;
+        if (newTf === MS.chartTf) return;
+        MS.chartTf = newTf;
+        document.querySelectorAll('#md-tf .market-tf-btn').forEach(x => {
+          x.classList.toggle('active', x.dataset.tf === newTf);
+        });
+        await fetchChart();
+        startTimer();
+      });
+    });
+
+    startTimer();
   }
 
   // ─────── CANVAS CHART (line + area + axis) ───────
@@ -487,6 +623,12 @@
       return;
     }
 
+    // Эффективная цена покупки (с учётом spread+commission ≈ 1.45%) — для превью.
+    // Реальные значения посчитает бэк, тут лишь оценка чтобы юзер видел сколько получит.
+    const FEE_TOTAL = 0.0145;   // 0.3% spread/2 + 1% commission + запас
+    const buyEffective = asset.current_price * (1 + FEE_TOTAL);
+    const sellEffective = asset.current_price * (1 - FEE_TOTAL);
+
     overlay.innerHTML = `
       <div class="market-trade-box">
         <button class="market-trade-close" id="mt-close">×</button>
@@ -499,8 +641,13 @@
         </div>
         ${side === 'buy' ? `
           <div class="market-trade-bal">Доступно: <b>${fmtTCompact(myCash)}</b> TRYLLA</div>
-          <input type="number" class="market-trade-input" id="mt-amt" placeholder="Сумма (TRYLLA)" min="1" max="${Math.floor(myCash/100)}" />
-          <div class="market-trade-quick">
+          <div class="market-trade-modes">
+            <button class="market-mode-btn active" data-mode="cash">💰 По TRYLLA</button>
+            <button class="market-mode-btn" data-mode="qty">📦 По штукам</button>
+          </div>
+          <input type="number" class="market-trade-input" id="mt-amt" placeholder="Сумма (TRYLLA)" min="0" step="any" />
+          <div class="market-trade-preview" id="mt-preview">Введи сумму…</div>
+          <div class="market-trade-quick" id="mt-quick">
             <button data-amt="100">100</button>
             <button data-amt="1000">1K</button>
             <button data-amt="10000">10K</button>
@@ -508,22 +655,22 @@
             <button data-amt="half">50%</button>
             <button data-amt="all">ВСЁ</button>
           </div>
-          <div class="market-trade-fee">
-            Комиссия 1% (снижается перками) · Спред 0.3%
-          </div>
+          <div class="market-trade-fee">Комиссия 1% (снижается перками) · Спред 0.3%</div>
           <button class="market-trade-go buy" id="mt-go">⇪ КУПИТЬ</button>
         ` : `
-          <div class="market-trade-bal">У тебя: <b>${(myQty / 1_000_000).toFixed(6)}</b> @ avg <b>${priceFmt(holding.avg_buy_price)}</b></div>
+          <div class="market-trade-bal">У тебя: <b>${(myQty / 1_000_000).toFixed(6)}</b> ${escape(asset.symbol)} @ avg <b>${priceFmt(holding.avg_buy_price)}</b></div>
           <div class="market-trade-pl ${holding.pl >= 0 ? 'gain' : 'loss'}">
             P/L: ${fmtTSign(holding.pl)} (${holding.pl_pct.toFixed(2)}%)
           </div>
-          <div class="market-trade-quick big">
+          <div class="market-trade-quick big" id="mt-quick">
             <button data-pct="25">25%</button>
             <button data-pct="50">50%</button>
             <button data-pct="75">75%</button>
             <button data-pct="100">100%</button>
           </div>
-          <button class="market-trade-go sell" id="mt-go" data-pct="100">⇩ ПРОДАТЬ ВСЁ</button>
+          <input type="number" class="market-trade-input" id="mt-pct" placeholder="Свой % (1-100)" min="1" max="100" step="1" />
+          <div class="market-trade-preview" id="mt-preview">Получишь ≈ ${fmtTCompact(Math.floor(myQty * sellEffective / 1_000_000))} TRYLLA</div>
+          <button class="market-trade-go sell" id="mt-go" data-pct="100">⇩ ПРОДАТЬ 100%</button>
         `}
       </div>
     `;
@@ -532,56 +679,126 @@
     overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
 
     if (side === 'buy') {
-      const input = document.getElementById('mt-amt');
-      overlay.querySelectorAll('[data-amt]').forEach(b => {
+      const input    = document.getElementById('mt-amt');
+      const preview  = document.getElementById('mt-preview');
+      let mode = 'cash';   // 'cash' = ввод в TRYLLA, 'qty' = в штуках
+
+      const updatePreview = () => {
+        const v = Number(input.value);
+        if (!v || v <= 0) { preview.textContent = mode === 'cash' ? 'Введи сумму…' : 'Введи количество…'; return; }
+        if (mode === 'cash') {
+          // cents = v * 100; qty ≈ cents / buyEffective (×1 since price in cents)
+          const qty = (v * 100) / buyEffective;
+          preview.innerHTML = `Получишь ≈ <b>${qty.toFixed(6)}</b> ${escape(asset.symbol)}`;
+        } else {
+          // qty = v штук → cost = qty * buyEffective (cents) / 100 = TRYLLA
+          const cost = (v * buyEffective) / 100;
+          const cls = (cost * 100) > myCash ? 'over' : '';
+          preview.innerHTML = `Стоимость ≈ <b class="${cls}">${fmtTCompact(Math.ceil(cost * 100))}</b> TRYLLA`;
+        }
+      };
+
+      const setMode = (m) => {
+        mode = m;
+        overlay.querySelectorAll('.market-mode-btn').forEach(b => {
+          b.classList.toggle('active', b.dataset.mode === m);
+        });
+        input.placeholder = m === 'cash' ? 'Сумма (TRYLLA)' : `Количество (${asset.symbol})`;
+        // Reset value when switching to avoid confusion
+        input.value = '';
+        updatePreview();
+      };
+
+      overlay.querySelectorAll('.market-mode-btn').forEach(b => {
+        b.addEventListener('click', () => setMode(b.dataset.mode));
+      });
+
+      overlay.querySelectorAll('#mt-quick [data-amt]').forEach(b => {
         b.addEventListener('click', () => {
+          // Quick-кнопки всегда работают в режиме TRYLLA (если был qty — переключаем).
+          if (mode !== 'cash') setMode('cash');
           const v = b.dataset.amt;
           const cashUnits = myCash / 100;
           if (v === 'quarter') input.value = Math.floor(cashUnits * 0.25);
           else if (v === 'half') input.value = Math.floor(cashUnits * 0.5);
           else if (v === 'all') input.value = Math.floor(cashUnits);
           else input.value = v;
+          updatePreview();
         });
       });
+
+      input.addEventListener('input', updatePreview);
+
       document.getElementById('mt-go').addEventListener('click', async () => {
-        const cents = Math.max(1, Math.min(myCash, Math.floor(Number(input.value) * 100)));
-        if (!cents) { toast('Введи сумму'); return; }
-        const r = await api('/api/market/buy', {
-          method: 'POST',
-          body: JSON.stringify({ asset_key: asset.key, cash_amount: cents }),
-        });
+        const v = Number(input.value);
+        if (!v || v <= 0) { toast(mode === 'cash' ? 'Введи сумму' : 'Введи количество'); return; }
+        const body = { asset_key: asset.key };
+        if (mode === 'cash') {
+          const cents = Math.max(1, Math.min(myCash, Math.floor(v * 100)));
+          body.cash_amount = cents;
+        } else {
+          // микро-юниты = штук × 1e6
+          body.quantity_micro = Math.max(1, Math.floor(v * 1_000_000));
+        }
+        const r = await api('/api/market/buy', { method: 'POST', body: JSON.stringify(body) });
         if (!r.ok) { toast(r.error || 'Ошибка'); return; }
-        toast('✓ Куплено ' + (r.quantity / 1_000_000).toFixed(6));
+        toast('✓ Куплено ' + (r.quantity / 1_000_000).toFixed(6) + ' ' + asset.symbol);
         tg?.HapticFeedback?.notificationOccurred?.('success');
         overlay.remove();
         await refresh();
       });
     } else {
       let chosenPct = 100;
-      overlay.querySelectorAll('[data-pct]').forEach(b => {
-        b.addEventListener('click', async () => {
-          chosenPct = Number(b.dataset.pct);
-          if (b.id === 'mt-go') {
-            const r = await api('/api/market/sell', {
-              method: 'POST',
-              body: JSON.stringify({ asset_key: asset.key, quantity_pct: chosenPct }),
-            });
-            if (!r.ok) { toast(r.error || 'Ошибка'); return; }
-            const sign = r.realized_pl >= 0 ? '+' : '';
-            toast(`✓ Продано · P/L ${sign}${fmt(Math.floor(r.realized_pl/100))} TRYLLA`);
-            tg?.HapticFeedback?.notificationOccurred?.('success');
-            overlay.remove();
-            await refresh();
-          } else {
-            // toggle quick %
-            overlay.querySelectorAll('.market-trade-quick.big button').forEach(x => x.classList.remove('active'));
-            b.classList.add('active');
-            const goBtn = document.getElementById('mt-go');
-            goBtn.textContent = `⇩ ПРОДАТЬ ${chosenPct}%`;
-            goBtn.dataset.pct = chosenPct;
-          }
+      const pctInput = document.getElementById('mt-pct');
+      const preview  = document.getElementById('mt-preview');
+      const goBtn    = document.getElementById('mt-go');
+
+      const updatePctPreview = (pct) => {
+        const sellQty = myQty * (pct / 100);
+        const grossT  = (sellQty * sellEffective) / 1_000_000 / 100;   // TRYLLA (whole)
+        const cost    = (sellQty * holding.avg_buy_price) / 1_000_000 / 100;
+        const pl      = grossT - cost;
+        const sign    = pl >= 0 ? '+' : '';
+        const cls     = pl >= 0 ? 'gain' : 'loss';
+        preview.innerHTML = `Получишь ≈ <b>${fmtTCompact(Math.floor(grossT))}</b> TRYLLA · <span class="${cls}">${sign}${fmtTCompact(Math.floor(pl))}</span>`;
+        goBtn.textContent = `⇩ ПРОДАТЬ ${pct}%`;
+        goBtn.dataset.pct = pct;
+      };
+
+      const setPct = (pct) => {
+        chosenPct = Math.max(1, Math.min(100, Math.floor(pct)));
+        overlay.querySelectorAll('.market-trade-quick.big button').forEach(x => {
+          x.classList.toggle('active', Number(x.dataset.pct) === chosenPct);
+        });
+        updatePctPreview(chosenPct);
+      };
+
+      overlay.querySelectorAll('.market-trade-quick.big [data-pct]').forEach(b => {
+        b.addEventListener('click', () => {
+          pctInput.value = '';
+          setPct(Number(b.dataset.pct));
         });
       });
+      pctInput.addEventListener('input', () => {
+        const v = Number(pctInput.value);
+        if (v >= 1 && v <= 100) setPct(v);
+      });
+
+      goBtn.addEventListener('click', async () => {
+        const r = await api('/api/market/sell', {
+          method: 'POST',
+          body: JSON.stringify({ asset_key: asset.key, quantity_pct: chosenPct }),
+        });
+        if (!r.ok) { toast(r.error || 'Ошибка'); return; }
+        const sign = r.realized_pl >= 0 ? '+' : '';
+        toast(`✓ Продано · P/L ${sign}${fmt(Math.floor(r.realized_pl/100))} TRYLLA`);
+        tg?.HapticFeedback?.notificationOccurred?.('success');
+        overlay.remove();
+        await refresh();
+      });
+
+      // Initial preview at default 100%
+      setPct(100);
     }
   }
 
@@ -676,7 +893,8 @@
       })[n.type] || n.type;
       const sevCls = n.severity || 'medium';
       const ago = ageString(n.spawned_at);
-      const affectedStr = renderAffected(n.affected);
+      // affected намеренно не рендерим — пусть игроки сами догадываются,
+      // что выросло, что упало, и насколько сильно. Это часть гейма.
       return `
         <div class="market-news-row sev-${sevCls} ${n.active ? 'active' : 'expired'}">
           <div class="market-news-head">
@@ -685,7 +903,6 @@
           </div>
           <div class="market-news-headline">${escape(n.headline)}</div>
           ${n.body ? `<div class="market-news-body">${escape(n.body)}</div>` : ''}
-          ${affectedStr ? `<div class="market-news-affected">${affectedStr}</div>` : ''}
         </div>
       `;
     }).join('');
@@ -699,21 +916,6 @@
     if (sec < 60) return `${sec}с назад`;
     if (sec < 3600) return `${Math.floor(sec/60)}мин назад`;
     return `${Math.floor(sec/3600)}ч назад`;
-  }
-
-  function renderAffected(aff) {
-    if (!aff) return '';
-    const items = [];
-    if (aff.asset) items.push({ label: aff.asset.toUpperCase(), pct: aff.pct });
-    if (aff.assets) for (const a of aff.assets) items.push({ label: a.key.toUpperCase(), pct: a.pct });
-    if (aff.category) items.push({ label: '🏷 ' + categoryName(aff.category), pct: aff.pct });
-    if (aff.subcategory) items.push({ label: '🏷 ' + aff.subcategory, pct: aff.pct });
-    if (aff.tag) items.push({ label: '#' + aff.tag, pct: aff.pct });
-    return items.map(i => {
-      const cls = i.pct >= 0 ? 'up' : 'down';
-      const sign = i.pct >= 0 ? '+' : '';
-      return `<span class="market-aff ${cls}">${escape(i.label)} ${sign}${i.pct.toFixed(1)}%</span>`;
-    }).join(' ');
   }
 
   // ─────── LEADERBOARD ───────
