@@ -114,19 +114,21 @@
 .market-search:focus { border-color: rgba(255,215,0,0.4); }
 
 .market-cat-strip {
-  display: flex; gap: 5px; overflow-x: auto; padding: 4px 0 8px;
-  scrollbar-width: none;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+  padding: 4px 0 8px;
 }
-.market-cat-strip::-webkit-scrollbar { display: none; }
 .market-cat-pill {
-  flex: 0 0 auto;
-  padding: 7px 12px;
+  padding: 8px 6px;
   background: rgba(0,0,0,0.25);
   border: 1px solid var(--border, rgba(255,255,255,0.08));
   color: var(--text-dim, #aaa);
-  border-radius: 999px;
+  border-radius: 10px;
   font-size: 11px; font-weight: 700;
   cursor: pointer; white-space: nowrap;
+  text-align: center;
+  overflow: hidden; text-overflow: ellipsis;
 }
 .market-cat-pill.active {
   background: linear-gradient(135deg, #ffd700, #d4a800);
