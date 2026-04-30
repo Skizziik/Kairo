@@ -270,13 +270,36 @@
     const canvas = document.getElementById('sg-canvas');
     const ctx = canvas.getContext('2d');
 
-    // Determine pixel size
+    // Determine pixel size. Bug repro: после "▶ Ещё" в death-модалке layout
+    // Telegram WebView иногда не успевает посчитать размеры до getBoundingClientRect
+    // → wrapRect получался 0×0 → cellPx=0 → пустое поле. Форсим reflow и фолбэк
+    // на размеры окна если измерение даёт мусор.
     const wrapEl = overlay.querySelector('.snake-canvas-wrap');
-    const wrapRect = wrapEl.getBoundingClientRect();
-    const maxPx = Math.min(wrapRect.width, wrapRect.height) - 16;
-    const cellPx = Math.floor(maxPx / size);
+    void wrapEl.offsetHeight;   // sync reflow
+    let wrapRect = wrapEl.getBoundingClientRect();
+    let maxPx = Math.min(wrapRect.width, wrapRect.height) - 16;
+    if (maxPx < 120) {
+      // HUD ~60px + сейф-эрия — fallback на window
+      maxPx = Math.min(window.innerWidth, window.innerHeight - 80) - 16;
+    }
+    const cellPx = Math.max(8, Math.floor(maxPx / size));
     canvas.width = cellPx * size;
     canvas.height = cellPx * size;
+
+    // Если после rAF wrap всё-таки расширился (медленный layout) — пересайзим
+    // канвас и перерисуем. Это фикс кейсов когда тачи Telegram задерживают layout.
+    requestAnimationFrame(() => {
+      const r2 = wrapEl.getBoundingClientRect();
+      const max2 = Math.min(r2.width, r2.height) - 16;
+      if (max2 > 120) {
+        const cp2 = Math.max(8, Math.floor(max2 / size));
+        if (cp2 !== cellPx) {
+          canvas.width = cp2 * size;
+          canvas.height = cp2 * size;
+          G.cellPx = cp2;
+        }
+      }
+    });
 
     // ----- game state -----
     // We keep both `cells` (current logical positions, updated every tick) and
