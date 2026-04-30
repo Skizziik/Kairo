@@ -388,8 +388,10 @@
   }
 
   // ─────── ASSET DETAIL (overlay) ───────
-  // Polling cadence per timeframe — для 12ч/24ч смысла дёргать каждые 3с нет.
-  const TF_POLL_MS = { '10m': 3000, '1h': 5000, '12h': 30000, '24h': 60000 };
+  // Polling cadence per timeframe. Сервер тикает раз в 5с — поэтому 10м синхрон
+  // с тиком, нет холостых запросов. Длинные tf — реже, потому что бакеты
+  // (6м/12м) меняются медленно.
+  const TF_POLL_MS = { '10m': 5000, '1h': 10000, '12h': 30000, '24h': 60000 };
 
   function renderHoldingRow(assetKey, asset) {
     const h = MS.state?.holdings?.find(x => x.asset_key === assetKey);
@@ -475,16 +477,36 @@
     document.getElementById('md-close').addEventListener('click', () => {
       MS.activeAsset = null;
       if (MS.chartTimer) { clearInterval(MS.chartTimer); MS.chartTimer = null; }
+      if (MS.chartPulseRaf) { cancelAnimationFrame(MS.chartPulseRaf); MS.chartPulseRaf = null; }
+      MS.chartPulseUntil = 0;
       overlay.remove();
     });
     document.getElementById('md-buy').addEventListener('click', () => openTradeModal(chart.asset, 'buy'));
     document.getElementById('md-sell').addEventListener('click', () => openTradeModal(chart.asset, 'sell'));
+
+    const pulseLoop = () => {
+      if (!MS.activeAsset) { MS.chartPulseRaf = null; return; }
+      const canvas3 = document.getElementById('md-canvas');
+      if (canvas3 && MS.chart) drawChart(canvas3, MS.chart.points, MS.chart.asset);
+      if ((MS.chartPulseUntil || 0) > performance.now()) {
+        MS.chartPulseRaf = requestAnimationFrame(pulseLoop);
+      } else {
+        MS.chartPulseRaf = null;
+      }
+    };
 
     const fetchChart = async () => {
       if (!MS.activeAsset || MS.activeAsset !== assetKey) return null;
       try {
         const upd = await api(`/api/market/chart/${assetKey}?tf=${MS.chartTf}`);
         if (!upd.ok) return null;
+        // Детект новых данных: цена или ts последней точки изменились
+        const prevPrice = MS.chart && MS.chart.asset ? MS.chart.asset.current_price : null;
+        const prevLastTs = MS.chart && MS.chart.points && MS.chart.points.length
+          ? MS.chart.points[MS.chart.points.length - 1].ts : null;
+        const newLastTs = upd.points && upd.points.length
+          ? upd.points[upd.points.length - 1].ts : null;
+        const changed = prevPrice !== upd.asset.current_price || prevLastTs !== newLastTs;
         MS.chart = upd;
         const canvas2 = document.getElementById('md-canvas');
         if (canvas2) drawChart(canvas2, upd.points, upd.asset);
@@ -494,6 +516,10 @@
         if (stats) stats.innerHTML = `H: <b>${priceFmt(upd.asset.high_24h)}</b> · L: <b>${priceFmt(upd.asset.low_24h)}</b>`;
         const hold = document.getElementById('md-holding');
         if (hold) hold.innerHTML = renderHoldingRow(assetKey, upd.asset);
+        if (changed && prevPrice !== null) {
+          MS.chartPulseUntil = performance.now() + 700;
+          if (!MS.chartPulseRaf) MS.chartPulseRaf = requestAnimationFrame(pulseLoop);
+        }
         return upd;
       } catch (e) { return null; }
     };
@@ -609,6 +635,24 @@
     ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
+
+    // Pulse — расходящееся кольцо при приходе новых данных. Таймштамп
+    // окончания пульса хранится в MS.chartPulseUntil, ставится в fetchChart
+    // когда обнаружено изменение цены/таймштампа последней точки.
+    const pulseUntil = MS.chartPulseUntil || 0;
+    const remain = pulseUntil - performance.now();
+    if (remain > 0) {
+      const PULSE_MS = 700;
+      const t = 1 - (remain / PULSE_MS);   // 0 → 1
+      const ringR = 4 + t * 16;             // 4 → 20 px
+      ctx.globalAlpha = Math.max(0, 1 - t);
+      ctx.strokeStyle = lineColor;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(lastX, lastY, ringR, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
 
     // Axis labels
     ctx.fillStyle = '#888';
