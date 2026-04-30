@@ -916,6 +916,10 @@ function openGameScreen(gameKey) {
     showView('flappy');
     return;
   }
+  if (gameKey === 'market') {
+    showView('market');
+    return;
+  }
   const grid = document.querySelector('.game-grid');
   if (grid) grid.style.display = 'none';
   const area = document.getElementById('game-play-area');
@@ -1006,6 +1010,8 @@ function renderGamePlay(game, target) {
     if (typeof window.snakeEnter === 'function') window.snakeEnter();
   } else if (game === 'flappy') {
     showView('flappy');
+  } else if (game === 'market') {
+    showView('market');
   }
 }
 

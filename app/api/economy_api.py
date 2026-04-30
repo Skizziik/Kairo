@@ -1454,3 +1454,124 @@ async def api_flappy_leaderboard(sort_by: str = "lifetime", user: dict = Depends
     if sort_by not in ("lifetime", "best_run"):
         sort_by = "lifetime"
     return await _flappy.leaderboard(sort_by=sort_by, limit=20)
+
+
+# ================================================================
+# 📈 MARKET — TRYLLA EXCHANGE
+# ================================================================
+from app.economy import market as _market
+
+
+class MarketBuyReq(BaseModel):
+    asset_key: str
+    cash_amount: int = Field(..., ge=1)
+
+
+class MarketSellReq(BaseModel):
+    asset_key: str
+    quantity_pct: int = Field(default=100, ge=1, le=100)
+
+
+class MarketConvertReq(BaseModel):
+    amount_trylla: int = Field(..., ge=1)
+
+
+class MarketSubReq(BaseModel):
+    target_id: int
+
+
+class MarketPrivacyReq(BaseModel):
+    privacy: str = Field(..., pattern=r"^(public|private)$")
+
+
+@router.get("/market/state")
+async def api_market_state(user: dict = Depends(require_user)) -> dict:
+    return await _market.get_state(int(user["id"]))
+
+
+@router.get("/market/assets")
+async def api_market_assets(user: dict = Depends(require_user)) -> list[dict]:
+    _ = user
+    return await _market.get_assets()
+
+
+@router.get("/market/chart/{asset_key}")
+async def api_market_chart(asset_key: str, points: int = 100,
+                            user: dict = Depends(require_user)) -> dict:
+    _ = user
+    return await _market.get_chart(asset_key, points=max(20, min(500, points)))
+
+
+@router.get("/market/news")
+async def api_market_news(limit: int = 30, user: dict = Depends(require_user)) -> list[dict]:
+    _ = user
+    return await _market.get_news(limit=max(5, min(50, limit)))
+
+
+@router.get("/market/leaderboard")
+async def api_market_leaderboard(sort_by: str = "total_value",
+                                  user: dict = Depends(require_user)) -> list[dict]:
+    _ = user
+    return await _market.leaderboard(sort_by=sort_by, limit=30)
+
+
+@router.post("/market/buy")
+async def api_market_buy(req: MarketBuyReq, user: dict = Depends(require_user)) -> dict:
+    return await _market.buy_asset(int(user["id"]), req.asset_key, int(req.cash_amount))
+
+
+@router.post("/market/sell")
+async def api_market_sell(req: MarketSellReq, user: dict = Depends(require_user)) -> dict:
+    return await _market.sell_asset(int(user["id"]), req.asset_key, int(req.quantity_pct))
+
+
+@router.post("/market/convert")
+async def api_market_convert(req: MarketConvertReq, user: dict = Depends(require_user)) -> dict:
+    return await _market.convert_to_coins(int(user["id"]), int(req.amount_trylla))
+
+
+@router.get("/market/profile/{target_id}")
+async def api_market_profile(target_id: int, user: dict = Depends(require_user)) -> dict:
+    return await _market.get_other_portfolio(int(user["id"]), int(target_id))
+
+
+@router.post("/market/subscribe")
+async def api_market_subscribe(req: MarketSubReq, user: dict = Depends(require_user)) -> dict:
+    return await _market.buy_subscription(int(user["id"]), int(req.target_id))
+
+
+@router.post("/market/privacy")
+async def api_market_privacy(req: MarketPrivacyReq, user: dict = Depends(require_user)) -> dict:
+    from app.db.client import pool
+    async with pool().acquire() as conn:
+        await conn.execute(
+            "update market_users set portfolio_privacy = $2 where tg_id = $1",
+            int(user["id"]), req.privacy,
+        )
+    return {"ok": True, "privacy": req.privacy}
+
+
+# ── BANK / LOANS ──────────────────────────────────────────────────
+
+class MarketLoanTakeReq(BaseModel):
+    amount: int = Field(..., ge=1)
+
+
+class MarketLoanRepayReq(BaseModel):
+    loan_id: int
+    amount: int = Field(..., ge=1)
+
+
+@router.get("/market/bank")
+async def api_market_bank(user: dict = Depends(require_user)) -> dict:
+    return await _market.get_bank_state(int(user["id"]))
+
+
+@router.post("/market/loan/take")
+async def api_market_loan_take(req: MarketLoanTakeReq, user: dict = Depends(require_user)) -> dict:
+    return await _market.take_loan(int(user["id"]), int(req.amount))
+
+
+@router.post("/market/loan/repay")
+async def api_market_loan_repay(req: MarketLoanRepayReq, user: dict = Depends(require_user)) -> dict:
+    return await _market.repay_loan(int(user["id"]), int(req.loan_id), int(req.amount))

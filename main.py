@@ -21,6 +21,7 @@ from app.economy import jackpot as _jackpot
 from app.economy import snake as _snake
 from app.economy import tax as _tax
 from app.economy import flappy as _flappy
+from app.economy import market as _market
 from app.economy import tiers as _tiers
 from app.economy import gear as _gear
 from app.economy import mines as _mines
@@ -91,6 +92,10 @@ async def lifespan(_: FastAPI):
         await _flappy.ensure_schema()
     except Exception as e:
         log.warning("flappy schema migration failed: %s", e)
+    try:
+        await _market.ensure_schema()
+    except Exception as e:
+        log.warning("market schema migration failed: %s", e)
     # Trim oversized case pools (idempotent — only changes if current count > cap)
     try:
         await _case_rebalance.rebalance_all()
@@ -140,6 +145,13 @@ async def lifespan(_: FastAPI):
     scheduler_tasks.append(asyncio.create_task(_tax.midnight_loop()))
     scheduler_tasks.append(asyncio.create_task(_tax.raid_loop()))
     log.info("tax loops started (hourly + midnight SET + raid sweeper)")
+
+    # Market exchange — price ticks + news + whales + 24h reset
+    scheduler_tasks.append(asyncio.create_task(_market.price_loop()))
+    scheduler_tasks.append(asyncio.create_task(_market.news_loop()))
+    scheduler_tasks.append(asyncio.create_task(_market.whale_loop()))
+    scheduler_tasks.append(asyncio.create_task(_market.daily_reset_loop()))
+    log.info("market loops started (price + news + whale + daily reset)")
 
     try:
         yield

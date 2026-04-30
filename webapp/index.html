@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="./jackpot.css?v=20260428c" />
   <link rel="stylesheet" href="./tax.css?v=20260429e" />
   <link rel="stylesheet" href="./flappy.css?v=20260429c" />
+  <link rel="stylesheet" href="./market.css?v=20260430a" />
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
@@ -172,6 +173,11 @@
       <section class="view" data-view="games">
         <h2>🎰 Игры</h2>
         <div class="game-grid">
+          <div class="game-card market-card market-card-new" data-game="market">
+            <div class="game-icon">📈</div>
+            <div class="game-name">TRYLLA Exchange <span class="market-new-badge">NEW</span></div>
+            <div class="game-desc">Биржа: 294 актива, ловишь рост, реагируешь на новости, обыгрываешь рынок. TRYLLA → 🪙 1:1.</div>
+          </div>
           <div class="game-card flappy-card flappy-card-new" data-game="flappy">
             <div class="game-icon">🐦</div>
             <div class="game-name">Взлёт <span class="flappy-new-badge">NEW</span></div>
@@ -304,6 +310,14 @@
         </div>
       </section>
 
+      <!-- view: market (TRYLLA EXCHANGE) -->
+      <section class="view" data-view="market">
+        <h2>📈 TRYLLA Exchange</h2>
+        <div id="market-app">
+          <div class="loader">Загрузка...</div>
+        </div>
+      </section>
+
       <!-- view: leaderboard -->
       <section class="view" data-view="leaderboard">
         <h2>💎 Лидерборд</h2>
@@ -386,5 +400,6 @@
   <script src="./jackpot.js?v=20260428f"></script>
   <script src="./tax.js?v=20260429e"></script>
   <script src="./flappy.js?v=20260429d"></script>
+  <script src="./market.js?v=20260430a"></script>
 </body>
 </html>
