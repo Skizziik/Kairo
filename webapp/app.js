@@ -132,14 +132,41 @@ function fmt(n) {
 function fmtCompact(n) {
   n = Number(n) || 0;
   const abs = Math.abs(n);
+  // Стандарт топовых idle-игр (Antimatter Dimensions / NGU Idle / Egg Inc).
+  // Суффиксы short-scale системы. Покрывает до Vg (вигинтиллион = 10^63),
+  // дальше — научная нотация.
   const units = [
-    [1e15, 'Q'], [1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'K'],
+    [1e63, 'Vg'],   // vigintillion
+    [1e60, 'NoD'],  // novemdecillion
+    [1e57, 'OcD'],  // octodecillion
+    [1e54, 'SpD'],  // septendecillion
+    [1e51, 'SxD'],  // sexdecillion
+    [1e48, 'QiD'],  // quindecillion
+    [1e45, 'QaD'],  // quattuordecillion
+    [1e42, 'TD'],   // tredecillion
+    [1e39, 'DD'],   // duodecillion
+    [1e36, 'UD'],   // undecillion
+    [1e33, 'Dc'],   // decillion
+    [1e30, 'No'],   // nonillion
+    [1e27, 'Oc'],   // octillion
+    [1e24, 'Sp'],   // septillion
+    [1e21, 'Sx'],   // sextillion
+    [1e18, 'Qi'],   // quintillion
+    [1e15, 'Q'],    // quadrillion (legacy: оставлен Q вместо Qa для совместимости)
+    [1e12, 'T'],    // trillion
+    [1e9,  'B'],    // billion
+    [1e6,  'M'],    // million
+    [1e3,  'K'],    // thousand
   ];
   for (const [mag, suf] of units) {
     if (abs >= mag) {
       const v = n / mag;
       return (v >= 100 ? v.toFixed(0) : v.toFixed(1).replace(/\.0$/, '')) + suf;
     }
+  }
+  // За пределами Vg — научная нотация (1.5e+66)
+  if (abs >= 1e66) {
+    return n.toExponential(2);
   }
   return String(Math.round(n));
 }
