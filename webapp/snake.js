@@ -96,7 +96,7 @@
         <div class="snake-hub">
           <div class="snake-level-card">
             <div class="snake-level-row">
-              <div>🐍 <span class="snake-level-num">${s.level}<small>/100</small></span></div>
+              <div>🐍 <span class="snake-level-num">${s.level}<small>/${SS.cfg.player_max_level || 1000}</small></span></div>
               <div class="snake-level-xp">${fmt(cur)} / ${fmt(span)} XP</div>
             </div>
             <div class="snake-level-bar"><div class="snake-level-bar-fill" style="width:${pct}%"></div></div>

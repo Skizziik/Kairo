@@ -713,14 +713,17 @@ def xp_needed_for(level: int) -> int:
     return int(100 * (level ** 1.6))
 
 
+PLAYER_MAX_LEVEL = 1000
+
+
 def level_for_xp(xp: int) -> int:
-    """Reverse: max level achievable with given total XP."""
+    """Reverse: max level achievable with given total XP. Capped at 1000."""
     if xp < 0:
         return 1
     lvl = 1
     while xp >= xp_needed_for(lvl):
         lvl += 1
-        if lvl > 200:
+        if lvl > PLAYER_MAX_LEVEL:
             break
     return lvl
 
@@ -1165,6 +1168,7 @@ async def get_config() -> dict:
         ],
         "afk_snakes": AFK_SNAKES,
         "afk_snake_max_level": AFK_SNAKE_MAX_LEVEL,
+        "player_max_level": PLAYER_MAX_LEVEL,
         "skins":     COSMETIC_SKINS,
         "maps":      MAPS,
         "modes":     MODES,
