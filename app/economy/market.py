@@ -599,13 +599,16 @@ async def buy_asset(
     asset_key: str,
     cash_amount: int | None = None,
     quantity_micro: int | None = None,
+    cash_pct: int | None = None,
 ) -> dict:
-    """Купить `asset_key` либо на сумму `cash_amount` (в центах TRYLLA),
-    либо на конкретное кол-во `quantity_micro` (микро-юниты ×1e6).
-    Один из двух обязателен."""
+    """Купить `asset_key` одним из трёх способов:
+    - cash_amount: точная сумма в центах TRYLLA
+    - quantity_micro: точное кол-во в микро-юнитах (×1e6)
+    - cash_pct: процент от баланса 1-100 (обходит JS Number precision на огромных балансах)"""
     if (cash_amount is None or cash_amount <= 0) and \
-       (quantity_micro is None or quantity_micro <= 0):
-        return {"ok": False, "error": "Укажи сумму или количество"}
+       (quantity_micro is None or quantity_micro <= 0) and \
+       (cash_pct is None or cash_pct <= 0):
+        return {"ok": False, "error": "Укажи сумму, количество или %"}
     await ensure_user(tg_id)
     try:
         async with pool().acquire() as conn:
@@ -630,13 +633,20 @@ async def buy_asset(
                 base_price = int(asset["current_price"])
                 fill_price = int(base_price * (1.0 + SPREAD_PCT / 2))
 
+                # cash_pct → конвертим в cash_amount по серверному балансу
+                user_trylla = int(user["trylla"])
+                if cash_pct is not None and cash_pct > 0:
+                    cash_amount = (user_trylla * max(1, min(100, int(cash_pct)))) // 100
+                    if cash_amount <= 0:
+                        return {"ok": False, "error": "Баланс пуст"}
+
                 # Если задано quantity_micro — пересчитываем нужный cash_amount.
                 # cost = qty_micro * fill_price / 1e6 ; cash * (1-cm) >= cost
                 if quantity_micro is not None and quantity_micro > 0:
                     cost_no_comm = (quantity_micro * fill_price + 999_999) // 1_000_000  # ceil
                     cash_amount = int(math.ceil(cost_no_comm / max(0.0001, 1.0 - cm)))
 
-                if int(user["trylla"]) < cash_amount:
+                if user_trylla < cash_amount:
                     return {"ok": False, "error": "Не хватает TRYLLA",
                             "have": int(user["trylla"]), "need": cash_amount}
 
@@ -822,17 +832,34 @@ async def sell_asset(tg_id: int, asset_key: str, quantity_pct: int = 100) -> dic
 # CONVERSION TRYLLA → main coins (taxable)
 # ============================================================
 
-async def convert_to_coins(tg_id: int, amount_trylla: int) -> dict:
-    """Конвертация TRYLLA → основные коины 1:1. Облагается налогом."""
-    if amount_trylla <= 0:
-        return {"ok": False, "error": "Сумма должна быть > 0"}
+async def convert_to_coins(
+    tg_id: int,
+    amount_trylla: int | None = None,
+    amount_pct: int | None = None,
+) -> dict:
+    """Конвертация TRYLLA → основные коины 1:1. Облагается налогом.
+
+    Можно указать либо `amount_trylla` (точная сумма в центах TRYLLA),
+    либо `amount_pct` (1-100, % от баланса) — обходит JS Number precision
+    на огромных балансах."""
+    if (amount_trylla is None or amount_trylla <= 0) and \
+       (amount_pct is None or amount_pct <= 0):
+        return {"ok": False, "error": "Укажи сумму или %"}
     await ensure_user(tg_id)
     async with pool().acquire() as conn:
         async with conn.transaction():
             user = await conn.fetchrow(
                 "select trylla from market_users where tg_id = $1 for update", tg_id,
             )
-            if user is None or int(user["trylla"]) < amount_trylla:
+            if user is None:
+                return {"ok": False, "error": "Нет состояния"}
+            user_trylla = int(user["trylla"])
+            # pct mode: серверный расчёт от баланса
+            if amount_pct is not None and amount_pct > 0:
+                amount_trylla = (user_trylla * max(1, min(100, int(amount_pct)))) // 100
+                if amount_trylla <= 0:
+                    return {"ok": False, "error": "Баланс пуст"}
+            if user_trylla < amount_trylla:
                 return {"ok": False, "error": "Недостаточно TRYLLA"}
             await conn.execute(
                 "update market_users set trylla = trylla - $2 where tg_id = $1",

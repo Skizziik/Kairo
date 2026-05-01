@@ -1464,9 +1464,13 @@ from app.economy import market as _market
 
 class MarketBuyReq(BaseModel):
     asset_key: str
-    # Один из двух — либо сумма в TRYLLA центах, либо желаемое кол-во в микро-юнитах
+    # Варианты передачи (один из):
+    # - cash_amount (центы TRYLLA, int OR str для huge values)
+    # - quantity_micro (микро-юниты ×1e6)
+    # - cash_pct (1-100, % от баланса) — обходит JS Number precision
     cash_amount:    int | None = Field(default=None, ge=1)
     quantity_micro: int | None = Field(default=None, ge=1)
+    cash_pct:       int | None = Field(default=None, ge=1, le=100)
 
 
 class MarketSellReq(BaseModel):
@@ -1475,7 +1479,9 @@ class MarketSellReq(BaseModel):
 
 
 class MarketConvertReq(BaseModel):
-    amount_trylla: int = Field(..., ge=1)
+    # int для нормальных сумм; для огромных балансов > 2^53 фронт шлёт как str.
+    amount_trylla: int | None = Field(default=None, ge=1)
+    amount_pct:    int | None = Field(default=None, ge=1, le=100)
 
 
 class MarketSubReq(BaseModel):
@@ -1525,6 +1531,7 @@ async def api_market_buy(req: MarketBuyReq, user: dict = Depends(require_user)) 
         int(user["id"]), req.asset_key,
         cash_amount=req.cash_amount,
         quantity_micro=req.quantity_micro,
+        cash_pct=req.cash_pct,
     )
 
 
@@ -1535,7 +1542,11 @@ async def api_market_sell(req: MarketSellReq, user: dict = Depends(require_user)
 
 @router.post("/market/convert")
 async def api_market_convert(req: MarketConvertReq, user: dict = Depends(require_user)) -> dict:
-    return await _market.convert_to_coins(int(user["id"]), int(req.amount_trylla))
+    return await _market.convert_to_coins(
+        int(user["id"]),
+        amount_trylla=req.amount_trylla,
+        amount_pct=req.amount_pct,
+    )
 
 
 @router.get("/market/profile/{target_id}")

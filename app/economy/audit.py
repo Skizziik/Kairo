@@ -31,6 +31,31 @@ async def ensure_schema() -> None:
     sql = sql_path.read_text(encoding="utf-8")
     async with pool().acquire() as conn:
         await conn.execute(sql)
+        # Idempotent upgrade: переносим economy_users + economy_transactions
+        # с bigint на numeric(50,0). Без этого UPDATE balance = balance + N
+        # для юзеров с раздутыми балансами вылетает с overflow, и snake/jackpot
+        # crediт молча падает (юзер видит +0). Гард по data_type — повторный
+        # запуск миграции = no-op.
+        try:
+            await conn.execute("""
+                do $$
+                begin
+                  if (select data_type from information_schema.columns
+                      where table_schema='public' and table_name='economy_users'
+                        and column_name='balance') = 'bigint' then
+                    alter table economy_users
+                      alter column balance      type numeric(50,0) using balance::numeric,
+                      alter column total_earned type numeric(50,0) using total_earned::numeric,
+                      alter column total_spent  type numeric(50,0) using total_spent::numeric;
+                    alter table economy_transactions
+                      alter column amount        type numeric(50,0) using amount::numeric,
+                      alter column balance_after type numeric(50,0) using balance_after::numeric;
+                  end if;
+                end $$;
+            """)
+            log.info("economy bigint→numeric migration ensured")
+        except Exception as e:
+            log.warning("economy numeric migration failed: %s", e)
     log.info("audit schema ensured")
 
 

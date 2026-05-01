@@ -766,32 +766,46 @@
         b.addEventListener('click', () => setMode(b.dataset.mode));
       });
 
+      // pendingPct — если кликнули % кнопку, шлём cash_pct (server compute),
+      // обходит JS Number precision на огромных балансах
+      let pendingPct = null;
       overlay.querySelectorAll('#mt-quick [data-amt]').forEach(b => {
         b.addEventListener('click', () => {
           // Quick-кнопки всегда работают в режиме TRYLLA (если был qty — переключаем).
           if (mode !== 'cash') setMode('cash');
+          pendingPct = null;
           const v = b.dataset.amt;
-          const cashUnits = myCash / 100;
-          if (v === 'quarter') input.value = Math.floor(cashUnits * 0.25);
-          else if (v === 'half') input.value = Math.floor(cashUnits * 0.5);
-          else if (v === 'all') input.value = Math.floor(cashUnits);
-          else input.value = v;
+          if (v === 'quarter')   { pendingPct = 25;  input.value = ''; input.placeholder = '25% от баланса'; }
+          else if (v === 'half') { pendingPct = 50;  input.value = ''; input.placeholder = '50% от баланса'; }
+          else if (v === 'all')  { pendingPct = 100; input.value = ''; input.placeholder = '100% от баланса'; }
+          else { input.value = v; }
           updatePreview();
         });
       });
 
-      input.addEventListener('input', updatePreview);
+      input.addEventListener('input', () => { pendingPct = null; updatePreview(); });
 
       document.getElementById('mt-go').addEventListener('click', async () => {
-        const v = Number(input.value);
-        if (!v || v <= 0) { toast(mode === 'cash' ? 'Введи сумму' : 'Введи количество'); return; }
         const body = { asset_key: asset.key };
-        if (mode === 'cash') {
-          const cents = Math.max(1, Math.min(myCash, Math.floor(v * 100)));
-          body.cash_amount = cents;
+        if (pendingPct !== null && pendingPct > 0 && mode === 'cash') {
+          body.cash_pct = pendingPct;
         } else {
-          // микро-юниты = штук × 1e6
-          body.quantity_micro = Math.max(1, Math.floor(v * 1_000_000));
+          const raw = String(input.value).trim().replace(/[ ,]/g, '');
+          if (!raw) { toast(mode === 'cash' ? 'Введи сумму' : 'Введи количество'); return; }
+          if (mode === 'cash') {
+            // BigInt для огромных значений; cents = trylla * 100
+            try {
+              const cents = (BigInt(raw) * 100n).toString();
+              if (cents === '0') { toast('Введи сумму'); return; }
+              body.cash_amount = cents;
+            } catch (e) { toast('Неверный формат суммы'); return; }
+          } else {
+            try {
+              const qm = (BigInt(raw) * 1000000n).toString();
+              if (qm === '0') { toast('Введи количество'); return; }
+              body.quantity_micro = qm;
+            } catch (e) { toast('Неверный формат количества'); return; }
+          }
         }
         let r;
         try {
@@ -801,7 +815,8 @@
           return;
         }
         if (!r || !r.ok) { toast((r && r.error) || 'Ошибка покупки'); return; }
-        toast('✓ Куплено ' + (r.quantity / 1_000_000).toFixed(6) + ' ' + asset.symbol);
+        const qStr = r.quantity ? (Number(r.quantity) / 1_000_000).toFixed(6) : '0';
+        toast('✓ Куплено ' + qStr + ' ' + asset.symbol);
         tg?.HapticFeedback?.notificationOccurred?.('success');
         overlay.remove();
         await refresh();
@@ -1239,12 +1254,14 @@
         <div class="market-convert-rate">💱 1 TRYLLA = 1 🪙</div>
         <div class="market-convert-tax">⚠ Облагается налогом — учтётся в дневном tax-tick</div>
         <div class="market-convert-bal">У тебя: <b>${fmtTCompact(s.trylla)}</b> TRYLLA</div>
-        <input type="number" id="market-conv-input" class="market-trade-input" placeholder="Сколько обменять?" min="1" max="${Math.floor(s.trylla/100)}" />
+        <input type="text" inputmode="numeric" id="market-conv-input" class="market-trade-input" placeholder="Сколько обменять? (TRYLLA)" />
         <div class="market-trade-quick">
           <button data-amt="1000">1K</button>
           <button data-amt="10000">10K</button>
           <button data-amt="100000">100K</button>
-          <button data-amt="all">ВСЁ</button>
+          <button data-pct="25">25%</button>
+          <button data-pct="50">50%</button>
+          <button data-pct="100">ВСЁ</button>
         </div>
         <button class="market-trade-go buy" id="market-conv-btn">💱 Конвертировать в коины</button>
       </div>
@@ -1259,18 +1276,43 @@
       </div>
     `;
     const input = document.getElementById('market-conv-input');
+    let pendingPct = null;   // если кликнули %-кнопку — отдаём pct, не сумму
     c.querySelectorAll('[data-amt]').forEach(b => {
       b.addEventListener('click', () => {
-        const v = b.dataset.amt;
-        if (v === 'all') input.value = Math.floor(s.trylla / 100);
-        else input.value = v;
+        pendingPct = null;
+        input.value = b.dataset.amt;
       });
     });
+    c.querySelectorAll('[data-pct]').forEach(b => {
+      b.addEventListener('click', () => {
+        pendingPct = Number(b.dataset.pct);
+        input.value = '';   // визуально очищаем — кнопка %% сама скажет серверу
+        input.placeholder = `Будет конвертировано ${pendingPct}% от баланса`;
+      });
+    });
+    input.addEventListener('input', () => { pendingPct = null; });
+
     document.getElementById('market-conv-btn').addEventListener('click', async () => {
-      const cents = Math.max(1, Math.min(s.trylla, Math.floor(Number(input.value) * 100)));
-      if (!cents) { toast('Введи сумму'); return; }
-      const r = await api('/api/market/convert', { method: 'POST', body: JSON.stringify({ amount_trylla: cents }) });
-      if (!r.ok) { toast(r.error || 'Ошибка'); return; }
+      // Огромные балансы: используем pct (серверный расчёт) или строку с BigInt
+      let body;
+      if (pendingPct !== null && pendingPct > 0) {
+        body = { amount_pct: pendingPct };
+      } else {
+        const v = String(input.value).trim().replace(/[ ,]/g, '');
+        if (!v) { toast('Введи сумму'); return; }
+        // Парсим как BigInt чтобы не потерять точность на огромных значениях
+        let cents;
+        try {
+          cents = (BigInt(v) * 100n).toString();
+        } catch (e) { toast('Неверный формат суммы'); return; }
+        if (cents === '0') { toast('Введи сумму'); return; }
+        body = { amount_trylla: cents };
+      }
+      let r;
+      try {
+        r = await api('/api/market/convert', { method: 'POST', body: JSON.stringify(body) });
+      } catch (e) { toast('Ошибка сети: ' + (e.message || 'неизвестно')); return; }
+      if (!r || !r.ok) { toast((r && r.error) || 'Ошибка'); return; }
       toast('✓ Получено ' + fmt(r.credited_coins) + ' 🪙');
       if (typeof r.new_balance === 'number') {
         window.state.me.balance = r.new_balance;

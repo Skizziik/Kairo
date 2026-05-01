@@ -119,3 +119,29 @@ create table if not exists economy_market (
 );
 
 create index if not exists idx_market_active on economy_market (status, created_at desc) where status='active';
+
+
+-- ============================================================
+-- UPGRADE: bigint → numeric(50,0) для money-столбцов экономии.
+-- Снимает аппаратный лимит bigint (9.2e18) — балансы любых размеров.
+-- Идемпотентно: гард по data_type, повторный запуск миграции — no-op.
+-- Решает баги: snake/jackpot/etc credit failed silently на раздутых
+-- балансах (overflow на UPDATE balance = balance + N).
+-- ============================================================
+do $$
+begin
+  if (select data_type from information_schema.columns
+      where table_schema='public' and table_name='economy_users'
+        and column_name='balance') = 'bigint' then
+
+    alter table economy_users
+      alter column balance      type numeric(50,0) using balance::numeric,
+      alter column total_earned type numeric(50,0) using total_earned::numeric,
+      alter column total_spent  type numeric(50,0) using total_spent::numeric;
+
+    alter table economy_transactions
+      alter column amount        type numeric(50,0) using amount::numeric,
+      alter column balance_after type numeric(50,0) using balance_after::numeric;
+
+  end if;
+end $$;
