@@ -71,15 +71,17 @@ def _hour_msk() -> int:
 
 
 def _is_party_time() -> bool:
-    """Пятница/суббота вечер 18-26 (=02:00) — время хайпа."""
+    """Поздний вечер пт/сб (21:00-02:00) — единственное окно для HYPE.
+    Раньше было 18:00, но HYPE срабатывал слишком часто и истерил.
+    """
     msk_now = datetime.now(timezone.utc) + timedelta(hours=3)
     weekday = msk_now.weekday()    # 0=пн, 4=пт, 5=сб
     hour = msk_now.hour
-    if weekday == 4 and hour >= 18:           # пт вечер
+    if weekday == 4 and hour >= 21:                   # пт поздний вечер
         return True
-    if weekday == 5 and (hour >= 12 or hour < 4):   # сб днём+вечером
+    if weekday == 5 and (hour >= 21 or hour < 3):     # сб поздний вечер
         return True
-    if weekday == 6 and hour < 4:             # вс ночь (= сб вечер)
+    if weekday == 6 and hour < 3:                     # вс ночь (= сб поздний)
         return True
     return False
 
@@ -234,16 +236,17 @@ def select_persona(state: MoodState, last_text: str = "") -> personas.Persona:
     if state.offended >= 70:
         return personas.OBIZHEN
 
-    # 2. ХАЙП — пятница/суббота вечер + энергия высокая
-    if _is_party_time() and state.energy >= 60:
+    # 2. ХАЙП — только поздний вечер пт/сб + ВЫСОКАЯ энергия
+    if _is_party_time() and state.energy >= 80:
         return personas.HYPE
 
     # 3. ОТМОРОЗ — токсичность высокая
-    if state.toxicity >= 65:
+    if state.toxicity >= 70:
         return personas.OTMOROZ
 
-    # 4. ФИЛОСОФ — триггер-слова или 5% рандом
-    if personas.has_philosophy_trigger(last_text) or random.random() < 0.05:
+    # 4. ФИЛОСОФ — только если триггер-слово в сообщении (без рандома —
+    # рандом давал 5% всегда, бот включал философа невпопад)
+    if personas.has_philosophy_trigger(last_text):
         return personas.FILOSOF
 
     # 5. Дефолт
