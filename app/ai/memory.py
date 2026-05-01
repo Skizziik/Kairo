@@ -135,6 +135,16 @@ async def answer_as_rip(
             seen.add(tag)
             members.append(tag)
 
+    # Также добавляем @-юзернеймы которые юзер ВРУЧНУЮ упомянул в текущем
+    # вопросе. Иначе бот их фильтрует как «не из списка участников» и
+    # игнорирует просьбу типа «передай привет @lagurman».
+    explicit_mentions = re.findall(r"@([A-Za-z0-9_]{4,})", question or "")
+    for um in explicit_mentions:
+        tag = f"@{um}"
+        if tag not in seen:
+            seen.add(tag)
+            members.append(tag)
+
     memories: list[str] = []
     if mem_count > 0:
         try:
