@@ -1103,7 +1103,9 @@ class SnakeRunReq(BaseModel):
     mode: str
     map_id: str
     died_to: str = "self"
-    coins_earned: int = Field(default=0, ge=0)   # client's per-eat sum (with lucky/crit/combo/streak/treasure already applied)
+    # Принимаем int OR str — для огромных значений (>2^53) JS Number теряет
+    # точность; фронт шлёт String(value) и Pydantic коэрцит обратно в int.
+    coins_earned: int | str = Field(default=0)
 
 
 class SnakeUpgradeReq(BaseModel):

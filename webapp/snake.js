@@ -1297,7 +1297,11 @@
         // RAW pre-multiplier sum (server adds greed/total/um/daily on top).
         // G.coins is the display value with run-wide mult already applied —
         // sending that would double-apply.
-        coins_earned: G.rawCoins || G.coins,
+        // Отправляем как СТРОКУ — иначе при rawCoins ≥ 1e21 V8 сериализует
+        // в scientific notation ("4.56e+20"), Python парсит как float, Pydantic
+        // роняет → fallback на avg = ~2 ляма. С строкой Python int парсит
+        // точно.
+        coins_earned: String(Math.floor(G.rawCoins || G.coins || 0)),
       }),
     }).then(resp => {
       if (!resp) return;
