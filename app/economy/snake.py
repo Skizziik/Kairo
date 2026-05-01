@@ -1138,8 +1138,9 @@ async def get_state(tg_id: int) -> dict:
             daily_bonus_mult = 1 + (daily_bonus_mult - 1) * 3
         elif is_first_today and art_eff["daily_first_run_base"] > 1.0:
             daily_bonus_mult = float(art_eff["daily_first_run_base"])
-    # Artifact: Корона Владыки — total ×1.05^level
-    crown_mult = (1.05 ** cur_lvl) if art_eff["crown_level_mult"] else 1.0
+    # Artifact: Корона Владыки — total ×(level × 0.23). Линейная, +11.5x за
+    # каждые 50 уровней. На 50 = ×11.5, 100 = ×23, 200 = ×46, 1000 = ×230.
+    crown_mult = max(1.0, cur_lvl * 0.23) if art_eff["crown_level_mult"] else 1.0
     # Artifact: Космический Двигатель — +20% к финальному множителю
     engine_mult = 1.0 + float(art_eff.get("run_total_mult_bonus", 0.0))
     coin_mult = round(greed_mult * total_mult * universal_mult * daily_bonus_mult * crown_mult * engine_mult, 4)
@@ -1334,10 +1335,12 @@ async def record_run(
     # Apply RUN-WIDE multipliers (NOT applied client-side):
     coins = int(coins * greed_mult * total_mult * um_mult * daily_bonus_mult)
 
-    # Artifact: Корона Владыки — total ×1.05^level (kicks in regardless of upgrade)
+    # Artifact: Корона Владыки — линейный множитель `level × 0.23` (см. preview
+    # multiplier выше). Заменили старую `1.05^level` экспоненту, которая на
+    # 200+ уровнях уходила в ×17K+ и ломала экономику.
     if art_eff["crown_level_mult"]:
         cur_level_now = int((row or {}).get("level", 1))
-        coins = int(coins * (1.05 ** cur_level_now))
+        coins = int(coins * max(1.0, cur_level_now * 0.23))
 
     # Artifact: Космический Двигатель — +20% к финальному ран-доходу
     engine_bonus = float(art_eff.get("run_total_mult_bonus", 0.0))
