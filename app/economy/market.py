@@ -346,9 +346,7 @@ async def price_tick() -> None:
         delta = drift * (1 + vol) * liquidity_amp * _market_mood
 
         # ⬆ Рост: НЕ ограничиваем — пускай прыгает вверх как угодно.
-        # ⬇ Падение: cap -3% за тик. Таким образом пик нарастает быстро,
-        # а отскок назад идёт плавно (не моментальный crash). Это убирает
-        # «пилу» отскоков но не трогает рост.
+        # ⬇ Падение: cap -3% за тик.
         if delta < -0.03:
             delta = -0.03
 
@@ -357,6 +355,11 @@ async def price_tick() -> None:
 
         # ── New price with hard floor/ceiling
         new_price = cur * (1.0 + delta)
+        # 🛡 SAFETY NET: ещё раз форсим минимум 97% от cur. Это ловит случаи
+        # когда delta-cap не сработал из-за какой-то экзотики (overflow,
+        # numeric edge case, race с другим тиком и т.д.). Даже если delta
+        # упустили — new_price НЕ падает ниже cur*0.97.
+        new_price = max(cur * 0.97, new_price)
         new_price = max(PRICE_FLOOR, base * 0.02, min(base * 100, new_price))
 
         # Capture BTC/gold deltas for correlation cascade
