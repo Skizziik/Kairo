@@ -740,6 +740,33 @@ async def ensure_schema() -> None:
     sql = sql_path.read_text(encoding="utf-8")
     async with pool().acquire() as conn:
         await conn.execute(sql)
+        # Idempotent migration: bigint → numeric(50,0) для денежных колонок
+        # snake. С Crown ×1.05^level и кэпом lvl=1000 итоговый множитель уходит
+        # в 5e21+, что overflow'ит bigint. После этой миграции snake credit
+        # перестаёт молча падать с +0 на больших winnings.
+        try:
+            await conn.execute("""
+                do $$
+                begin
+                  if (select data_type from information_schema.columns
+                      where table_schema='public' and table_name='snake_users'
+                        and column_name='coins_lifetime') = 'bigint' then
+                    alter table snake_users
+                      alter column coins_lifetime    type numeric(50,0) using coins_lifetime::numeric,
+                      alter column best_run_coins    type numeric(50,0) using best_run_coins::numeric,
+                      alter column daily_afk_earned  type numeric(50,0) using daily_afk_earned::numeric;
+                  end if;
+                  if (select data_type from information_schema.columns
+                      where table_schema='public' and table_name='snake_runs'
+                        and column_name='coins') = 'bigint' then
+                    alter table snake_runs
+                      alter column coins type numeric(50,0) using coins::numeric;
+                  end if;
+                end $$;
+            """)
+            log.info("snake bigint→numeric migration ensured")
+        except Exception as e:
+            log.warning("snake numeric migration failed: %s", e)
     log.info("snake schema ensured")
     # One-shot data migrations: rescale players to new upgrade curves
     try:
@@ -1335,7 +1362,11 @@ async def record_run(
         xp_total = int(xp_total * (1 + xp_mult_lvl * 0.10))
 
     # === Persist ===
-    async with pool().acquire() as conn:
+    # Try/except оборачивает блок чтобы ошибки overflow / DB не уходили в
+    # silent 500. Раньше при overflow сырая ошибка убивала запрос, и фронт
+    # ловил .catch → показывал «+0».
+    try:
+      async with pool().acquire() as conn:
         async with conn.transaction():
             # Credit coins to economy
             new_bal_row = await conn.fetchrow(
@@ -1392,6 +1423,9 @@ async def record_run(
                 """,
                 tg_id,
             )
+    except Exception as e:
+        log.exception("snake record_run persist failed for tg_id=%s", tg_id)
+        return {"ok": False, "error": f"DB ошибка: {type(e).__name__}: {e}", "coins_credited": 0}
 
     # Tax accrual (best-effort, non-blocking)
     try:

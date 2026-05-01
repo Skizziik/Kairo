@@ -1301,6 +1301,10 @@
       }),
     }).then(resp => {
       if (!resp) return;
+      // Если бэк вернул ok:false — surface реальную причину, не молчим +0
+      if (resp.ok === false && resp.error) {
+        toast('Ошибка сохранения: ' + resp.error, 4000);
+      }
       const credited = resp.coins_credited || 0;
       const xp = resp.xp_gained || 0;
       const coinsEl = document.getElementById('sg-d-coins');
