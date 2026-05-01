@@ -709,17 +709,28 @@ def _draw_shard_from_case(case_key: str) -> dict | None:
 def xp_needed_for(level: int) -> int:
     """XP threshold to reach `level + 1` from level 1 cumulative.
 
-    До 240 ур — стандартная кривая `100 × level^1.6` (примерно 665K на 240).
-    После 240 — каждые 100 уровней XP удваивается (anti-runaway, чтобы Корона
-    с экспонентой 1.05^level не доводила экономику до ничего за пару дней).
-    На 500 ур ≈ 27M XP, на 1000 ≈ 4.7B XP."""
+    Кривая в три этапа:
+    - LVL ≤ 240: стандарт `100 × level^1.6` (на 240 = 665K)
+    - LVL 241-500: плавный 2× за каждые 100 уровней (на 500 = 14.5M)
+    - LVL > 500: per-level gap **×1.5 каждый уровень**. Жёсткая стена.
+      На 510 нужно 7.5M на gap, на 520 = 432M, на 530 = 25B. Effective
+      max ~530-540, дальше идёт миллиарды XP за уровень.
+    """
     if level < 1:
         return 0
     base = 100 * (level ** 1.6)
     if level <= 240:
         return int(base)
-    excess = level - 240
-    return int(base * (2 ** (excess / 100)))
+    if level <= 500:
+        excess = level - 240
+        return int(base * (2 ** (excess / 100)))
+    # Past 500: per-level gap × 1.5 каждый уровень
+    base_at_500 = int(100 * (500 ** 1.6) * (2 ** 2.6))                  # ~14.5M
+    base_at_501 = int(100 * (501 ** 1.6) * (2 ** 2.61))                 # ~14.65M
+    gap_500_to_501 = base_at_501 - base_at_500                          # ~130K
+    excess = level - 500
+    # Сумма геометрической прогрессии: gap × (1.5^N − 1) / (1.5 − 1)
+    return base_at_500 + int(2 * gap_500_to_501 * (1.5 ** excess - 1))
 
 
 PLAYER_MAX_LEVEL = 1000
