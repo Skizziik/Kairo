@@ -25,8 +25,11 @@
     return fmt(Math.floor(cents / 100));
   }
   function fmtTSign(cents) {
-    const v = cents >= 0 ? '+' : '';
-    return v + fmt(Math.floor(cents / 100));
+    // Compact формат + знак. На huge balances "+991 222 863 621 712 500 000"
+    // нечитаемо — делаем "+991Qi". Минус идёт из fmtCompact для negative.
+    const t = Math.trunc(cents / 100);
+    const sign = t >= 0 ? '+' : '';
+    return sign + fmtCompact(t);
   }
   function fmtCompact(n) {
     if (typeof window.fmtCompact === 'function') return window.fmtCompact(n);
