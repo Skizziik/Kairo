@@ -345,6 +345,12 @@ async def price_tick() -> None:
         # ── Final delta
         delta = drift * (1 + vol) * liquidity_amp * _market_mood
 
+        # Per-tick cap — не даём цене скакать больше чем на ±8% за тик. Иначе
+        # на графике получается пила (особенно на assets с vol≥0.85+liq≤0.3,
+        # где liquidity_amp×vol×mood даёт ±25-30% per tick). Big peaks остаются —
+        # просто растягиваются на несколько тиков.
+        delta = max(-0.08, min(0.08, delta))
+
         # Record for momentum
         st["last_delta"] = delta * 0.5 + st["last_delta"] * 0.5   # smoothed
 
