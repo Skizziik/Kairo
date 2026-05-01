@@ -8,3 +8,8 @@ create table if not exists bot_chat_state (
     extras          jsonb not null default '{}'::jsonb,  -- future use
     updated_at      timestamptz not null default now()
 );
+
+-- Mood/persona state — динамическая личность (Кайро 2.0)
+-- mood/energy/offended/toxicity, last_persona, day_seed. Полная схема в mood_engine.py.
+alter table bot_chat_state
+    add column if not exists mood_state jsonb not null default '{}'::jsonb;

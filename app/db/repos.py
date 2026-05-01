@@ -288,6 +288,43 @@ async def push_opener(chat_id: int, word: str, max_keep: int = 10) -> None:
         )
 
 
+async def get_mood_state(chat_id: int) -> dict | None:
+    """Возвращает dict из bot_chat_state.mood_state или None если пусто."""
+    async with pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "select mood_state from bot_chat_state where chat_id = $1",
+            chat_id,
+        )
+    if row is None:
+        return None
+    raw = row["mood_state"]
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else None
+        except Exception:
+            return None
+    return None
+
+
+async def save_mood_state(chat_id: int, state: dict) -> None:
+    """Upsert mood_state JSON в bot_chat_state."""
+    payload = json.dumps(state, ensure_ascii=False)
+    async with pool().acquire() as conn:
+        await conn.execute(
+            """
+            insert into bot_chat_state (chat_id, mood_state, updated_at)
+            values ($1, $2::jsonb, now())
+            on conflict (chat_id) do update set
+                mood_state = excluded.mood_state,
+                updated_at = now()
+            """,
+            chat_id, payload,
+        )
+
+
 async def can_chime_and_mark(chat_id: int, cooldown_seconds: int) -> bool:
     """Atomic: check cooldown; if expired, mark and return True. Else False."""
     async with pool().acquire() as conn:

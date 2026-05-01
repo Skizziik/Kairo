@@ -56,6 +56,18 @@ async def ensure_schema() -> None:
             log.info("economy bigint→numeric migration ensured")
         except Exception as e:
             log.warning("economy numeric migration failed: %s", e)
+
+        # AI bot mood state — добавляет колонку mood_state в bot_chat_state
+        # для динамической личности Кайро 2.0 (5 модусов + dynamic mood).
+        try:
+            await conn.execute("""
+                alter table bot_chat_state
+                    add column if not exists mood_state jsonb
+                    not null default '{}'::jsonb;
+            """)
+            log.info("bot_chat_state.mood_state column ensured")
+        except Exception as e:
+            log.warning("mood_state column migration failed: %s", e)
     log.info("audit schema ensured")
 
 

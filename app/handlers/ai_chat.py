@@ -57,6 +57,11 @@ async def _ask(msg: Message, question: str) -> None:
         log.exception("ai answer failed")
         await msg.reply("Щас не могу, мозги лагают. Попробуй через минуту.")
         return
+    # answer == None means active persona (e.g. ОБИДЕЛСЯ) chose silence.
+    # Скипаем reply вообще — это часть UX динамической личности.
+    if answer is None:
+        log.info("bot chose silence in chat=%s", msg.chat.id)
+        return
     sent = await msg.reply(answer or "...")
     # Log bot's own message for self-learning feedback tracking
     try:

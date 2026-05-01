@@ -6,7 +6,7 @@ import logging
 import re
 from datetime import datetime
 
-from app.ai import llm
+from app.ai import llm, mood_engine
 from app.ai.embeddings import embed, embed_one
 from app.ai.prompts import EXTRACT_SYSTEM, build_system_prompt
 from app.config import get_settings
@@ -77,7 +77,9 @@ async def answer_as_rip(
     asker_id: int,
     asker_display: str,
     question: str,
-) -> str:
+) -> str | None:
+    """Отвечает от имени Кайро. Возвращает None если активный модус решил
+    промолчать (например, ОБИДЕЛСЯ — silence_chance срабатывает)."""
     s = get_settings()
 
     async def _mem_count() -> int:
@@ -88,11 +90,30 @@ async def answer_as_rip(
     profile_task = asyncio.create_task(repos.get_profile(asker_id))
     history_task = asyncio.create_task(repos.recent_messages(chat_id, s.chat_history_limit))
     mem_count_task = asyncio.create_task(_mem_count())
+    mood_task = asyncio.create_task(repos.get_mood_state(chat_id))
 
     summary, traits = await profile_task
     window_msgs = await history_task
     mem_count = await mem_count_task
+    mood_raw = await mood_task
     window = _format_window(window_msgs)
+
+    # ── Mood / persona selection ──
+    state = mood_engine.MoodState.from_jsonb(mood_raw)
+    state = mood_engine.update_state(state, text=question, addressed_to_bot=True)
+    persona = mood_engine.select_persona(state, last_text=question)
+    state.last_persona = persona.key
+    log.info("chat=%s persona=%s | %s", chat_id, persona.key,
+             mood_engine.describe(state))
+
+    # ОБИДЕЛСЯ may decide to just stay silent — return None, caller skips reply.
+    if mood_engine.should_stay_silent(persona):
+        log.info("chat=%s persona=%s chose silence", chat_id, persona.key)
+        try:
+            await repos.save_mood_state(chat_id, state.to_dict())
+        except Exception:
+            log.exception("failed to save mood state on silence")
+        return None
 
     seen: set[str] = set()
     members: list[str] = []
@@ -159,14 +180,19 @@ async def answer_as_rip(
         memories=memories,
         chat_window=window,
         members=members,
+        persona_voice=persona.voice,
     ) + rel_note + opener_note
 
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": question},
     ]
-    # Lower temp + max_tokens so replies stay short and chat-like (no multi-paragraph filler).
-    answer = await llm.chat(messages, temperature=0.65, max_tokens=120)
+    # Семплинг подкручивается под активный модус (см. personas.py).
+    answer = await llm.chat(
+        messages,
+        temperature=persona.temperature,
+        max_tokens=persona.max_tokens,
+    )
     answer = _sanitize(answer)
 
     # If banned phrases slipped through, ask the model to rewrite.
@@ -198,6 +224,12 @@ async def answer_as_rip(
             await repos.push_opener(chat_id, first)
         except Exception:
             log.exception("failed to persist opener")
+
+    # Persist mood state for next interaction
+    try:
+        await repos.save_mood_state(chat_id, state.to_dict())
+    except Exception:
+        log.exception("failed to persist mood state")
 
     return answer
 
