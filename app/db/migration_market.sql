@@ -221,3 +221,58 @@ create table if not exists market_loans (
 );
 create index if not exists idx_market_loans_active on market_loans (user_id, status)
     where status = 'active';
+
+
+-- ============================================================
+-- 11. UPGRADE: bigint → numeric(50,0) для money/quantity столбцов
+-- Снимает аппаратный лимит bigint (9.2e18) — теперь балансы могут быть
+-- произвольной величины. Идемпотентно: гард по data_type, повторный
+-- запуск миграции — no-op.
+-- ============================================================
+do $$
+begin
+  if (select data_type from information_schema.columns
+      where table_schema = 'public'
+        and table_name   = 'market_users'
+        and column_name  = 'trylla') = 'bigint' then
+
+    alter table market_users
+      alter column trylla            type numeric(50,0) using trylla::numeric,
+      alter column total_invested    type numeric(50,0) using total_invested::numeric,
+      alter column total_realized_pl type numeric(50,0) using total_realized_pl::numeric,
+      alter column best_trade_pl     type numeric(50,0) using best_trade_pl::numeric,
+      alter column worst_trade_pl    type numeric(50,0) using worst_trade_pl::numeric;
+
+    alter table market_assets
+      alter column base_price    type numeric(50,0) using base_price::numeric,
+      alter column current_price type numeric(50,0) using current_price::numeric,
+      alter column high_24h      type numeric(50,0) using high_24h::numeric,
+      alter column low_24h       type numeric(50,0) using low_24h::numeric,
+      alter column open_24h      type numeric(50,0) using open_24h::numeric,
+      alter column volume_24h    type numeric(50,0) using volume_24h::numeric;
+
+    alter table market_holdings
+      alter column quantity      type numeric(50,0) using quantity::numeric,
+      alter column avg_buy_price type numeric(50,0) using avg_buy_price::numeric;
+
+    alter table market_price_snapshots
+      alter column price  type numeric(50,0) using price::numeric,
+      alter column volume type numeric(50,0) using volume::numeric;
+
+    alter table market_trades
+      alter column quantity    type numeric(50,0) using quantity::numeric,
+      alter column price       type numeric(50,0) using price::numeric,
+      alter column total_value type numeric(50,0) using total_value::numeric,
+      alter column commission  type numeric(50,0) using commission::numeric,
+      alter column realized_pl type numeric(50,0) using realized_pl::numeric;
+
+    alter table market_orders
+      alter column target_price type numeric(50,0) using target_price::numeric,
+      alter column quantity     type numeric(50,0) using quantity::numeric;
+
+    alter table market_loans
+      alter column principal        type numeric(50,0) using principal::numeric,
+      alter column accrued_interest type numeric(50,0) using accrued_interest::numeric,
+      alter column repaid           type numeric(50,0) using repaid::numeric;
+  end if;
+end $$;

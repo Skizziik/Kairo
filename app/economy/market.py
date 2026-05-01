@@ -583,13 +583,9 @@ async def whale_tick() -> None:
 # TRADING
 # ============================================================
 
-# PostgreSQL bigint max — все аккумуляторы (trylla, total_realized_pl,
-# total_invested, quantity holdings) клампим до этого значения, чтобы не
-# ловить numeric_value_out_of_range на раздутых балансах (последствие
-# старого 22Q-снейк-бага и подобных эксплоитов). Без этих клампов SELL/BUY
-# у затронутых юзеров молча падал — фронт получал 500, кнопка «не
-# нажималась».
-BIGINT_SAFE_MAX = 9_000_000_000_000_000_000   # 9e18, чуть ниже жёсткого предела
+# После миграции на numeric(50,0) (см. migration_market.sql §11) все money/
+# quantity столбцы — арбитрарной точности. Hardware-cap нет, переполнения
+# не бывает. Кламп тут только для одного — защита от негативного баланса.
 
 
 async def buy_asset(
@@ -650,16 +646,14 @@ async def buy_asset(
                     return {"ok": False, "error": "Слишком мало для покупки"}
                 actual_cost = (quantity * fill_price) // 1_000_000   # back to cents
 
-                # Apply. Numeric-cast чтобы не словить overflow на сложении.
-                spent = min(BIGINT_SAFE_MAX, actual_cost + commission)
+                # Apply. Все money-колонки теперь numeric(50,0) — overflow невозможен.
+                spent = actual_cost + commission
                 await conn.execute(
-                    f"""
+                    """
                     update market_users set
-                      trylla = (greatest(0::numeric,
-                                trylla::numeric - $2::numeric))::bigint,
+                      trylla = greatest(0::numeric, trylla - $2),
                       total_trades = total_trades + 1,
-                      total_invested = (least({BIGINT_SAFE_MAX}::numeric,
-                                        total_invested::numeric + $2::numeric))::bigint,
+                      total_invested = total_invested + $2,
                       last_active_at = now()
                     where tg_id = $1
                     """,
@@ -674,7 +668,7 @@ async def buy_asset(
                 if existing:
                     old_qty = int(existing["quantity"])
                     old_avg = int(existing["avg_buy_price"])
-                    new_qty = min(BIGINT_SAFE_MAX, old_qty + quantity)
+                    new_qty = old_qty + quantity
                     new_avg = (old_qty * old_avg + quantity * fill_price) // max(1, new_qty)
                     await conn.execute(
                         "update market_holdings set quantity = $3, avg_buy_price = $4, "
@@ -685,7 +679,7 @@ async def buy_asset(
                     await conn.execute(
                         "insert into market_holdings (user_id, asset_key, quantity, avg_buy_price) "
                         "values ($1,$2,$3,$4)",
-                        tg_id, asset_key, min(BIGINT_SAFE_MAX, quantity), fill_price,
+                        tg_id, asset_key, quantity, fill_price,
                     )
                 # Trade record
                 await conn.execute(
@@ -694,21 +688,13 @@ async def buy_asset(
                       (user_id, asset_key, side, quantity, price, total_value, commission, realized_pl)
                     values ($1,$2,'buy',$3,$4,$5,$6,0)
                     """,
-                    tg_id, asset_key,
-                    min(BIGINT_SAFE_MAX, quantity),
-                    fill_price,
-                    min(BIGINT_SAFE_MAX, actual_cost),
-                    min(BIGINT_SAFE_MAX, commission),
+                    tg_id, asset_key, quantity, fill_price, actual_cost, commission,
                 )
-                # Bump XP — 5 per trade + 1 per 1K cash. Numeric-cast.
-                xp_gain = 5 + min(BIGINT_SAFE_MAX, cash_amount) // 100_000
+                # Bump XP — 5 per trade + 1 per 1K cash
+                xp_gain = 5 + cash_amount // 100_000
                 await conn.execute(
-                    f"""
-                    update market_users set xp = (least({BIGINT_SAFE_MAX}::numeric,
-                                                  xp::numeric + $2::numeric))::bigint
-                    where tg_id = $1
-                    """,
-                    tg_id, int(min(BIGINT_SAFE_MAX, xp_gain)),
+                    "update market_users set xp = xp + $2 where tg_id = $1",
+                    tg_id, xp_gain,
                 )
     except Exception as e:
         log.exception("buy_asset failed for tg_id=%s asset=%s", tg_id, asset_key)
@@ -727,10 +713,8 @@ async def sell_asset(tg_id: int, asset_key: str, quantity_pct: int = 100) -> dic
     """Sell `quantity_pct` of holding (1-100). Spread-adjusted. Applies commission
     and computes realized P/L. XP for profitable sells.
 
-    Все обновления аккумуляторов клампятся через `least(BIGINT_SAFE_MAX, ...)`,
-    чтобы не словить bigint overflow на раздутых балансах (последствие старых
-    эксплоитов). Без этого продажа крупных позиций молча падала с DB-ошибкой,
-    клиент получал 500, кнопка «не нажималась»."""
+    После миграции money/quantity-колонок на numeric(50,0) overflow невозможен —
+    суммы любого размера обрабатываются нативно."""
     quantity_pct = max(1, min(100, int(quantity_pct)))
     await ensure_user(tg_id)
     try:
@@ -771,11 +755,6 @@ async def sell_asset(tg_id: int, asset_key: str, quantity_pct: int = 100) -> dic
                 cost_basis = (sell_qty * avg_buy) // 1_000_000
                 realized_pl = net - cost_basis
 
-                # Pre-clamp значений в int range, чтобы Python не отдал в asyncpg число
-                # больше bigint
-                net_clamped = min(BIGINT_SAFE_MAX, max(-BIGINT_SAFE_MAX, net))
-                pl_clamped  = min(BIGINT_SAFE_MAX, max(-BIGINT_SAFE_MAX, realized_pl))
-
                 # Apply
                 new_qty = full_qty - sell_qty
                 if new_qty == 0:
@@ -790,20 +769,12 @@ async def sell_asset(tg_id: int, asset_key: str, quantity_pct: int = 100) -> dic
                         tg_id, asset_key, new_qty,
                     )
 
-                # КРИТИЧНО: складываем через ::numeric (arbitrary precision),
-                # потом клампим в bigint range и кастим обратно. Иначе
-                # `bigint + bigint` падает с numeric_value_out_of_range
-                # ДО того как least() успеет сработать.
                 await conn.execute(
-                    f"""
+                    """
                     update market_users set
-                      trylla = (least({BIGINT_SAFE_MAX}::numeric,
-                                greatest(0::numeric,
-                                  trylla::numeric + $2::numeric)))::bigint,
+                      trylla = trylla + $2,
                       total_trades = total_trades + 1,
-                      total_realized_pl = (greatest(-{BIGINT_SAFE_MAX}::numeric,
-                                            least({BIGINT_SAFE_MAX}::numeric,
-                                              total_realized_pl::numeric + $3::numeric)))::bigint,
+                      total_realized_pl = total_realized_pl + $3,
                       best_trade_pl = greatest(best_trade_pl, $3),
                       worst_trade_pl = least(worst_trade_pl, $3),
                       win_count = win_count + $4,
@@ -811,9 +782,9 @@ async def sell_asset(tg_id: int, asset_key: str, quantity_pct: int = 100) -> dic
                       last_active_at = now()
                     where tg_id = $1
                     """,
-                    tg_id, net_clamped, pl_clamped,
-                    1 if pl_clamped > 0 else 0,
-                    1 if pl_clamped < 0 else 0,
+                    tg_id, net, realized_pl,
+                    1 if realized_pl > 0 else 0,
+                    1 if realized_pl < 0 else 0,
                 )
 
                 await conn.execute(
@@ -822,20 +793,13 @@ async def sell_asset(tg_id: int, asset_key: str, quantity_pct: int = 100) -> dic
                       (user_id, asset_key, side, quantity, price, total_value, commission, realized_pl)
                     values ($1,$2,'sell',$3,$4,$5,$6,$7)
                     """,
-                    tg_id, asset_key, sell_qty, fill_price,
-                    min(BIGINT_SAFE_MAX, gross),
-                    min(BIGINT_SAFE_MAX, commission),
-                    pl_clamped,
+                    tg_id, asset_key, sell_qty, fill_price, gross, commission, realized_pl,
                 )
-                # XP — больше за прибыльные сделки. numeric-cast против overflow.
-                xp_gain = 5 + max(0, pl_clamped // 1_000_00)
+                # XP — больше за прибыльные сделки
+                xp_gain = 5 + max(0, realized_pl // 1_000_00)
                 await conn.execute(
-                    f"""
-                    update market_users set xp = (least({BIGINT_SAFE_MAX}::numeric,
-                                                  xp::numeric + $2::numeric))::bigint
-                    where tg_id = $1
-                    """,
-                    tg_id, int(min(BIGINT_SAFE_MAX, xp_gain)),
+                    "update market_users set xp = xp + $2 where tg_id = $1",
+                    tg_id, int(xp_gain),
                 )
     except Exception as e:
         log.exception("sell_asset failed for tg_id=%s asset=%s", tg_id, asset_key)
