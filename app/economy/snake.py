@@ -711,26 +711,26 @@ def xp_needed_for(level: int) -> int:
 
     Кривая в три этапа:
     - LVL ≤ 240: стандарт `100 × level^1.6` (на 240 = 665K)
-    - LVL 241-500: плавный 2× за каждые 100 уровней (на 500 = 14.5M)
-    - LVL > 500: per-level gap **×1.5 каждый уровень**. Жёсткая стена.
-      На 510 нужно 7.5M на gap, на 520 = 432M, на 530 = 25B. Effective
-      max ~530-540, дальше идёт миллиарды XP за уровень.
+    - LVL 241-400: плавный 2× за каждые 100 уровней (на 400 = 5.15M)
+    - LVL > 400: per-level gap **×3 каждый уровень**. Жёсткая стена.
+      На 405 уже 6M, на 410 = 1.48B, на 415 = 358B. Effective max ~410-415,
+      дальше идут миллиарды-триллионы XP за уровень.
     """
     if level < 1:
         return 0
     base = 100 * (level ** 1.6)
     if level <= 240:
         return int(base)
-    if level <= 500:
+    if level <= 400:
         excess = level - 240
         return int(base * (2 ** (excess / 100)))
-    # Past 500: per-level gap × 1.5 каждый уровень
-    base_at_500 = int(100 * (500 ** 1.6) * (2 ** 2.6))                  # ~14.5M
-    base_at_501 = int(100 * (501 ** 1.6) * (2 ** 2.61))                 # ~14.65M
-    gap_500_to_501 = base_at_501 - base_at_500                          # ~130K
-    excess = level - 500
-    # Сумма геометрической прогрессии: gap × (1.5^N − 1) / (1.5 − 1)
-    return base_at_500 + int(2 * gap_500_to_501 * (1.5 ** excess - 1))
+    # Past 400: per-level gap × 3 каждый уровень
+    base_at_400 = int(100 * (400 ** 1.6) * (2 ** 1.6))                  # ~5.15M
+    base_at_401 = int(100 * (401 ** 1.6) * (2 ** 1.61))                 # ~5.20M
+    gap_400_to_401 = base_at_401 - base_at_400                          # ~50K
+    excess = level - 400
+    # Сумма геометрической прогрессии: gap × (3^N − 1) / (3 − 1)
+    return base_at_400 + int(0.5 * gap_400_to_401 * (3 ** excess - 1))
 
 
 PLAYER_MAX_LEVEL = 1000
