@@ -1324,13 +1324,9 @@ async def record_run(
     else:
         coins = client_coins
 
-    # Anti-cheat: cap RAW per-second rate BEFORE applying run-wide multipliers.
-    # The cap targets client claims (which can be inflated); run-wide mults
-    # come from server-validated upgrade/artifact levels, so multiplying after
-    # the cap is safe and lets stacked builds keep their full value.
-    max_allowed_raw = int(MAX_COINS_PER_SECOND * max(1, duration_sec))
-    if coins > max_allowed_raw:
-        coins = max_allowed_raw
+    # Per-second cap снят по решению owner — экономика игры допускает
+    # любые цифры, читеров на этом экземпляре нет. Единственная защита
+    # теперь — sanity-check duration_sec ≤ 7200 на входе.
 
     # Apply RUN-WIDE multipliers (NOT applied client-side):
     coins = int(coins * greed_mult * total_mult * um_mult * daily_bonus_mult)
