@@ -28,7 +28,7 @@ from app.economy import mines as _mines
 from app.economy import prestige as _prestige
 from app.economy import tycoon as _tycoon
 from app.economy.chat_events import happy_hour_loop, mystery_drop_loop
-from app.scheduler import daily_summary_loop, weekly_memory_compact_loop
+from app.scheduler import active_initiator_loop, daily_summary_loop, weekly_memory_compact_loop
 
 s = get_settings()
 
@@ -117,6 +117,8 @@ async def lifespan(_: FastAPI):
         log.info("daily summary scheduler started (fires at %dh UTC)", s.daily_summary_hour_utc)
     scheduler_tasks.append(asyncio.create_task(weekly_memory_compact_loop()))
     log.info("weekly memory compact scheduler started (Sunday 03:00 UTC)")
+    scheduler_tasks.append(asyncio.create_task(active_initiator_loop(bot)))
+    log.info("active initiator scheduler started (random hour 10-22 MSK daily)")
     if s.casino_chat_events_enabled:
         scheduler_tasks.append(asyncio.create_task(happy_hour_loop(bot)))
         scheduler_tasks.append(asyncio.create_task(mystery_drop_loop(bot)))

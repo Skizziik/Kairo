@@ -288,6 +288,140 @@ async def push_opener(chat_id: int, word: str, max_keep: int = 10) -> None:
         )
 
 
+# ============================================================
+# pending_questions — бот задал вопрос, ждёт ответ юзера
+# Используется question_engine для лимитов и smart-выбора.
+# ============================================================
+# ============================================================
+# chat_inside_jokes — мемы чата (Phase 3)
+# ============================================================
+# ============================================================
+# bot_phrase_freq — n-gram tracker для anti-stale (Phase 6)
+# ============================================================
+async def bump_phrase_freq(chat_id: int, ngram: str) -> None:
+    async with pool().acquire() as conn:
+        await conn.execute(
+            """
+            insert into bot_phrase_freq (chat_id, ngram, use_count, last_used)
+            values ($1, $2, 1, now())
+            on conflict (chat_id, ngram) do update set
+                use_count = bot_phrase_freq.use_count + 1,
+                last_used = now()
+            """,
+            chat_id, ngram,
+        )
+
+
+async def find_stale_phrases(
+    chat_id: int, ngrams: list[str], threshold: int, since: datetime,
+) -> list[str]:
+    if not ngrams:
+        return []
+    async with pool().acquire() as conn:
+        rows = await conn.fetch(
+            """
+            select ngram from bot_phrase_freq
+            where chat_id = $1
+              and ngram = any($2::text[])
+              and last_used > $3
+              and use_count >= $4
+            """,
+            chat_id, ngrams, since, threshold,
+        )
+    return [r["ngram"] for r in rows]
+
+
+# ============================================================
+# chat_inside_jokes — Phase 3
+# ============================================================
+async def upsert_inside_joke(chat_id: int, phrase: str, origin_user_id: int) -> None:
+    async with pool().acquire() as conn:
+        await conn.execute(
+            """
+            insert into chat_inside_jokes (chat_id, phrase, origin_user_id)
+            values ($1, $2, $3)
+            on conflict (chat_id, phrase) do update set
+                use_count = chat_inside_jokes.use_count + 1,
+                last_used_at = now()
+            """,
+            chat_id, phrase, origin_user_id,
+        )
+
+
+async def top_inside_jokes(chat_id: int, min_count: int = 3, limit: int = 5) -> list[str]:
+    async with pool().acquire() as conn:
+        rows = await conn.fetch(
+            """
+            select phrase from chat_inside_jokes
+            where chat_id = $1 and use_count >= $2
+            order by use_count desc, last_used_at desc
+            limit $3
+            """,
+            chat_id, min_count, limit,
+        )
+    return [r["phrase"] for r in rows]
+
+
+# ============================================================
+# pending_questions — Phase 2
+# ============================================================
+async def add_pending_question(user_id: int, field: str, question: str) -> None:
+    async with pool().acquire() as conn:
+        await conn.execute(
+            """
+            insert into pending_questions (user_id, field, question, asked_at)
+            values ($1, $2, $3, now())
+            """,
+            user_id, field, question,
+        )
+
+
+async def questions_asked_in_window(user_id: int, hours: int) -> int:
+    async with pool().acquire() as conn:
+        n = await conn.fetchval(
+            """
+            select count(*) from pending_questions
+            where user_id = $1
+            and asked_at > now() - ($2 || ' hours')::interval
+            """,
+            user_id, str(hours),
+        )
+    return int(n or 0)
+
+
+async def last_question_asked_at(user_id: int) -> datetime | None:
+    async with pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "select max(asked_at) as ts from pending_questions where user_id = $1",
+            user_id,
+        )
+    return row["ts"] if row else None
+
+
+async def fields_asked_recently(user_id: int, days: int) -> list[str]:
+    async with pool().acquire() as conn:
+        rows = await conn.fetch(
+            """
+            select distinct field from pending_questions
+            where user_id = $1
+            and asked_at > now() - ($2 || ' days')::interval
+            """,
+            user_id, str(days),
+        )
+    return [r["field"] for r in rows]
+
+
+async def mark_question_resolved(user_id: int, field: str) -> None:
+    async with pool().acquire() as conn:
+        await conn.execute(
+            """
+            update pending_questions set resolved_at = now()
+            where user_id = $1 and field = $2 and resolved_at is null
+            """,
+            user_id, field,
+        )
+
+
 async def get_mood_state(chat_id: int) -> dict | None:
     """Возвращает dict из bot_chat_state.mood_state или None если пусто."""
     async with pool().acquire() as conn:
@@ -323,6 +457,61 @@ async def save_mood_state(chat_id: int, state: dict) -> None:
             """,
             chat_id, payload,
         )
+
+
+async def can_user_trigger_and_mark(
+    chat_id: int, user_id: int, cooldown_seconds: int = 300, max_in_window: int = 3,
+) -> bool:
+    """Per-user rate limit: один и тот же юзер не может триггерить бота
+    больше `max_in_window` раз за `cooldown_seconds` секунд (= 5 мин).
+
+    Использует bot_chat_state.extras jsonb для трекинга (без отдельной таблицы).
+    """
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=cooldown_seconds)
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "select extras from bot_chat_state where chat_id = $1 for update",
+                chat_id,
+            )
+            extras = {}
+            if row is not None:
+                raw = row["extras"]
+                if isinstance(raw, dict):
+                    extras = raw
+                elif isinstance(raw, str):
+                    try:
+                        extras = json.loads(raw or "{}")
+                    except Exception:
+                        extras = {}
+            user_log = extras.get("user_triggers", {}).get(str(user_id), [])
+            # фильтруем устаревшие timestamps
+            fresh = [ts for ts in user_log if ts > cutoff.timestamp()]
+            if len(fresh) >= max_in_window:
+                return False
+            fresh.append(now.timestamp())
+            # Очищаем все устаревшие записи всех юзеров (компакция extras)
+            triggers = extras.get("user_triggers", {})
+            triggers[str(user_id)] = fresh
+            # cleanup other users
+            for uid in list(triggers.keys()):
+                triggers[uid] = [ts for ts in triggers[uid] if ts > cutoff.timestamp()]
+                if not triggers[uid]:
+                    del triggers[uid]
+            extras["user_triggers"] = triggers
+            await conn.execute(
+                """
+                insert into bot_chat_state (chat_id, extras, updated_at)
+                values ($1, $2::jsonb, now())
+                on conflict (chat_id) do update set
+                    extras = excluded.extras,
+                    updated_at = now()
+                """,
+                chat_id, json.dumps(extras),
+            )
+            return True
 
 
 async def can_chime_and_mark(chat_id: int, cooldown_seconds: int) -> bool:

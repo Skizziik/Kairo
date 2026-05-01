@@ -68,6 +68,62 @@ async def ensure_schema() -> None:
             log.info("bot_chat_state.mood_state column ensured")
         except Exception as e:
             log.warning("mood_state column migration failed: %s", e)
+
+        # pending_questions — бот задаёт вопросы для заполнения профиля
+        # (Phase 2 — Smart Questions). Лимит 2/неделю на юзера.
+        try:
+            await conn.execute("""
+                create table if not exists pending_questions (
+                    id          bigserial primary key,
+                    user_id     bigint not null,
+                    field       text not null,
+                    question    text not null,
+                    asked_at    timestamptz not null default now(),
+                    resolved_at timestamptz
+                );
+                create index if not exists idx_pending_q_user_time
+                    on pending_questions (user_id, asked_at desc);
+            """)
+            log.info("pending_questions table ensured")
+        except Exception as e:
+            log.warning("pending_questions migration failed: %s", e)
+
+        # chat_inside_jokes — мемы чата (Phase 3)
+        try:
+            await conn.execute("""
+                create table if not exists chat_inside_jokes (
+                    id              bigserial primary key,
+                    chat_id         bigint not null,
+                    phrase          text not null,
+                    origin_user_id  bigint,
+                    first_used_at   timestamptz not null default now(),
+                    last_used_at    timestamptz not null default now(),
+                    use_count       int not null default 1,
+                    unique (chat_id, phrase)
+                );
+                create index if not exists idx_jokes_chat_use
+                    on chat_inside_jokes (chat_id, use_count desc);
+            """)
+            log.info("chat_inside_jokes table ensured")
+        except Exception as e:
+            log.warning("chat_inside_jokes migration failed: %s", e)
+
+        # bot_phrase_freq — n-gram tracker для anti-stale (Phase 6)
+        try:
+            await conn.execute("""
+                create table if not exists bot_phrase_freq (
+                    chat_id    bigint not null,
+                    ngram      text not null,
+                    use_count  int not null default 1,
+                    last_used  timestamptz not null default now(),
+                    primary key (chat_id, ngram)
+                );
+                create index if not exists idx_phrase_freq_chat_recent
+                    on bot_phrase_freq (chat_id, last_used desc);
+            """)
+            log.info("bot_phrase_freq table ensured")
+        except Exception as e:
+            log.warning("bot_phrase_freq migration failed: %s", e)
     log.info("audit schema ensured")
 
 

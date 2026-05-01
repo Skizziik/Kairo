@@ -8,6 +8,7 @@ from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
+from app.ai import inside_jokes
 from app.ai.memory import answer_as_rip
 from app.bot import get_bot
 from app.config import get_settings
@@ -130,6 +131,13 @@ async def on_text(msg: Message) -> None:
     text = msg.text or msg.caption or ""
     if text.startswith("/"):
         return
+
+    # Track inside-jokes / repeat phrases — fires on каждое обычное сообщение
+    # (не команда). Помогает боту запомнить мемы чата для будущего инжекта.
+    try:
+        await inside_jokes.track_message(msg.chat.id, msg.from_user.id, text)
+    except Exception:
+        log.exception("inside_jokes.track_message failed")
     # Ignore replies to the bot — handled above
     if (
         msg.reply_to_message is not None
@@ -141,6 +149,17 @@ async def on_text(msg: Message) -> None:
     # 1) Direct address via @mention or name trigger — always respond
     question = await _extract_mention_question(msg)
     if question is not None:
+        # Phase 4: per-user cooldown — 3 trigger'а за 5 мин max от одного юзера
+        try:
+            allow = await repos.can_user_trigger_and_mark(
+                msg.chat.id, msg.from_user.id, cooldown_seconds=300, max_in_window=3,
+            )
+            if not allow:
+                log.info("per-user rate-limit hit chat=%s user=%s",
+                         msg.chat.id, msg.from_user.id)
+                return
+        except Exception:
+            log.exception("per-user cooldown check failed")
         await _ask(msg, question)
         return
 
@@ -155,6 +174,20 @@ async def on_text(msg: Message) -> None:
     probability = s.chime_in_probability
     if "?" in text:
         probability = min(1.0, probability * 2)
+    # Phase 4: smart chime-in — учитываем sentiment чата.
+    # Если чат в "серьёзном режиме" (длинные сообщения) — реже вклиниваемся.
+    # Если в "режиме базара" (короткие) — чаще.
+    try:
+        recent = await repos.recent_messages(msg.chat.id, 5)
+        non_bot = [m for m in recent if not m.is_bot and m.text]
+        if non_bot:
+            avg_len = sum(len(m.text) for m in non_bot) / len(non_bot)
+            if avg_len > 150:
+                probability *= 0.4   # серьёзный разговор — почти не лезем
+            elif avg_len < 30:
+                probability = min(1.0, probability * 1.5)   # базар — лезем чаще
+    except Exception:
+        log.exception("smart chime-in sentiment check failed")
     if random.random() > probability:
         return
     # Atomic cooldown check — marks last_chime_at if allowed. Persisted in DB.

@@ -706,11 +706,13 @@ async def buy_asset(
                     """,
                     tg_id, asset_key, quantity, fill_price, actual_cost, commission,
                 )
-                # Bump XP — 5 per trade + 1 per 1K cash
-                xp_gain = 5 + cash_amount // 100_000
+                # Bump XP — 5 per trade + 1 per 1K cash, capped at 1M per buy.
+                # Cap критичен: на 1828131Q балансах без cap xp_gain летит в e17
+                # и пробивает bigint потолок. Прогрессия с cap остаётся вменяемой.
+                xp_gain = min(1_000_000, 5 + cash_amount // 100_000)
                 await conn.execute(
                     "update market_users set xp = xp + $2 where tg_id = $1",
-                    tg_id, xp_gain,
+                    tg_id, int(xp_gain),
                 )
     except Exception as e:
         log.exception("buy_asset failed for tg_id=%s asset=%s", tg_id, asset_key)
@@ -811,8 +813,8 @@ async def sell_asset(tg_id: int, asset_key: str, quantity_pct: int = 100) -> dic
                     """,
                     tg_id, asset_key, sell_qty, fill_price, gross, commission, realized_pl,
                 )
-                # XP — больше за прибыльные сделки
-                xp_gain = 5 + max(0, realized_pl // 1_000_00)
+                # XP — больше за прибыльные сделки. Cap 1M на сделку.
+                xp_gain = min(1_000_000, 5 + max(0, realized_pl // 1_000_00))
                 await conn.execute(
                     "update market_users set xp = xp + $2 where tg_id = $1",
                     tg_id, int(xp_gain),

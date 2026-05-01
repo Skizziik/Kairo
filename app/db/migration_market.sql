@@ -276,3 +276,17 @@ begin
       alter column repaid           type numeric(50,0) using repaid::numeric;
   end if;
 end $$;
+
+
+-- Отдельный гард для xp (был пропущен в первом блоке, проверяем отдельно).
+-- На раздутых балансах xp_gain пробивает bigint потолок при покупке.
+do $$
+begin
+  if (select data_type from information_schema.columns
+      where table_schema = 'public'
+        and table_name   = 'market_users'
+        and column_name  = 'xp') = 'bigint' then
+    alter table market_users
+      alter column xp type numeric(50,0) using xp::numeric;
+  end if;
+end $$;

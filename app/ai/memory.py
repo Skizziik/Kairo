@@ -6,7 +6,7 @@ import logging
 import re
 from datetime import datetime
 
-from app.ai import llm, mood_engine
+from app.ai import anti_stale, inside_jokes, llm, mood_engine, question_engine
 from app.ai.embeddings import embed, embed_one
 from app.ai.prompts import EXTRACT_SYSTEM, build_system_prompt
 from app.config import get_settings
@@ -98,6 +98,13 @@ async def answer_as_rip(
     mood_raw = await mood_task
     window = _format_window(window_msgs)
 
+    # Inside jokes — мемы чата для инжекта в промпт
+    chat_jokes: list[str] = []
+    try:
+        chat_jokes = await inside_jokes.get_top_jokes(chat_id)
+    except Exception:
+        log.exception("inside_jokes top fetch failed")
+
     # ── Mood / persona selection ──
     state = mood_engine.MoodState.from_jsonb(mood_raw)
     state = mood_engine.update_state(state, text=question, addressed_to_bot=True)
@@ -173,6 +180,13 @@ async def answer_as_rip(
     if relationships_lines:
         rel_note = "\n\nОтношения собеседника с другими: " + "; ".join(relationships_lines)
 
+    jokes_note = ""
+    if chat_jokes:
+        jokes_note = (
+            "\n\nМЕМЫ И ХАРАКТЕРНЫЕ ФРАЗЫ ЭТОГО ЧАТА (используй уместно, не насильно): "
+            + "; ".join(f'«{j}»' for j in chat_jokes)
+        )
+
     system = build_system_prompt(
         asker_display=asker_display,
         asker_profile=summary,
@@ -181,7 +195,7 @@ async def answer_as_rip(
         chat_window=window,
         members=members,
         persona_voice=persona.voice,
-    ) + rel_note + opener_note
+    ) + rel_note + jokes_note + opener_note
 
     messages = [
         {"role": "system", "content": system},
@@ -217,6 +231,46 @@ async def answer_as_rip(
         except Exception:
             log.exception("rewrite failed, using original")
 
+    # Phase 6: Anti-Stale rewrite — если в ответе залипшие n-grams (>5 раз
+    # за 24ч в этом чате), просим LLM переписать.
+    try:
+        stale = await anti_stale.is_stale(chat_id, answer)
+        if stale:
+            log.info("anti-stale: %d залипших фраз в ответе chat=%s: %s",
+                     len(stale), chat_id, stale[:3])
+            rewrite_msgs = messages + [
+                {"role": "assistant", "content": answer},
+                {
+                    "role": "user",
+                    "content": (
+                        "Перепиши ответ выше другими словами. Эти фразы ты "
+                        "уже использовал слишком часто и они затёрлись: "
+                        + ", ".join(f'«{p}»' for p in stale[:5])
+                        + ". Сохрани смысл и тон, но избавься от них. "
+                        "Только переписанный ответ."
+                    ),
+                },
+            ]
+            try:
+                fresh = await llm.chat(
+                    rewrite_msgs,
+                    temperature=min(0.95, persona.temperature + 0.15),
+                    max_tokens=persona.max_tokens,
+                )
+                fresh = _sanitize(fresh)
+                if fresh and not _has_banned_phrase(fresh):
+                    answer = fresh
+            except Exception:
+                log.exception("anti-stale rewrite failed")
+    except Exception:
+        log.exception("anti-stale check failed")
+
+    # Track n-grams of final answer for next-time anti-stale checks
+    try:
+        await anti_stale.track_bot_reply(chat_id, answer)
+    except Exception:
+        log.exception("anti-stale track failed")
+
     # Track the opener so future responses avoid repeating it (persisted)
     first = _first_word(answer)
     if first:
@@ -230,6 +284,22 @@ async def answer_as_rip(
         await repos.save_mood_state(chat_id, state.to_dict())
     except Exception:
         log.exception("failed to persist mood state")
+
+    # Phase 2: Smart Questions — иногда дописываем вопрос в конец, чтобы
+    # заполнить пробелы в профиле собеседника. Лимиты внутри функции.
+    # Skip для OBIZHEN — обиделся, не до расспросов.
+    if persona.key != "obizhen":
+        try:
+            extra_q = await question_engine.maybe_generate_question(
+                user_id=asker_id,
+                traits=traits or {},
+                persona_key=persona.key,
+            )
+            if extra_q:
+                # Аккуратно приклеиваем — на новой строке, чтоб выглядело органично
+                answer = answer.rstrip(".") + ". " + extra_q
+        except Exception:
+            log.exception("question_engine failed")
 
     return answer
 
