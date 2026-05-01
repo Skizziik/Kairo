@@ -236,11 +236,7 @@ def select_persona(state: MoodState, last_text: str = "") -> personas.Persona:
     if state.offended >= 70:
         return personas.OBIZHEN
 
-    # 2. ХАЙП — только поздний вечер пт/сб + ВЫСОКАЯ энергия
-    if _is_party_time() and state.energy >= 80:
-        return personas.HYPE
-
-    # 3. ОТМОРОЗ — токсичность высокая
+    # 2. ОТМОРОЗ — токсичность высокая
     if state.toxicity >= 70:
         return personas.OTMOROZ
 
