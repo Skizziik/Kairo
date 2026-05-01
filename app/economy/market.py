@@ -274,18 +274,20 @@ async def price_tick() -> None:
         st = _asset_st(key)
         _maybe_change_regime(st)
 
-        # ── 1. Random walk (much more lively than before)
-        sigma = 0.0025 * (1 + 0.5 * vol)   # higher vol asset → wider gaussian
+        # ── 1. Random walk — небольшое случайное колебание (раньше было 0.0025,
+        # снизили до 0.0010 чтобы убрать пилу. Тренды теперь идут от momentum).
+        sigma = 0.0010 * (1 + 0.5 * vol)
         drift = random.gauss(0, sigma)
 
-        # ── 2. Momentum — 30-40% of previous delta carries forward
-        momentum = st["last_delta"] * 0.35
+        # ── 2. Momentum — 70% прошлого delta (раньше 35%). Сильная инерция —
+        # тренд держится несколько тиков, цена не разворачивается мгновенно.
+        momentum = st["last_delta"] * 0.70
         drift += momentum
 
         # ── 3. Regime bias
         if st["regime"] == "trending_up":     drift += 0.0010 * (1 + vol)
         elif st["regime"] == "trending_down": drift -= 0.0010 * (1 + vol)
-        elif st["regime"] == "volatile":      drift += random.gauss(0, 0.003 * (1 + vol))
+        elif st["regime"] == "volatile":      drift += random.gauss(0, 0.0015 * (1 + vol))
 
         # ── 4. Sector drift
         drift += sector_drift.get(cat, 0.0)
@@ -345,22 +347,13 @@ async def price_tick() -> None:
         # ── Final delta
         delta = drift * (1 + vol) * liquidity_amp * _market_mood
 
-        # Per-tick cap ±10% — пики разрешены, но не безграничны.
-        delta = max(-0.10, min(0.10, delta))
+        # Лёгкий нижний cap (-15%) от резких крахов; верх не ограничиваем.
+        if delta < -0.15:
+            delta = -0.15
 
-        # 🔒 DIRECTION LOCK — главная защита от per-tick арбитража.
-        # Если последнее движение было заметно вверх (>+2%), следующий тик
-        # НЕ МОЖЕТ моментально развернуться вниз. И наоборот. Цена идёт в
-        # одном направлении хотя бы 2-3 тика, потом плавно меняется.
-        # Без этого пила: купил-продал каждые 5 сек = бесплатные деньги.
-        prev = st.get("last_delta", 0)
-        if prev > 0.02 and delta < 0:
-            delta = max(0.0, delta * 0.2)      # глушим обратный разворот
-        elif prev < -0.02 and delta > 0:
-            delta = min(0.0, delta * 0.2)
-
-        # Record for momentum
-        st["last_delta"] = delta * 0.5 + st["last_delta"] * 0.5   # smoothed
+        # Record for momentum (СИЛЬНОЕ сглаживание = тренд устойчивый,
+        # пилы за один тик нет, цена идёт по инерции).
+        st["last_delta"] = delta * 0.3 + st["last_delta"] * 0.7   # was 0.5/0.5
 
         # ── New price with hard floor/ceiling
         new_price = cur * (1.0 + delta)
