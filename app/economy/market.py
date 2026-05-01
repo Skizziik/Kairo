@@ -472,8 +472,34 @@ async def cascade_check_tick() -> None:
 # MAJOR EVENTS
 # ============================================================
 
+MAJOR_EVENT_MAX_MIN = 120   # Кап на длительность любого major event (2ч).
+                            # Без этого глобальная рецессия висела 4ч и плодилась
+                            # параллельно — UX мертвый.
+
+
 async def major_event_tick() -> None:
-    """Roll for a major event each tick. Very low chance."""
+    """Roll for a major event each tick. Very low chance.
+
+    Не запускаем новый major пока активен прошлый — иначе стакается до
+    'рецессия + рецессия' и игрок сидит часами в красной зоне.
+    """
+    async with pool().acquire() as conn:
+        # One-shot: подрезаем уже-активные оверлонг-эвенты до 2ч от старта.
+        # Если эвент стартовал >2ч назад — expires_at уйдёт в прошлое = эвент
+        # моментально протухнет на следующем чтении. Идемпотентно: повторный
+        # update просто хитнет 0 строк.
+        await conn.execute(
+            f"update market_news set expires_at = spawned_at + "
+            f"interval '{MAJOR_EVENT_MAX_MIN} minutes' "
+            f"where type = 'major_event' "
+            f"and expires_at > spawned_at + interval '{MAJOR_EVENT_MAX_MIN} minutes'"
+        )
+        active = await conn.fetchval(
+            "select count(*) from market_news "
+            "where type = 'major_event' and expires_at > now()"
+        )
+    if active and int(active) > 0:
+        return
     for event in MAJOR_EVENTS:
         chance = float(event.get("frequency_chance", 0))
         if random.random() < chance:
@@ -484,7 +510,8 @@ async def major_event_tick() -> None:
 async def _trigger_major_event(event: dict) -> None:
     """Apply event effects via spawning multiple news items."""
     log.info("MARKET MAJOR EVENT: %s", event["name"])
-    duration_min = int(event.get("duration_min", 60))
+    # Кап длительности — даже если конфиг говорит 240/360/480 мин, режем до 2ч.
+    duration_min = min(MAJOR_EVENT_MAX_MIN, int(event.get("duration_min", 60)))
     severity = event.get("severity", "extreme")
     name = event["name"]
     desc = event.get("description", "")
