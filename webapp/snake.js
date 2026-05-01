@@ -1271,14 +1271,30 @@
     `;
     document.body.appendChild(modal);
 
+    const refreshMainBalance = async () => {
+      try {
+        const me = await api('/api/me');
+        if (me && me.balance !== undefined && me.balance !== null) {
+          const newBal = Number(me.balance);
+          if (Number.isFinite(newBal)) {
+            window.state.me.balance = newBal;
+            const balEl = document.getElementById('balance-display');
+            if (balEl) balEl.textContent = fmt(newBal);
+          }
+        }
+      } catch (_) {}
+    };
+
     document.getElementById('sg-close').addEventListener('click', async () => {
       modal.remove();
       try { SS.state = await api('/api/snake/state'); } catch (e) {}
+      await refreshMainBalance();
       paintHub();
     });
     document.getElementById('sg-retry').addEventListener('click', async () => {
       modal.remove();
       try { SS.state = await api('/api/snake/state'); } catch (e) {}
+      await refreshMainBalance();
       startGame();
     });
 
@@ -1303,7 +1319,7 @@
         // точно.
         coins_earned: String(Math.floor(G.rawCoins || G.coins || 0)),
       }),
-    }).then(resp => {
+    }).then(async resp => {
       if (!resp) return;
       // Если бэк вернул ok:false — surface реальную причину, не молчим +0
       if (resp.ok === false && resp.error) {
@@ -1315,10 +1331,25 @@
       const xpEl = document.getElementById('sg-d-xp');
       if (coinsEl) coinsEl.textContent = '+' + fmt(credited) + ' 🪙';
       if (xpEl)    xpEl.textContent = '+' + fmt(xp);
-      if (typeof resp.new_balance === 'number') {
-        window.state.me.balance = resp.new_balance;
-        const balEl = document.getElementById('balance-display');
-        if (balEl) balEl.textContent = fmt(resp.new_balance);
+      // Force refresh main balance — резет через /api/me чтобы убедиться
+      // что цифра в UI = реальный баланс из DB. Без этого на огромных балансах
+      // JS Number precision могла «съедать» инкремент.
+      try {
+        const me = await api('/api/me');
+        if (me && me.balance !== undefined && me.balance !== null) {
+          const newBal = Number(me.balance);
+          if (Number.isFinite(newBal)) {
+            window.state.me.balance = newBal;
+            const balEl = document.getElementById('balance-display');
+            if (balEl) balEl.textContent = fmt(newBal);
+          }
+        }
+      } catch (_) { /* fallback: response value */ }
+      if (resp.new_balance !== undefined && resp.new_balance !== null) {
+        const fallbackBal = Number(resp.new_balance);
+        if (Number.isFinite(fallbackBal)) {
+          window.state.me.balance = fallbackBal;
+        }
       }
       // Surface any unlocked achievements as toasts (sequential, 1.4s gap)
       const ach = Array.isArray(resp.achievements) ? resp.achievements : [];
