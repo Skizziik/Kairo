@@ -583,6 +583,15 @@ async def whale_tick() -> None:
 # TRADING
 # ============================================================
 
+# PostgreSQL bigint max — все аккумуляторы (trylla, total_realized_pl,
+# total_invested, quantity holdings) клампим до этого значения, чтобы не
+# ловить numeric_value_out_of_range на раздутых балансах (последствие
+# старого 22Q-снейк-бага и подобных эксплоитов). Без этих клампов SELL/BUY
+# у затронутых юзеров молча падал — фронт получал 500, кнопка «не
+# нажималась».
+BIGINT_SAFE_MAX = 9_000_000_000_000_000_000   # 9e18, чуть ниже жёсткого предела
+
+
 async def buy_asset(
     tg_id: int,
     asset_key: str,
@@ -596,93 +605,104 @@ async def buy_asset(
        (quantity_micro is None or quantity_micro <= 0):
         return {"ok": False, "error": "Укажи сумму или количество"}
     await ensure_user(tg_id)
-    async with pool().acquire() as conn:
-        async with conn.transaction():
-            asset = await conn.fetchrow(
-                "select * from market_assets where key = $1", asset_key,
-            )
-            if asset is None:
-                return {"ok": False, "error": "Актив не найден"}
-            user = await conn.fetchrow(
-                "select trylla, skills from market_users where tg_id = $1 for update", tg_id,
-            )
-            if user is None:
-                return {"ok": False, "error": "Нет состояния"}
-
-            # Effective commission (skill discount)
-            skills = _parse_jsonb(user["skills"]) or {}
-            cm = COMMISSION_PCT * (1 - 0.05 * int(skills.get("lower_fees", 0)))  # 5% off per level
-            cm = max(0.001, cm)
-
-            # Buy at spread-adjusted price
-            base_price = int(asset["current_price"])
-            fill_price = int(base_price * (1.0 + SPREAD_PCT / 2))
-
-            # Если задано quantity_micro — пересчитываем нужный cash_amount.
-            # cost = qty_micro * fill_price / 1e6 ; cash * (1-cm) >= cost
-            if quantity_micro is not None and quantity_micro > 0:
-                cost_no_comm = (quantity_micro * fill_price + 999_999) // 1_000_000  # ceil
-                cash_amount = int(math.ceil(cost_no_comm / max(0.0001, 1.0 - cm)))
-
-            if int(user["trylla"]) < cash_amount:
-                return {"ok": False, "error": "Не хватает TRYLLA",
-                        "have": int(user["trylla"]), "need": cash_amount}
-
-            commission = int(cash_amount * cm)
-            available = cash_amount - commission
-            if available <= 0:
-                return {"ok": False, "error": "После комиссии ничего не остаётся"}
-
-            # Quantity in milliunits: (available / fill_price) × 1000
-            # Quantity in microunits (×1,000,000) for sub-cent precision.
-            quantity = int((available * 1_000_000) // fill_price)
-            if quantity <= 0:
-                return {"ok": False, "error": "Слишком мало для покупки"}
-            actual_cost = (quantity * fill_price) // 1_000_000   # back to cents
-
-            # Apply
-            await conn.execute(
-                "update market_users set trylla = trylla - $2, total_trades = total_trades + 1, "
-                "total_invested = total_invested + $2, last_active_at = now() where tg_id = $1",
-                tg_id, actual_cost + commission,
-            )
-            # Upsert holding (weighted avg buy price)
-            existing = await conn.fetchrow(
-                "select quantity, avg_buy_price from market_holdings "
-                "where user_id = $1 and asset_key = $2 for update",
-                tg_id, asset_key,
-            )
-            if existing:
-                old_qty = int(existing["quantity"])
-                old_avg = int(existing["avg_buy_price"])
-                new_qty = old_qty + quantity
-                new_avg = (old_qty * old_avg + quantity * fill_price) // new_qty
-                await conn.execute(
-                    "update market_holdings set quantity = $3, avg_buy_price = $4, "
-                    "last_traded_at = now() where user_id = $1 and asset_key = $2",
-                    tg_id, asset_key, new_qty, new_avg,
+    try:
+        async with pool().acquire() as conn:
+            async with conn.transaction():
+                asset = await conn.fetchrow(
+                    "select * from market_assets where key = $1", asset_key,
                 )
-            else:
-                await conn.execute(
-                    "insert into market_holdings (user_id, asset_key, quantity, avg_buy_price) "
-                    "values ($1,$2,$3,$4)",
-                    tg_id, asset_key, quantity, fill_price,
+                if asset is None:
+                    return {"ok": False, "error": "Актив не найден"}
+                user = await conn.fetchrow(
+                    "select trylla, skills from market_users where tg_id = $1 for update", tg_id,
                 )
-            # Trade record
-            await conn.execute(
-                """
-                insert into market_trades
-                  (user_id, asset_key, side, quantity, price, total_value, commission, realized_pl)
-                values ($1,$2,'buy',$3,$4,$5,$6,0)
-                """,
-                tg_id, asset_key, quantity, fill_price, actual_cost, commission,
-            )
-            # Bump XP — 5 per trade + 1 per 1K cash
-            xp_gain = 5 + cash_amount // 100_000
-            await conn.execute(
-                "update market_users set xp = xp + $2 where tg_id = $1",
-                tg_id, xp_gain,
-            )
+                if user is None:
+                    return {"ok": False, "error": "Нет состояния"}
+
+                # Effective commission (skill discount)
+                skills = _parse_jsonb(user["skills"]) or {}
+                cm = COMMISSION_PCT * (1 - 0.05 * int(skills.get("lower_fees", 0)))  # 5% off per level
+                cm = max(0.001, cm)
+
+                # Buy at spread-adjusted price
+                base_price = int(asset["current_price"])
+                fill_price = int(base_price * (1.0 + SPREAD_PCT / 2))
+
+                # Если задано quantity_micro — пересчитываем нужный cash_amount.
+                # cost = qty_micro * fill_price / 1e6 ; cash * (1-cm) >= cost
+                if quantity_micro is not None and quantity_micro > 0:
+                    cost_no_comm = (quantity_micro * fill_price + 999_999) // 1_000_000  # ceil
+                    cash_amount = int(math.ceil(cost_no_comm / max(0.0001, 1.0 - cm)))
+
+                if int(user["trylla"]) < cash_amount:
+                    return {"ok": False, "error": "Не хватает TRYLLA",
+                            "have": int(user["trylla"]), "need": cash_amount}
+
+                commission = int(cash_amount * cm)
+                available = cash_amount - commission
+                if available <= 0:
+                    return {"ok": False, "error": "После комиссии ничего не остаётся"}
+
+                # Quantity in milliunits: (available / fill_price) × 1000
+                # Quantity in microunits (×1,000,000) for sub-cent precision.
+                quantity = int((available * 1_000_000) // fill_price)
+                if quantity <= 0:
+                    return {"ok": False, "error": "Слишком мало для покупки"}
+                actual_cost = (quantity * fill_price) // 1_000_000   # back to cents
+
+                # Apply (clamp на BIGINT_SAFE_MAX чтобы не ловить overflow)
+                spent = min(BIGINT_SAFE_MAX, actual_cost + commission)
+                await conn.execute(
+                    f"update market_users set trylla = trylla - $2, total_trades = total_trades + 1, "
+                    f"total_invested = least({BIGINT_SAFE_MAX}::bigint, total_invested + $2), "
+                    f"last_active_at = now() where tg_id = $1",
+                    tg_id, spent,
+                )
+                # Upsert holding (weighted avg buy price)
+                existing = await conn.fetchrow(
+                    "select quantity, avg_buy_price from market_holdings "
+                    "where user_id = $1 and asset_key = $2 for update",
+                    tg_id, asset_key,
+                )
+                if existing:
+                    old_qty = int(existing["quantity"])
+                    old_avg = int(existing["avg_buy_price"])
+                    new_qty = min(BIGINT_SAFE_MAX, old_qty + quantity)
+                    new_avg = (old_qty * old_avg + quantity * fill_price) // max(1, new_qty)
+                    await conn.execute(
+                        "update market_holdings set quantity = $3, avg_buy_price = $4, "
+                        "last_traded_at = now() where user_id = $1 and asset_key = $2",
+                        tg_id, asset_key, new_qty, new_avg,
+                    )
+                else:
+                    await conn.execute(
+                        "insert into market_holdings (user_id, asset_key, quantity, avg_buy_price) "
+                        "values ($1,$2,$3,$4)",
+                        tg_id, asset_key, min(BIGINT_SAFE_MAX, quantity), fill_price,
+                    )
+                # Trade record
+                await conn.execute(
+                    """
+                    insert into market_trades
+                      (user_id, asset_key, side, quantity, price, total_value, commission, realized_pl)
+                    values ($1,$2,'buy',$3,$4,$5,$6,0)
+                    """,
+                    tg_id, asset_key,
+                    min(BIGINT_SAFE_MAX, quantity),
+                    fill_price,
+                    min(BIGINT_SAFE_MAX, actual_cost),
+                    min(BIGINT_SAFE_MAX, commission),
+                )
+                # Bump XP — 5 per trade + 1 per 1K cash
+                xp_gain = 5 + min(BIGINT_SAFE_MAX, cash_amount) // 100_000
+                await conn.execute(
+                    f"update market_users set xp = least({BIGINT_SAFE_MAX}::bigint, xp + $2) "
+                    "where tg_id = $1",
+                    tg_id, int(min(BIGINT_SAFE_MAX, xp_gain)),
+                )
+    except Exception as e:
+        log.exception("buy_asset failed for tg_id=%s asset=%s", tg_id, asset_key)
+        return {"ok": False, "error": f"Ошибка покупки: {type(e).__name__}"}
 
     return {
         "ok": True,
@@ -695,92 +715,114 @@ async def buy_asset(
 
 async def sell_asset(tg_id: int, asset_key: str, quantity_pct: int = 100) -> dict:
     """Sell `quantity_pct` of holding (1-100). Spread-adjusted. Applies commission
-    and computes realized P/L. XP for profitable sells."""
+    and computes realized P/L. XP for profitable sells.
+
+    Все обновления аккумуляторов клампятся через `least(BIGINT_SAFE_MAX, ...)`,
+    чтобы не словить bigint overflow на раздутых балансах (последствие старых
+    эксплоитов). Без этого продажа крупных позиций молча падала с DB-ошибкой,
+    клиент получал 500, кнопка «не нажималась»."""
     quantity_pct = max(1, min(100, int(quantity_pct)))
     await ensure_user(tg_id)
-    async with pool().acquire() as conn:
-        async with conn.transaction():
-            asset = await conn.fetchrow(
-                "select current_price from market_assets where key = $1", asset_key,
-            )
-            if asset is None:
-                return {"ok": False, "error": "Актив не найден"}
-            holding = await conn.fetchrow(
-                "select quantity, avg_buy_price from market_holdings "
-                "where user_id = $1 and asset_key = $2 for update",
-                tg_id, asset_key,
-            )
-            if not holding or int(holding["quantity"]) <= 0:
-                return {"ok": False, "error": "Нет позиции"}
-
-            user = await conn.fetchrow(
-                "select trylla, skills from market_users where tg_id = $1 for update", tg_id,
-            )
-            skills = _parse_jsonb(user["skills"]) or {}
-            cm = COMMISSION_PCT * (1 - 0.05 * int(skills.get("lower_fees", 0)))
-            cm = max(0.001, cm)
-
-            full_qty = int(holding["quantity"])
-            sell_qty = (full_qty * quantity_pct) // 100
-            if sell_qty <= 0:
-                return {"ok": False, "error": "Слишком мало для продажи"}
-
-            base_price = int(asset["current_price"])
-            fill_price = int(base_price * (1.0 - SPREAD_PCT / 2))
-            gross = (sell_qty * fill_price) // 1_000_000  # cents (microunits → cents)
-            commission = int(gross * cm)
-            net = gross - commission
-
-            avg_buy = int(holding["avg_buy_price"])
-            cost_basis = (sell_qty * avg_buy) // 1_000_000
-            realized_pl = net - cost_basis
-
-            # Apply
-            new_qty = full_qty - sell_qty
-            if new_qty == 0:
-                await conn.execute(
-                    "delete from market_holdings where user_id = $1 and asset_key = $2",
+    try:
+        async with pool().acquire() as conn:
+            async with conn.transaction():
+                asset = await conn.fetchrow(
+                    "select current_price from market_assets where key = $1", asset_key,
+                )
+                if asset is None:
+                    return {"ok": False, "error": "Актив не найден"}
+                holding = await conn.fetchrow(
+                    "select quantity, avg_buy_price from market_holdings "
+                    "where user_id = $1 and asset_key = $2 for update",
                     tg_id, asset_key,
                 )
-            else:
+                if not holding or int(holding["quantity"]) <= 0:
+                    return {"ok": False, "error": "Нет позиции"}
+
+                user = await conn.fetchrow(
+                    "select trylla, skills from market_users where tg_id = $1 for update", tg_id,
+                )
+                skills = _parse_jsonb(user["skills"]) or {}
+                cm = COMMISSION_PCT * (1 - 0.05 * int(skills.get("lower_fees", 0)))
+                cm = max(0.001, cm)
+
+                full_qty = int(holding["quantity"])
+                sell_qty = (full_qty * quantity_pct) // 100
+                if sell_qty <= 0:
+                    return {"ok": False, "error": "Слишком мало для продажи"}
+
+                base_price = int(asset["current_price"])
+                fill_price = int(base_price * (1.0 - SPREAD_PCT / 2))
+                gross = (sell_qty * fill_price) // 1_000_000  # cents (microunits → cents)
+                commission = int(gross * cm)
+                net = gross - commission
+
+                avg_buy = int(holding["avg_buy_price"])
+                cost_basis = (sell_qty * avg_buy) // 1_000_000
+                realized_pl = net - cost_basis
+
+                # Pre-clamp значений в int range, чтобы Python не отдал в asyncpg число
+                # больше bigint
+                net_clamped = min(BIGINT_SAFE_MAX, max(-BIGINT_SAFE_MAX, net))
+                pl_clamped  = min(BIGINT_SAFE_MAX, max(-BIGINT_SAFE_MAX, realized_pl))
+
+                # Apply
+                new_qty = full_qty - sell_qty
+                if new_qty == 0:
+                    await conn.execute(
+                        "delete from market_holdings where user_id = $1 and asset_key = $2",
+                        tg_id, asset_key,
+                    )
+                else:
+                    await conn.execute(
+                        "update market_holdings set quantity = $3, last_traded_at = now() "
+                        "where user_id = $1 and asset_key = $2",
+                        tg_id, asset_key, new_qty,
+                    )
+
+                # `least(MAX, expr)` в SQL предотвращает overflow на сложении —
+                # если итог упёрся в потолок, просто клампим. Иначе INSERT/UPDATE
+                # вылетал бы с numeric_value_out_of_range.
                 await conn.execute(
-                    "update market_holdings set quantity = $3, last_traded_at = now() "
-                    "where user_id = $1 and asset_key = $2",
-                    tg_id, asset_key, new_qty,
+                    f"""
+                    update market_users set
+                      trylla            = least({BIGINT_SAFE_MAX}::bigint, trylla + $2),
+                      total_trades      = total_trades + 1,
+                      total_realized_pl = greatest(-{BIGINT_SAFE_MAX}::bigint,
+                                          least({BIGINT_SAFE_MAX}::bigint, total_realized_pl + $3)),
+                      best_trade_pl     = greatest(best_trade_pl, $3),
+                      worst_trade_pl    = least(worst_trade_pl, $3),
+                      win_count         = win_count + $4,
+                      loss_count        = loss_count + $5,
+                      last_active_at    = now()
+                    where tg_id = $1
+                    """,
+                    tg_id, net_clamped, pl_clamped,
+                    1 if pl_clamped > 0 else 0,
+                    1 if pl_clamped < 0 else 0,
                 )
 
-            await conn.execute(
-                """
-                update market_users set
-                  trylla = trylla + $2,
-                  total_trades = total_trades + 1,
-                  total_realized_pl = total_realized_pl + $3,
-                  best_trade_pl = greatest(best_trade_pl, $3),
-                  worst_trade_pl = least(worst_trade_pl, $3),
-                  win_count = win_count + $4,
-                  loss_count = loss_count + $5,
-                  last_active_at = now()
-                where tg_id = $1
-                """,
-                tg_id, net, realized_pl,
-                1 if realized_pl > 0 else 0,
-                1 if realized_pl < 0 else 0,
-            )
-
-            await conn.execute(
-                """
-                insert into market_trades
-                  (user_id, asset_key, side, quantity, price, total_value, commission, realized_pl)
-                values ($1,$2,'sell',$3,$4,$5,$6,$7)
-                """,
-                tg_id, asset_key, sell_qty, fill_price, gross, commission, realized_pl,
-            )
-            # XP — больше за прибыльные сделки
-            xp_gain = 5 + max(0, realized_pl // 1_000_00)
-            await conn.execute(
-                "update market_users set xp = xp + $2 where tg_id = $1",
-                tg_id, int(xp_gain),
-            )
+                await conn.execute(
+                    """
+                    insert into market_trades
+                      (user_id, asset_key, side, quantity, price, total_value, commission, realized_pl)
+                    values ($1,$2,'sell',$3,$4,$5,$6,$7)
+                    """,
+                    tg_id, asset_key, sell_qty, fill_price,
+                    min(BIGINT_SAFE_MAX, gross),
+                    min(BIGINT_SAFE_MAX, commission),
+                    pl_clamped,
+                )
+                # XP — больше за прибыльные сделки
+                xp_gain = 5 + max(0, pl_clamped // 1_000_00)
+                await conn.execute(
+                    f"update market_users set xp = least({BIGINT_SAFE_MAX}::bigint, xp + $2) "
+                    "where tg_id = $1",
+                    tg_id, int(min(BIGINT_SAFE_MAX, xp_gain)),
+                )
+    except Exception as e:
+        log.exception("sell_asset failed for tg_id=%s asset=%s", tg_id, asset_key)
+        return {"ok": False, "error": f"Ошибка продажи: {type(e).__name__}"}
 
     return {
         "ok": True, "sold_quantity": sell_qty, "fill_price": fill_price,

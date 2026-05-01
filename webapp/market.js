@@ -793,8 +793,14 @@
           // микро-юниты = штук × 1e6
           body.quantity_micro = Math.max(1, Math.floor(v * 1_000_000));
         }
-        const r = await api('/api/market/buy', { method: 'POST', body: JSON.stringify(body) });
-        if (!r.ok) { toast(r.error || 'Ошибка'); return; }
+        let r;
+        try {
+          r = await api('/api/market/buy', { method: 'POST', body: JSON.stringify(body) });
+        } catch (e) {
+          toast('Ошибка сети: ' + (e.message || 'неизвестно'));
+          return;
+        }
+        if (!r || !r.ok) { toast((r && r.error) || 'Ошибка покупки'); return; }
         toast('✓ Куплено ' + (r.quantity / 1_000_000).toFixed(6) + ' ' + asset.symbol);
         tg?.HapticFeedback?.notificationOccurred?.('success');
         overlay.remove();
@@ -838,11 +844,20 @@
       });
 
       goBtn.addEventListener('click', async () => {
-        const r = await api('/api/market/sell', {
-          method: 'POST',
-          body: JSON.stringify({ asset_key: asset.key, quantity_pct: chosenPct }),
-        });
-        if (!r.ok) { toast(r.error || 'Ошибка'); return; }
+        // Защита от молчаливой смерти кнопки на raised exception в api():
+        // без try/catch async-обработчик отбрасывал promise в никуда и
+        // юзер видел «кнопка не нажимается».
+        let r;
+        try {
+          r = await api('/api/market/sell', {
+            method: 'POST',
+            body: JSON.stringify({ asset_key: asset.key, quantity_pct: chosenPct }),
+          });
+        } catch (e) {
+          toast('Ошибка сети: ' + (e.message || 'неизвестно'));
+          return;
+        }
+        if (!r || !r.ok) { toast((r && r.error) || 'Ошибка продажи'); return; }
         const sign = r.realized_pl >= 0 ? '+' : '';
         toast(`✓ Продано · P/L ${sign}${fmt(Math.floor(r.realized_pl/100))} TRYLLA`);
         tg?.HapticFeedback?.notificationOccurred?.('success');
