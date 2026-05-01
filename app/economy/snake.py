@@ -707,10 +707,19 @@ def _draw_shard_from_case(case_key: str) -> dict | None:
 # ============================================================
 
 def xp_needed_for(level: int) -> int:
-    """XP threshold to reach `level + 1` from level 1 cumulative."""
+    """XP threshold to reach `level + 1` from level 1 cumulative.
+
+    До 240 ур — стандартная кривая `100 × level^1.6` (примерно 665K на 240).
+    После 240 — каждые 100 уровней XP удваивается (anti-runaway, чтобы Корона
+    с экспонентой 1.05^level не доводила экономику до ничего за пару дней).
+    На 500 ур ≈ 27M XP, на 1000 ≈ 4.7B XP."""
     if level < 1:
         return 0
-    return int(100 * (level ** 1.6))
+    base = 100 * (level ** 1.6)
+    if level <= 240:
+        return int(base)
+    excess = level - 240
+    return int(base * (2 ** (excess / 100)))
 
 
 PLAYER_MAX_LEVEL = 1000
@@ -1138,9 +1147,10 @@ async def get_state(tg_id: int) -> dict:
             daily_bonus_mult = 1 + (daily_bonus_mult - 1) * 3
         elif is_first_today and art_eff["daily_first_run_base"] > 1.0:
             daily_bonus_mult = float(art_eff["daily_first_run_base"])
-    # Artifact: Корона Владыки — total ×(level × 0.23). Линейная, +11.5x за
-    # каждые 50 уровней. На 50 = ×11.5, 100 = ×23, 200 = ×46, 1000 = ×230.
-    crown_mult = max(1.0, cur_lvl * 0.23) if art_eff["crown_level_mult"] else 1.0
+    # Artifact: Корона Владыки — экспоненциальный множитель 1.05^level.
+    # На 50 = ×11.5, 100 = ×131, 200 = ×17K, 1000 = ×5e21. Для баланса XP-кривая
+    # резко тяжелеет после 240 ур (см. xp_needed_for).
+    crown_mult = (1.05 ** cur_lvl) if art_eff["crown_level_mult"] else 1.0
     # Artifact: Космический Двигатель — +20% к финальному множителю
     engine_mult = 1.0 + float(art_eff.get("run_total_mult_bonus", 0.0))
     coin_mult = round(greed_mult * total_mult * universal_mult * daily_bonus_mult * crown_mult * engine_mult, 4)
@@ -1331,12 +1341,11 @@ async def record_run(
     # Apply RUN-WIDE multipliers (NOT applied client-side):
     coins = int(coins * greed_mult * total_mult * um_mult * daily_bonus_mult)
 
-    # Artifact: Корона Владыки — линейный множитель `level × 0.23` (см. preview
-    # multiplier выше). Заменили старую `1.05^level` экспоненту, которая на
-    # 200+ уровнях уходила в ×17K+ и ломала экономику.
+    # Artifact: Корона Владыки — экспоненциальный 1.05^level. Балансируется
+    # тяжёлой XP-кривой после 240 ур.
     if art_eff["crown_level_mult"]:
         cur_level_now = int((row or {}).get("level", 1))
-        coins = int(coins * max(1.0, cur_level_now * 0.23))
+        coins = int(coins * (1.05 ** cur_level_now))
 
     # Artifact: Космический Двигатель — +20% к финальному ран-доходу
     engine_bonus = float(art_eff.get("run_total_mult_bonus", 0.0))
