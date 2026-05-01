@@ -3761,13 +3761,27 @@ h2 {
 .lb-rank.top3 { color: #cd7f32; }
 
 .lb-name {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;            /* чтобы flex-shrink реально срезал длинные ники */
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+.lb-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .lb-bal {
+  flex: 0 0 auto;          /* не сжимаем баланс — всегда полностью виден */
   font-weight: 700;
   color: var(--accent-gold);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* ===== tabs ===== */

@@ -3834,15 +3834,19 @@ function renderLeaderboard() {
     const tierHtml = tier
       ? `<span class="lb-tier" style="color:${tier.color || '#aaa'}" title="${escape(tier.name || '')} · оборот ${fmt(r.lifetime_wager || 0)}">${escape(tier.emoji || '')}</span>`
       : '';
+    // Гигантские балансы (>1B) рендерим компактно — иначе на мобиле
+    // 20+ цифр перекрывают никнейм. Для нормальных оставляем полное форматирование.
+    const balN = Number(r.balance) || 0;
+    const balStr = balN >= 1_000_000_000 ? fmtCompact(balN) : fmt(r.balance);
     return `
       <div class="lb-row">
         <div class="lb-rank ${rankClass}">${rankStr}</div>
         <div class="lb-name">
           ${tierHtml}
-          <span class="lb-name-text">${escape(name)}</span>
+          <span class="lb-name-text" title="${escape(name)}">${escape(name)}</span>
           ${badgesHtml ? `<span class="lb-badges">${badgesHtml}</span>` : ''}
         </div>
-        <div class="lb-bal">${fmt(r.balance)} 🪙</div>
+        <div class="lb-bal" title="${fmt(r.balance)} 🪙">${balStr} 🪙</div>
       </div>
     `;
   }).join('');
