@@ -63,6 +63,7 @@ def _register(dp: Dispatcher) -> None:
         timer,
         tldr,
         top,
+        villager,
         voice,
         welcome,
         whereami,
@@ -99,6 +100,7 @@ def _register(dp: Dispatcher) -> None:
         top.router,
         google.router,           # /google + "загугли X" trigger
         economy_cmds.router,     # /balance /daily /casino
+        villager.router,         # /villager /vstatus /vcollect
         audit_cmd.router,        # /audit @user [period] (admin)
         mystery_drop.router,     # claim_drop callback
         roll.router,

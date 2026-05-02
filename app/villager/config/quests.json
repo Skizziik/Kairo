@@ -1,0 +1,83 @@
+{
+  "q_first_steps": {
+    "name": "Первые шаги",
+    "description": "Поставь свою первую лесопилку. Она будет добывать дерево пока тебя нет.",
+    "trigger": "build",
+    "target": {"building_type": "lumbermill", "count": 1},
+    "rewards": {"gold": 50, "experience": 100},
+    "next": ["q_mine_stone"],
+    "auto_start": true
+  },
+  "q_mine_stone": {
+    "name": "Камень — основа всего",
+    "description": "Построй каменоломню. Без камня далеко не уедешь.",
+    "trigger": "build",
+    "target": {"building_type": "quarry", "count": 1},
+    "rewards": {"gold": 50, "experience": 100, "wood": 50},
+    "next": ["q_first_food"]
+  },
+  "q_first_food": {
+    "name": "Накорми деревню",
+    "description": "Построй ферму чтобы жители не голодали.",
+    "trigger": "build",
+    "target": {"building_type": "farm", "count": 1},
+    "rewards": {"gold": 80, "experience": 150, "stone": 50},
+    "next": ["q_water"]
+  },
+  "q_water": {
+    "name": "Источник жизни",
+    "description": "Построй колодец — без воды ничего не растёт.",
+    "trigger": "build",
+    "target": {"building_type": "well", "count": 1},
+    "rewards": {"gold": 100, "experience": 200, "food": 50},
+    "next": ["q_collect_wood"]
+  },
+  "q_collect_wood": {
+    "name": "Заготовщик",
+    "description": "Собери 500 дерева. Покажи кто тут хозяин леса.",
+    "trigger": "collect",
+    "target": {"resource": "wood", "amount": 500},
+    "rewards": {"gold": 150, "experience": 200},
+    "next": ["q_upgrade_townhall"]
+  },
+  "q_upgrade_townhall": {
+    "name": "Расти, деревня!",
+    "description": "Прокачай Ратушу до уровня 2. Это откроет новые возможности.",
+    "trigger": "upgrade",
+    "target": {"building_type": "townhall", "level": 2},
+    "rewards": {"gold": 300, "experience": 500, "gems": 5},
+    "next": ["q_build_house"]
+  },
+  "q_build_house": {
+    "name": "Жильё",
+    "description": "Построй два дома — людям нужна крыша над головой.",
+    "trigger": "build",
+    "target": {"building_type": "house", "count": 2},
+    "rewards": {"gold": 200, "experience": 300},
+    "next": ["q_storage"]
+  },
+  "q_storage": {
+    "name": "Запас не помешает",
+    "description": "Построй склад чтобы хранить больше ресурсов.",
+    "trigger": "build",
+    "target": {"building_type": "storage", "count": 1},
+    "rewards": {"gold": 250, "experience": 400, "wood": 100, "stone": 100},
+    "next": ["q_builder_hut"]
+  },
+  "q_builder_hut": {
+    "name": "Больше рабочих рук",
+    "description": "Построй хижину строителя — будешь строить два здания одновременно.",
+    "trigger": "build",
+    "target": {"building_type": "builderhut", "count": 1},
+    "rewards": {"gold": 400, "experience": 600, "gems": 10},
+    "next": ["q_collect_gold"]
+  },
+  "q_collect_gold": {
+    "name": "Богатей",
+    "description": "Накопи 1000 золота. Это основа любой империи.",
+    "trigger": "collect",
+    "target": {"resource": "gold", "amount": 1000},
+    "rewards": {"gems": 25, "experience": 1000},
+    "next": []
+  }
+}

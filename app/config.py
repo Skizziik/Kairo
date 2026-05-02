@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     # Register via BotFather /newapp. When set, /casino uses it for url buttons.
     miniapp_tme_url: str | None = Field(default=None, alias="MINIAPP_TME_URL")
 
+    # Village Tycoon Mini App — separate frontend (Phaser). Hosted on
+    # user's PC via Cloudflare Tunnel during MVP. Backend lives here.
+    villager_url: str | None = Field(default=None, alias="VILLAGER_URL")
+    villager_tme_url: str | None = Field(default=None, alias="VILLAGER_TME_URL")
+
     chime_in_probability: float = Field(default=0.18, alias="CHIME_IN_PROBABILITY")
     chime_in_cooldown_seconds: int = Field(default=90, alias="CHIME_IN_COOLDOWN_SECONDS")
     chime_in_min_words: int = Field(default=4, alias="CHIME_IN_MIN_WORDS")

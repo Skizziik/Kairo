@@ -1,0 +1,8 @@
+{
+  "wood":  {"name": "Дерево",  "icon": "res_wood.png",  "base_cap": 200, "color": "#8B5A2B"},
+  "stone": {"name": "Камень",  "icon": "res_stone.png", "base_cap": 200, "color": "#8896A6"},
+  "food":  {"name": "Еда",     "icon": "res_food.png",  "base_cap": 200, "color": "#F2B23E"},
+  "water": {"name": "Вода",    "icon": "res_water.png", "base_cap": 100, "color": "#4FB2E5"},
+  "gold":  {"name": "Золото",  "icon": "res_gold.png",  "base_cap": 500, "color": "#FFD23F"},
+  "gems":  {"name": "Гемы",    "icon": "res_gems.png",  "base_cap": 9999999, "color": "#B557F7"}
+}
