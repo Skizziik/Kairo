@@ -37,6 +37,7 @@ export function renderTopBar(state: StateSnap, config: ConfigSnap) {
     root.appendChild(topBarEl);
   }
   topBarEl.innerHTML = "";
+  // Compact: only main 4 + gold. Cap shown via progress shading, not text.
   const visible = ["wood", "stone", "food", "water", "gold"];
   for (const r of state.resources) {
     if (!visible.includes(r.type)) continue;
@@ -44,11 +45,16 @@ export function renderTopBar(state: StateSnap, config: ConfigSnap) {
     if (!def) continue;
     const chip = document.createElement("div");
     chip.className = "res-chip";
-    if (Number(r.amount) >= Number(r.cap)) chip.classList.add("capped");
+    const amount = Number(r.amount);
+    const cap = Number(r.cap);
+    const pct = cap > 0 ? Math.min(100, Math.round((amount / cap) * 100)) : 0;
+    if (amount >= cap) chip.classList.add("capped");
+    chip.title = `${def.name}: ${amount} / ${cap}`;
     chip.innerHTML = `
       <img src="${ASSET}/resources/${def.icon}" alt="${def.name}">
-      <span>${formatNum(r.amount)} / ${formatNum(r.cap)}</span>
+      <span>${formatNum(r.amount)}</span>
     `;
+    chip.style.setProperty("--fill-pct", `${pct}%`);
     topBarEl.appendChild(chip);
   }
 }
@@ -361,6 +367,17 @@ export function showBuildingDetails(scene: Phaser.Scene, b: BuildingSnap) {
           hapticNotify("error");
           toast("Не получилось", "error");
         }
+      },
+    });
+  }
+
+  if (b.status === "active") {
+    actions.push({
+      label: "Переместить",
+      onClick: () => {
+        haptic("light");
+        m.close();
+        scene.events.emit("ui:move", b.id);
       },
     });
   }

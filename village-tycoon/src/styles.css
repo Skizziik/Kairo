@@ -118,37 +118,59 @@ html, body {
   left: 8px;
   right: 8px;
   display: flex;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
   pointer-events: none;
+  max-width: calc(100% - 100px); /* leave room for the corner gem chip */
 }
 
 .res-chip {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px 6px 8px;
+  gap: 4px;
+  padding: 3px 10px 3px 4px;
   background: linear-gradient(180deg, #3D2E22 0%, #2C211A 100%);
   border: 2px solid var(--wood-dark);
   border-radius: 999px;
   pointer-events: auto;
   font-weight: 700;
-  font-size: 14px;
+  font-size: 13px;
+  line-height: 1;
   color: var(--text-primary);
   text-shadow: 0 1px 0 rgba(0,0,0,0.5);
-  box-shadow: 0 2px 0 var(--wood-dark), 0 4px 12px rgba(0,0,0,0.3);
-  min-width: 86px;
+  box-shadow: 0 2px 0 var(--wood-dark);
+  overflow: hidden;
+}
+
+/* Subtle fill indicator showing how full the storage is. */
+.res-chip::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: var(--fill-pct, 0%);
+  background: linear-gradient(180deg, rgba(255, 210, 63, 0.12) 0%, rgba(255, 210, 63, 0.04) 100%);
+  pointer-events: none;
+  transition: width 300ms ease-out;
+}
+
+.res-chip > * {
+  position: relative;
+  z-index: 1;
 }
 
 .res-chip img {
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   object-fit: contain;
   filter: drop-shadow(0 1px 0 rgba(0,0,0,0.4));
 }
 
 .res-chip.capped {
   border-color: var(--red-negative);
+}
+.res-chip.capped::before {
+  background: linear-gradient(180deg, rgba(231, 76, 60, 0.2) 0%, rgba(231, 76, 60, 0.08) 100%);
 }
 
 /* Bottom navigation */

@@ -16,6 +16,7 @@ export class MapScene extends Phaser.Scene {
 
   private placementGhost: Phaser.GameObjects.Container | null = null;
   private placementType: string | null = null;
+  private movingBuildingId: number | null = null;
 
   private buildingSprites: Map<number, Phaser.GameObjects.Container> = new Map();
 
@@ -53,6 +54,17 @@ export class MapScene extends Phaser.Scene {
       this.spawnBuildingSprite(b, config);
     }
 
+    // Initial zoom: fit the whole map to the viewport (so the player sees the
+    // village immediately on a phone screen).
+    const mapPxW = this.mapW * TILE + MAP_PADDING * 2;
+    const mapPxH = this.mapH * TILE + MAP_PADDING * 2;
+    const fitZoom = Math.min(
+      this.scale.width / mapPxW,
+      this.scale.height / mapPxH,
+      1.0,
+    );
+    this.cam.setZoom(Math.max(0.3, fitZoom));
+
     // Center camera on Town Hall by default.
     const hall = state.buildings.find((b) => b.type === "townhall");
     if (hall) {
@@ -61,6 +73,8 @@ export class MapScene extends Phaser.Scene {
       const cx = MAP_PADDING + (hall.x + w / 2) * TILE;
       const cy = MAP_PADDING + (hall.y + h / 2) * TILE;
       this.cam.centerOn(cx, cy);
+    } else {
+      this.cam.centerOn(mapPxW / 2, mapPxH / 2);
     }
 
     this.setupInput();
@@ -100,27 +114,37 @@ export class MapScene extends Phaser.Scene {
   }
 
   private spawnDecorations() {
-    // Sprinkle decorative trees/rocks/bushes around the empty edges.
-    const decoTypes = ["deco_tree_oak", "deco_tree_pine", "deco_bush_1", "deco_bush_2", "deco_rock_1", "deco_rock_2"];
-    const positions: Array<[number, number]> = [];
-    const rng = Phaser.Math.RandomDataGenerator.prototype;
+    // Decorations only along the outer 2-tile border so they don't crowd buildings.
+    const decoTypes = ["deco_tree_oak", "deco_tree_pine", "deco_bush_1", "deco_bush_2", "deco_rock_1", "deco_rock_2", "deco_tree_dead"];
     let seed = 1337;
     const rand = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
 
-    for (let i = 0; i < 20; i++) {
+    const isBorder = (x: number, y: number) =>
+      x < 2 || x >= this.mapW - 2 || y < 2 || y >= this.mapH - 2;
+
+    const placed = new Set<string>();
+    let attempts = 0;
+    let count = 0;
+    while (count < 14 && attempts < 80) {
+      attempts++;
       const x = Math.floor(rand() * this.mapW);
       const y = Math.floor(rand() * this.mapH);
-      // Keep center clear (Town Hall lands at 6,6 with size 3).
-      if (x >= 5 && x <= 9 && y >= 5 && y <= 9) continue;
+      if (!isBorder(x, y)) continue;
+      const k = `${x},${y}`;
+      if (placed.has(k)) continue;
+      placed.add(k);
+
       const key = decoTypes[Math.floor(rand() * decoTypes.length)];
       if (!this.textures.exists(key)) continue;
-      const img = this.add.image(x * TILE + TILE / 2, y * TILE + TILE * 0.85, key);
+      const img = this.add.image(x * TILE + TILE / 2, y * TILE + TILE * 0.9, key);
       img.setOrigin(0.5, 1);
-      const scale = key.includes("tree") ? 0.55 : 0.4;
-      img.setScale(scale);
+      // Trees roughly fill 1 tile, bushes/rocks half a tile.
+      const isTree = key.includes("tree");
+      const targetW = isTree ? TILE * 0.85 : TILE * 0.5;
+      img.setDisplaySize(targetW, img.height * (targetW / img.width));
       img.setDepth(y);
       this.decoLayer.add(img);
-      positions.push([x, y]);
+      count++;
     }
   }
 
@@ -156,7 +180,7 @@ export class MapScene extends Phaser.Scene {
         if (this.pinchInitial == null) {
           this.pinchInitial = d / this.cam.zoom;
         } else {
-          this.cam.setZoom(Phaser.Math.Clamp(d / this.pinchInitial, 0.4, 1.6));
+          this.cam.setZoom(Phaser.Math.Clamp(d / this.pinchInitial, 0.25, 1.6));
         }
         return;
       }
@@ -191,7 +215,7 @@ export class MapScene extends Phaser.Scene {
 
     // Wheel zoom (desktop).
     this.input.on("wheel", (_p: Phaser.Input.Pointer, _objs: any, _dx: number, dy: number) => {
-      const z = Phaser.Math.Clamp(this.cam.zoom * (dy > 0 ? 0.9 : 1.1), 0.4, 1.6);
+      const z = Phaser.Math.Clamp(this.cam.zoom * (dy > 0 ? 0.9 : 1.1), 0.25, 1.6);
       this.cam.setZoom(z);
     });
   }
@@ -206,6 +230,10 @@ export class MapScene extends Phaser.Scene {
 
     this.events.on("ui:place", (type: string) => {
       this.beginPlacement(type);
+    });
+
+    this.events.on("ui:move", (buildingId: number) => {
+      this.beginMove(buildingId);
     });
 
     this.events.on("ui:cancel_placement", () => {
@@ -293,16 +321,17 @@ export class MapScene extends Phaser.Scene {
     this.placementGhost.setData("tile", { x: tx, y: ty });
 
     // Color the ghost rect by validity.
-    const valid = this.isPositionFree(tx, ty, w, h);
+    const valid = this.isPositionFree(tx, ty, w, h, this.movingBuildingId);
     const rect = this.placementGhost.list[0] as Phaser.GameObjects.Rectangle;
     rect.setFillStyle(valid ? 0x6FE085 : 0xE74C3C, 0.35);
     rect.setStrokeStyle(3, valid ? 0x6FE085 : 0xE74C3C, 1);
   }
 
-  private isPositionFree(tx: number, ty: number, w: number, h: number): boolean {
+  private isPositionFree(tx: number, ty: number, w: number, h: number, excludeId?: number | null): boolean {
     const config = this.registry.get("config") as ConfigSnap;
     const state = this.registry.get("state") as StateSnap;
     for (const b of state.buildings) {
+      if (excludeId != null && b.id === excludeId) continue;
       const def = config.buildings[b.type];
       if (!def) continue;
       const [bw, bh] = def.size;
@@ -316,20 +345,25 @@ export class MapScene extends Phaser.Scene {
   private async tryPlaceFromGhost() {
     if (!this.placementGhost || !this.placementType) return;
     const tile = this.placementGhost.getData("tile") as { x: number; y: number };
-    const type = this.placementType;
     const cancel = () => this.cancelPlacement();
 
     haptic("medium");
-    const r = await api.build(type, tile.x, tile.y);
+    let r;
+    if (this.movingBuildingId != null) {
+      r = await api.move(this.movingBuildingId, tile.x, tile.y);
+    } else {
+      r = await api.build(this.placementType, tile.x, tile.y);
+    }
     if (!r.ok) {
       hapticNotify("error");
       toast(this.translateError(r.error, r.missing), "error");
       return;
     }
+    const wasMove = this.movingBuildingId != null;
     cancel();
     if (r.data?.state) this.applyState(r.data.state);
     hapticNotify("success");
-    toast("Стройка пошла!", "success");
+    toast(wasMove ? "Перемещено" : "Стройка пошла!", "success");
   }
 
   private translateError(err?: string, missing?: string): string {
@@ -352,8 +386,21 @@ export class MapScene extends Phaser.Scene {
       this.placementGhost = null;
     }
     this.placementType = null;
+    this.movingBuildingId = null;
     this.gridLayer.setVisible(false);
     this.gridLayer.clear();
+  }
+
+  beginMove(buildingId: number) {
+    const state = this.registry.get("state") as StateSnap;
+    const b = state.buildings.find((x) => x.id === buildingId);
+    if (!b) return;
+    // Reuse beginPlacement, but mark the existing building as the source so
+    // collision-check excludes it and the API call goes to /move.
+    this.beginPlacement(b.type);
+    this.movingBuildingId = buildingId;
+    // Snap ghost to current position so user sees where it is now.
+    this.moveGhost(b.x, b.y);
   }
 
   private drawGrid() {
