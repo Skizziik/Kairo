@@ -57,6 +57,31 @@ async def ensure_schema() -> None:
         except Exception as e:
             log.warning("economy numeric migration failed: %s", e)
 
+        # economy_users.balance: bump precision to UNLIMITED numeric
+        # (numeric without args = arbitrary precision). Раньше было numeric(50,0)
+        # = max 50 цифр. Для All-or-Nothing с балансами в 50+ цифр доцать ×2
+        # пробивает potolok. Unlimited numeric решает.
+        try:
+            await conn.execute("""
+                do $$
+                begin
+                  if (select numeric_precision from information_schema.columns
+                      where table_schema='public' and table_name='economy_users'
+                        and column_name='balance') is not null then
+                    alter table economy_users
+                      alter column balance      type numeric using balance::numeric,
+                      alter column total_earned type numeric using total_earned::numeric,
+                      alter column total_spent  type numeric using total_spent::numeric;
+                    alter table economy_transactions
+                      alter column amount        type numeric using amount::numeric,
+                      alter column balance_after type numeric using balance_after::numeric;
+                  end if;
+                end $$;
+            """)
+            log.info("economy_users.balance bumped to unlimited numeric")
+        except Exception as e:
+            log.warning("balance unlimited numeric migration failed: %s", e)
+
         # AI bot mood state — добавляет колонку mood_state в bot_chat_state
         # для динамической личности Кайро 2.0 (5 модусов + dynamic mood).
         try:

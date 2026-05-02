@@ -1459,6 +1459,29 @@ async def api_flappy_leaderboard(sort_by: str = "lifetime", user: dict = Depends
 
 
 # ================================================================
+# 🎲 ALL-OR-NOTHING — простой 50/50 на весь баланс
+# ================================================================
+from app.economy import all_or_nothing as _aon
+
+
+@router.post("/aon/play")
+async def api_aon_play(user: dict = Depends(require_user)) -> dict:
+    return await _aon.play(int(user["id"]))
+
+
+@router.get("/aon/state")
+async def api_aon_state(user: dict = Depends(require_user)) -> dict:
+    """Возвращает текущий баланс юзера (используется UI чтобы показать ставку)."""
+    from app.db.client import pool as _db_pool
+    async with _db_pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "select balance from economy_users where tg_id = $1",
+            int(user["id"]),
+        )
+    return {"balance": int(row["balance"]) if row else 0}
+
+
+# ================================================================
 # 📈 MARKET — TRYLLA EXCHANGE
 # ================================================================
 from app.economy import market as _market

@@ -926,6 +926,120 @@ document.addEventListener('DOMContentLoaded', () => {
   }, 15000);
 });
 
+// ════════════════════════════════════════════════════════════════
+// 🎲 ALL OR NOTHING — coin flip на весь баланс
+// ════════════════════════════════════════════════════════════════
+async function renderAonGame(area) {
+  // Подгружаем точный баланс с бэка (numeric, может быть огромный)
+  let balance = 0n;
+  try {
+    const r = await api('/api/aon/state');
+    balance = BigInt(String(r.balance || 0));
+  } catch (e) {
+    balance = BigInt(String((state.me && state.me.balance) || 0));
+  }
+  const balDisplay = fmtCompact(Number(balance.toString().slice(0, 16)));
+
+  area.innerHTML = `
+    <div class="aon-screen">
+      <div class="aon-title">💀 Всё или Ничего</div>
+      <div class="aon-warn">
+        ⚠ Шанс <b>50/50</b>. Ставка = <b>весь баланс</b>.<br>
+        Win = ×2 · Lose = ноль.
+      </div>
+      <div class="aon-balance">
+        <div class="aon-balance-label">Твой баланс (= ставка)</div>
+        <div class="aon-balance-value" id="aon-bal">${balDisplay} 🪙</div>
+      </div>
+      <div class="aon-coin-wrap">
+        <div class="aon-coin" id="aon-coin">
+          <div class="aon-coin-face aon-coin-front">🪙</div>
+          <div class="aon-coin-face aon-coin-back">💀</div>
+        </div>
+      </div>
+      <button class="aon-btn" id="aon-go" ${balance <= 0n ? 'disabled' : ''}>
+        ${balance <= 0n ? 'НЕЧЕГО СТАВИТЬ' : '⚡ КРУТИТЬ — ВСЁ ИЛИ НИЧЕГО'}
+      </button>
+      <div class="aon-result" id="aon-result"></div>
+    </div>
+  `;
+
+  const btn = document.getElementById('aon-go');
+  const coin = document.getElementById('aon-coin');
+  const resultEl = document.getElementById('aon-result');
+  const balEl = document.getElementById('aon-bal');
+
+  if (!btn || balance <= 0n) return;
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.textContent = '🎲 КИДАЕМ МОНЕТКУ...';
+    resultEl.textContent = '';
+    resultEl.className = 'aon-result';
+    coin.classList.remove('aon-spin', 'aon-result-win', 'aon-result-lose');
+
+    // Запускаем анимацию (вращение)
+    void coin.offsetWidth;   // reflow
+    coin.classList.add('aon-spin');
+
+    // Параллельно дёргаем API
+    let resp;
+    try {
+      resp = await api('/api/aon/play', { method: 'POST', body: '{}' });
+    } catch (e) {
+      coin.classList.remove('aon-spin');
+      resultEl.textContent = 'Ошибка сети, попробуй ещё раз';
+      resultEl.className = 'aon-result aon-result-lose';
+      btn.disabled = false;
+      btn.textContent = '⚡ КРУТИТЬ — ВСЁ ИЛИ НИЧЕГО';
+      return;
+    }
+
+    // Ждём пока крутится монета (минимум 2.5 сек)
+    await new Promise(r => setTimeout(r, 2500));
+    coin.classList.remove('aon-spin');
+
+    if (!resp || !resp.ok) {
+      resultEl.textContent = (resp && resp.error) || 'Ошибка';
+      resultEl.className = 'aon-result aon-result-lose';
+      btn.disabled = false;
+      btn.textContent = '⚡ КРУТИТЬ — ВСЁ ИЛИ НИЧЕГО';
+      return;
+    }
+
+    const won = resp.won;
+    const newBal = BigInt(String(resp.new_balance));
+    coin.classList.add(won ? 'aon-result-win' : 'aon-result-lose');
+
+    if (won) {
+      resultEl.innerHTML = `🔥 ВЫИГРАЛ — баланс удвоен!`;
+      resultEl.className = 'aon-result aon-result-win';
+    } else {
+      resultEl.innerHTML = `💀 ПРОЛЁТ — всё в ноль.`;
+      resultEl.className = 'aon-result aon-result-lose';
+    }
+    const newBalDisplay = newBal === 0n ? '0' : fmtCompact(Number(newBal.toString().slice(0, 16)));
+    balEl.textContent = newBalDisplay + ' 🪙';
+
+    // Обновляем глобальный balance display
+    if (state.me) {
+      state.me.balance = Number(newBal.toString().slice(0, 16));
+      const headerBal = document.getElementById('balance-display');
+      if (headerBal) headerBal.textContent = fmt(state.me.balance);
+    }
+
+    // Кнопка повторить (если не 0)
+    if (newBal > 0n) {
+      btn.disabled = false;
+      btn.textContent = '⚡ ЕЩЁ РАЗ — ВСЁ ИЛИ НИЧЕГО';
+    } else {
+      btn.disabled = true;
+      btn.textContent = 'НЕЧЕГО СТАВИТЬ';
+    }
+  });
+}
+
+
 function openGameScreen(gameKey) {
   // Snake has its own dedicated view (with sub-tabs); short-circuit before
   // hiding the games grid so the existing nav system handles it cleanly.
@@ -966,6 +1080,10 @@ function closeGameScreen() {
 function renderGamePlay(game, target) {
   // `target` is where to render; falls back to game-play-area for safety
   const area = target || document.getElementById('game-play-area');
+  if (game === 'aon') {
+    renderAonGame(area);
+    return;
+  }
   if (game === 'coinflip') {
     const me = state.me || {};
     const cap = me.coinflip_max_bet;
