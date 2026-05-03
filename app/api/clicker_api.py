@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.api.auth import require_user
 from app.clicker import game as gm
+from app.clicker import market as mk
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +63,19 @@ class BusinessBranchReq(BaseModel):
 class BPClaimReq(BaseModel):
     level: int = Field(..., ge=1, le=50)
     track: str = Field(..., min_length=4, max_length=8)
+
+
+class CreateLotReq(BaseModel):
+    offer_kind: str = Field(..., min_length=1, max_length=16)
+    offer_id: str | None = Field(default=None, max_length=64)
+    offer_amount: float = Field(..., ge=0.0001)
+    ask_kind: str = Field(..., min_length=1, max_length=16)
+    ask_id: str | None = Field(default=None, max_length=64)
+    ask_amount: float = Field(..., ge=0.0001)
+
+
+class LotIdReq(BaseModel):
+    lot_id: int = Field(..., ge=1)
 
 
 @router.get("/config")
@@ -145,6 +159,46 @@ async def api_battlepass_buy_premium(user: dict = Depends(require_user)) -> dict
 @router.post("/battlepass/claim")
 async def api_battlepass_claim(req: BPClaimReq, user: dict = Depends(require_user)) -> dict:
     return await gm.bp_claim(int(user["id"]), req.level, req.track)
+
+
+# ---- Marketplace ----
+
+@router.get("/market/lots")
+async def api_market_lots(user: dict = Depends(require_user)) -> dict:
+    rows = await mk.list_lots(limit=100, exclude_seller=int(user["id"]))
+    return {"ok": True, "data": rows}
+
+
+@router.get("/market/my_lots")
+async def api_market_my_lots(user: dict = Depends(require_user)) -> dict:
+    rows = await mk.my_lots(int(user["id"]))
+    return {"ok": True, "data": rows}
+
+
+@router.get("/market/history")
+async def api_market_history(asset_kind: str | None = None, asset_id: str | None = None,
+                              user: dict = Depends(require_user)) -> dict:
+    rows = await mk.history(limit=50, asset_kind=asset_kind, asset_id=asset_id)
+    return {"ok": True, "data": rows}
+
+
+@router.post("/market/create")
+async def api_market_create(req: CreateLotReq, user: dict = Depends(require_user)) -> dict:
+    return await mk.create_lot(
+        int(user["id"]),
+        req.offer_kind, req.offer_id, req.offer_amount,
+        req.ask_kind, req.ask_id, req.ask_amount,
+    )
+
+
+@router.post("/market/accept")
+async def api_market_accept(req: LotIdReq, user: dict = Depends(require_user)) -> dict:
+    return await mk.accept_lot(int(user["id"]), req.lot_id)
+
+
+@router.post("/market/cancel")
+async def api_market_cancel(req: LotIdReq, user: dict = Depends(require_user)) -> dict:
+    return await mk.cancel_lot(int(user["id"]), req.lot_id)
 
 
 @router.post("/prestige/buy_node")

@@ -127,6 +127,32 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ level, track }),
     }),
+
+  marketLots: () => request<any[]>("/api/clicker/market/lots"),
+  marketMyLots: () => request<any[]>("/api/clicker/market/my_lots"),
+  marketHistory: (asset_kind?: string, asset_id?: string) => {
+    const qs = new URLSearchParams();
+    if (asset_kind) qs.set("asset_kind", asset_kind);
+    if (asset_id) qs.set("asset_id", asset_id);
+    const path = `/api/clicker/market/history${qs.toString() ? "?" + qs.toString() : ""}`;
+    return request<any[]>(path);
+  },
+  marketCreate: (offer_kind: string, offer_id: string | null, offer_amount: number,
+                 ask_kind: string, ask_id: string | null, ask_amount: number) =>
+    request<{ lot_id: number; commission_paid: string }>("/api/clicker/market/create", {
+      method: "POST",
+      body: JSON.stringify({ offer_kind, offer_id, offer_amount, ask_kind, ask_id, ask_amount }),
+    }),
+  marketAccept: (lot_id: number) =>
+    request<{ lot_id: number }>("/api/clicker/market/accept", {
+      method: "POST",
+      body: JSON.stringify({ lot_id }),
+    }),
+  marketCancel: (lot_id: number) =>
+    request<{ lot_id: number }>("/api/clicker/market/cancel", {
+      method: "POST",
+      body: JSON.stringify({ lot_id }),
+    }),
   leaderboard: (metric: string, limit: number = 50) =>
     request<LeaderboardEntry[]>(`/api/clicker/leaderboard?metric=${encodeURIComponent(metric)}&limit=${limit}`),
 };

@@ -4,9 +4,9 @@ import { mountTopbar } from "./ui/topbar";
 import { mountBottomNav } from "./ui/bottomnav";
 import { mountClickerTab } from "./tabs/clicker";
 import { mountInventoryTab } from "./tabs/inventory";
-import { mountLockedTab } from "./tabs/locked";
 import { mountMoreTab } from "./tabs/more";
 import { mountBusinessTab } from "./tabs/business";
+import { mountMarketTab } from "./tabs/market";
 import { el } from "./util";
 import { toast } from "./ui/toast";
 
@@ -93,12 +93,7 @@ function buildUI() {
   mountClickerTab(tabArea);
   mountBusinessTab(tabArea);
   mountInventoryTab(tabArea);
-  mountLockedTab(tabArea, {
-    tabId: "market",
-    icon: "🛒",
-    title: "МАРКЕТ P2P",
-    message: "Свободный обмен ресурсов / артефактов / casecoins между друзьями. Лоты, история сделок, индекс цен. Раскатываем в Phase 2.",
-  });
+  mountMarketTab(tabArea);
   mountMoreTab(tabArea);
 
   mountBottomNav(app);

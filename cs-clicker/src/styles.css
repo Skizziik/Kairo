@@ -823,6 +823,120 @@ html, body {
 ::-webkit-scrollbar-track { background: var(--bg-deep); }
 ::-webkit-scrollbar-thumb { background: var(--bg-mid); border-radius: 3px; }
 
+/* ---------- MARKETPLACE ---------- */
+
+.market-create-btn {
+  width: 100%; min-height: 48px;
+  background: linear-gradient(180deg, var(--awp-orange), #C77530);
+  color: #000; border: 1px solid #8B4F1C; border-radius: 8px;
+  font-family: inherit; font-weight: 800; font-size: 14px; letter-spacing: 1px;
+  cursor: pointer;
+  margin-bottom: 12px;
+}
+.market-create-btn:active { transform: translateY(1px); }
+
+.market-list { display: flex; flex-direction: column; gap: 8px; }
+.market-empty { text-align: center; color: var(--text-soft); padding: 20px; font-size: 13px; }
+.market-lot {
+  background: var(--bg-card);
+  border: 1px solid var(--bg-mid);
+  border-radius: 10px;
+  padding: 10px;
+}
+.market-lot.status-sold { border-color: var(--cs-green); opacity: 0.7; }
+.market-lot.status-cancelled { border-color: var(--text-dim); opacity: 0.55; }
+.market-lot.status-expired { border-color: var(--rarity-rare); opacity: 0.55; }
+
+.market-lot-head {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 8px;
+  font-size: 11px;
+}
+.market-lot-seller { color: var(--text-soft); }
+.market-lot-time { color: var(--awp-orange); font-weight: 700; }
+.market-lot-status { color: var(--text-dim); text-transform: uppercase; font-weight: 700; }
+
+.market-trade {
+  display: grid; grid-template-columns: 1fr 24px 1fr;
+  gap: 6px; align-items: center;
+}
+.market-side {
+  background: rgba(0,0,0,0.25); border: 1px solid var(--bg-mid);
+  border-radius: 6px; padding: 6px 8px;
+}
+.market-side-label {
+  font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px;
+  margin-bottom: 2px;
+}
+.market-side-content {
+  font-size: 12px; font-weight: 700; color: var(--text-bright);
+}
+.market-arrow {
+  text-align: center; color: var(--awp-orange); font-size: 18px; font-weight: 800;
+}
+
+.market-buy-btn, .market-cancel-btn {
+  margin-top: 8px;
+  width: 100%; min-height: 36px;
+  border: none; border-radius: 6px;
+  font-family: inherit; font-weight: 800; font-size: 12px;
+  cursor: pointer; letter-spacing: 1px;
+}
+.market-buy-btn {
+  background: linear-gradient(180deg, var(--cs-green), #5D8019);
+  color: #fff;
+}
+.market-cancel-btn {
+  background: linear-gradient(180deg, #DC2626, #7F1D1D);
+  color: #fff;
+}
+.market-buy-btn:active, .market-cancel-btn:active { transform: translateY(1px); }
+.market-buy-btn:disabled, .market-cancel-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Wizard */
+.lot-wizard { display: flex; flex-direction: column; gap: 12px; }
+.lot-wizard-section {
+  background: var(--bg-card); border: 1px solid var(--bg-mid); border-radius: 8px;
+  padding: 10px;
+}
+.lot-wizard-label {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 2px;
+  color: var(--awp-orange); font-weight: 800; margin-bottom: 6px;
+}
+.lot-wizard-fee {
+  font-size: 11px; color: var(--text-soft); text-align: center; padding: 6px;
+}
+.asset-picker { display: flex; flex-direction: column; gap: 8px; }
+.asset-kind-row { display: flex; gap: 4px; }
+.asset-kind-tab {
+  flex: 1; padding: 6px;
+  background: var(--bg-mid); border: 1px solid var(--bg-mid); border-radius: 6px;
+  text-align: center; font-size: 11px; cursor: pointer;
+  font-weight: 700;
+}
+.asset-kind-tab.active {
+  background: var(--awp-orange); color: #000; border-color: #8B4F1C;
+}
+.asset-res-row {
+  display: flex; flex-wrap: wrap; gap: 4px;
+}
+.asset-res-chip {
+  padding: 4px 10px;
+  background: var(--bg-mid); border: 1px solid var(--bg-mid); border-radius: 999px;
+  font-size: 11px; cursor: pointer;
+}
+.asset-res-chip.active { background: var(--neon-blue); color: #000; border-color: var(--neon-blue); }
+.asset-amount-row {
+  display: flex; gap: 8px; align-items: center;
+}
+.asset-amount-row label { font-size: 12px; color: var(--text-soft); }
+.asset-amount-row input {
+  flex: 1; min-height: 36px; padding: 0 10px;
+  background: rgba(0,0,0,0.4); border: 1px solid var(--bg-mid); border-radius: 6px;
+  color: var(--text-bright); font-family: inherit; font-weight: 700;
+  -webkit-appearance: none;
+}
+
 /* ---------- BATTLE PASS ---------- */
 
 .bp-body { display: flex; flex-direction: column; gap: 10px; }

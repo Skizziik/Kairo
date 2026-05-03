@@ -128,6 +128,36 @@ create table if not exists clicker_businesses (
 create index if not exists idx_clicker_businesses_user
     on clicker_businesses(tg_id);
 
+-- P2P marketplace lots. Sellers offer X for Y; buyers accept whole.
+create table if not exists clicker_lots (
+    id              bigserial primary key,
+    seller_tg_id    bigint not null references clicker_users(tg_id) on delete cascade,
+    -- Offering side
+    offer_kind      text not null,                       -- 'resource' | 'artifact' | 'cash' | 'casecoins'
+    offer_id        text,                                -- resource_type, item_id, or null for cash/casecoins
+    offer_amount    numeric not null,
+    offer_payload   jsonb not null default '{}'::jsonb,  -- snapshot for restoration on cancel
+    -- Asking side
+    ask_kind        text not null,
+    ask_id          text,
+    ask_amount      numeric not null,
+    -- State
+    status          text not null default 'active',      -- active | sold | cancelled | expired
+    expires_at      timestamptz not null,
+    sold_to_tg_id   bigint,
+    sold_at         timestamptz,
+    cancelled_at    timestamptz,
+    seller_name     text,                                -- denormalized for fast listing
+    created_at      timestamptz not null default now()
+);
+
+create index if not exists idx_clicker_lots_active
+    on clicker_lots(status, expires_at) where status = 'active';
+create index if not exists idx_clicker_lots_seller
+    on clicker_lots(seller_tg_id);
+create index if not exists idx_clicker_lots_offer
+    on clicker_lots(offer_kind, offer_id) where status = 'active';
+
 -- Battle pass progress (weekly). Resets each Monday 00:00 UTC.
 create table if not exists clicker_battlepass (
     tg_id            bigint not null references clicker_users(tg_id) on delete cascade,
