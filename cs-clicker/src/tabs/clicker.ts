@@ -28,6 +28,15 @@ let statCritEl: HTMLElement;
 let pendingTaps = 0;
 let pendingTapsTimer: any = null;
 let lastTapAt = 0;
+// Client-side tap rate cap (mirrors server). Silent — over-cap clicks just don't
+// register at all (no popup, no haptic, no HP decrement). Permit removes the cap.
+let tapWindowStart = 0;
+let tapWindowCount = 0;
+
+function hasClickerPermit(): boolean {
+  const u = store.state?.upgrades.find((x) => x.kind === "permit" && x.slot_id === "clicker_permit");
+  return !!(u && u.level > 0);
+}
 let timerInterval: any = null;
 let lastLevel = -1;
 let isFlushingTaps = false;
@@ -262,6 +271,20 @@ function onTap(ev: PointerEvent) {
   const now = Date.now();
   if (now - lastTapAt < 16) return; // throttle very fast taps
   lastTapAt = now;
+
+  // Mirror server's 1-sec window cap. Without permit, silently swallow clicks
+  // beyond TAP_RATE_BASE/sec — no popup, no shake, no HP change. Visual matches
+  // server reality, so HP doesn't snap back later.
+  if (!hasClickerPermit()) {
+    const cap = Number(store.config?.constants?.tap_rate_base ?? 10);
+    if (now - tapWindowStart < 1000) {
+      if (tapWindowCount >= cap) return;
+      tapWindowCount++;
+    } else {
+      tapWindowStart = now;
+      tapWindowCount = 1;
+    }
+  }
 
   haptic("light");
   pendingTaps++;

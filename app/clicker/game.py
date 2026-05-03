@@ -2298,6 +2298,7 @@ def public_config() -> dict:
             "cost_growth": cfg.COST_GROWTH,
             "res_cost_growth": cfg.RES_COST_GROWTH,
             "damage_per_level": cfg.DAMAGE_PER_LEVEL,
+            "tap_rate_base": cfg.TAP_RATE_BASE,
             "checkpoint_every": cfg.CHECKPOINT_EVERY,
             "business_idle_cap_hours": cfg.BUSINESS_IDLE_CAP_HOURS,
         },

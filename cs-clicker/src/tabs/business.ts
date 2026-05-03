@@ -7,6 +7,14 @@ import { showBusinessTreeModal } from "./biz_tree_modal";
 
 let root: HTMLElement | null = null;
 let pendingPolls: any = null;
+// Client-side biz tap rate cap (mirrors server's biz_tap_window).
+let bizTapWindowStart = 0;
+let bizTapWindowCount = 0;
+
+function hasClickerPermit(): boolean {
+  const u = store.state?.upgrades.find((x) => x.kind === "permit" && x.slot_id === "clicker_permit");
+  return !!(u && u.level > 0);
+}
 
 export function mountBusinessTab(parent: HTMLElement): HTMLElement {
   root = el("div", { className: "tab-page", dataset: { tab: "business" } });
@@ -161,10 +169,26 @@ function renderCard(bdef: BusinessDef): HTMLElement {
   tapBtn.appendChild(el("span", { textContent: "ТАП" }));
   tapBtn.appendChild(el("span", { className: "small", textContent: `+${fmt(state?.tap_yield || "0")}` }));
   tapBtn.onclick = async () => {
+    // Client-side rate cap matching server. Without permit, silently swallow
+    // clicks beyond cap so the user doesn't feel like the button is "broken".
+    if (!hasClickerPermit()) {
+      const cap = Number(store.config?.constants?.tap_rate_base ?? 10);
+      const now = Date.now();
+      if (now - bizTapWindowStart < 1000) {
+        if (bizTapWindowCount >= cap) return;
+        bizTapWindowCount++;
+      } else {
+        bizTapWindowStart = now;
+        bizTapWindowCount = 1;
+      }
+    }
     haptic("light");
     const r = await api.businessTap(bdef.id);
     if (r.ok && r.data) {
       if ((r.data as any).state) store.setState((r.data as any).state);
+    } else if (r.error === "throttled") {
+      // Server desynced (rare). Just swallow.
+      return;
     } else {
       hapticNotify("error");
       toast(translateError(r.error), "error");

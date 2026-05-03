@@ -237,6 +237,7 @@ export interface ConfigSnap {
     cost_growth: number;
     res_cost_growth?: number;
     damage_per_level: number;
+    tap_rate_base?: number;
     checkpoint_every: number;
     business_idle_cap_hours: number;
   };
