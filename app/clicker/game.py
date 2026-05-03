@@ -74,6 +74,57 @@ def _upgrade_damage(base_dmg: int | float, level: int) -> Decimal:
     return Decimal(str(base_dmg)) * (Decimal(1) + Decimal(str(cfg.DAMAGE_PER_LEVEL)) * level)
 
 
+def _business_def(business_id: str) -> dict | None:
+    for b in cfg.businesses():
+        if b["id"] == business_id:
+            return b
+    return None
+
+
+def _business_idle_per_sec(business_def: dict, level: int) -> Decimal:
+    """Idle production rate scales by 1.08^level."""
+    base = Decimal(str(business_def["base_idle_per_sec"]))
+    return base * (Decimal(str(cfg.BUSINESS_IDLE_GROWTH)) ** level)
+
+
+def _business_tap_yield(business_def: dict, level: int) -> Decimal:
+    """Tap yield also scales mildly with level."""
+    base = Decimal(str(business_def["base_tap_yield"]))
+    return base * (Decimal(str(cfg.BUSINESS_IDLE_GROWTH)) ** level)
+
+
+def _business_upgrade_cost(business_def: dict, current_level: int) -> Decimal:
+    base = Decimal(str(business_def["base_upgrade_cost"]))
+    return (base * (Decimal(str(cfg.BUSINESS_COST_GROWTH)) ** current_level)).quantize(Decimal("1"))
+
+
+async def _business_level(conn, tg_id: int, business_id: str) -> int:
+    row = await conn.fetchrow(
+        """select level from clicker_upgrades where tg_id = $1 and kind = 'business' and slot_id = $2""",
+        tg_id, business_id,
+    )
+    return int(row["level"]) if row else 0
+
+
+async def _ensure_business_state(conn, tg_id: int, business_id: str, now: datetime) -> dict:
+    row = await conn.fetchrow(
+        "select * from clicker_businesses where tg_id = $1 and business_id = $2 for update",
+        tg_id, business_id,
+    )
+    if row:
+        return dict(row)
+    await conn.execute(
+        """insert into clicker_businesses (tg_id, business_id, last_idle_at, pending_amount)
+           values ($1, $2, $3, 0) on conflict do nothing""",
+        tg_id, business_id, now,
+    )
+    row = await conn.fetchrow(
+        "select * from clicker_businesses where tg_id = $1 and business_id = $2",
+        tg_id, business_id,
+    )
+    return dict(row)
+
+
 # ---------- ensure_user / state --------------------------------------------
 
 
@@ -760,6 +811,47 @@ async def _build_state(conn, tg_id: int) -> dict:
            order by acquired_at desc limit 200""",
         tg_id,
     )
+    res_rows = await conn.fetch(
+        "select resource_type, amount from clicker_resources where tg_id = $1", tg_id,
+    )
+    biz_rows = await conn.fetch(
+        "select * from clicker_businesses where tg_id = $1", tg_id,
+    )
+
+    # Compute live pending for each business (without persisting — just for display).
+    now = _now()
+    biz_state = []
+    user_max = int(user["max_level"])
+    for bdef in cfg.businesses():
+        bid = bdef["id"]
+        if user_max < int(bdef["unlock_level"]):
+            continue
+        # Find row.
+        biz_row = next((dict(r) for r in biz_rows if r["business_id"] == bid), None)
+        bus_level = next((int(u["level"]) for u in upg_rows if u["kind"] == "business" and u["slot_id"] == bid), 0)
+        rate = _business_idle_per_sec(bdef, bus_level)
+        upgrade_cost = _business_upgrade_cost(bdef, bus_level)
+        tap_yield = _business_tap_yield(bdef, bus_level)
+        pending = Decimal(0)
+        if biz_row:
+            last = biz_row["last_idle_at"]
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=timezone.utc)
+            elapsed = max(0.0, (now - last).total_seconds())
+            cap = cfg.BUSINESS_IDLE_CAP_HOURS * 3600
+            elapsed = min(elapsed, cap)
+            produced = (rate * Decimal(str(elapsed)))
+            pending = Decimal(biz_row["pending_amount"]) + produced
+        biz_state.append({
+            "id": bid,
+            "level": bus_level,
+            "unlock_level": int(bdef["unlock_level"]),
+            "resource": bdef["resource"],
+            "rate_per_sec": str(rate.quantize(Decimal("0.0001"))),
+            "tap_yield": str(tap_yield.quantize(Decimal("0.001"))),
+            "pending": str(pending.quantize(Decimal("0.01"))),
+            "upgrade_cost": str(upgrade_cost),
+        })
 
     level = int(user["level"])
     boss_def = cfg.boss_for_level(level)
@@ -820,6 +912,8 @@ async def _build_state(conn, tg_id: int) -> dict:
             }
             for r in inv_rows
         ],
+        "resources": {r["resource_type"]: str(r["amount"]) for r in res_rows},
+        "businesses": biz_state,
         "server_time": _now().isoformat(),
     }
 
@@ -831,12 +925,153 @@ def _next_boss_level(level: int) -> int:
     return max(level, nxt)
 
 
+# ---------- businesses ------------------------------------------------------
+
+
+async def _accrue_business_idle(conn, tg_id: int, business_id: str, now: datetime) -> Decimal:
+    """Compute new idle pending amount and update last_idle_at to `now`.
+    Returns the *new total* pending (not delta)."""
+    bdef = _business_def(business_id)
+    if not bdef:
+        return Decimal(0)
+    state = await _ensure_business_state(conn, tg_id, business_id, now)
+    last = state["last_idle_at"]
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    elapsed = max(0.0, (now - last).total_seconds())
+    cap = cfg.BUSINESS_IDLE_CAP_HOURS * 3600
+    elapsed = min(elapsed, cap)
+    level = await _business_level(conn, tg_id, business_id)
+    rate = _business_idle_per_sec(bdef, level)
+    produced = (rate * Decimal(str(elapsed))).quantize(Decimal("0.0001"))
+    new_pending = Decimal(state["pending_amount"]) + produced
+    await conn.execute(
+        """update clicker_businesses set pending_amount = $3, last_idle_at = $4
+           where tg_id = $1 and business_id = $2""",
+        tg_id, business_id, new_pending, now,
+    )
+    return new_pending
+
+
+async def business_tap(tg_id: int, business_id: str) -> dict:
+    bdef = _business_def(business_id)
+    if not bdef:
+        return {"ok": False, "error": "unknown_business"}
+    now = _now()
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            user = await conn.fetchrow(
+                "select max_level from clicker_users where tg_id = $1 for update", tg_id,
+            )
+            if not user:
+                return {"ok": False, "error": "no_user"}
+            if int(user["max_level"]) < int(bdef["unlock_level"]):
+                return {"ok": False, "error": "locked", "unlock_level": int(bdef["unlock_level"])}
+            level = await _business_level(conn, tg_id, business_id)
+            yield_amount = _business_tap_yield(bdef, level)
+            await conn.execute(
+                """insert into clicker_resources (tg_id, resource_type, amount) values ($1, $2, $3)
+                   on conflict (tg_id, resource_type) do update set amount = clicker_resources.amount + excluded.amount""",
+                tg_id, bdef["resource"], yield_amount,
+            )
+    state = await get_state(tg_id)
+    return {"ok": True, "data": {**state["data"], "tapped": str(yield_amount), "resource": bdef["resource"]}}
+
+
+async def business_collect(tg_id: int, business_id: str | None = None) -> dict:
+    """Collect pending idle from one or all businesses. None → all."""
+    now = _now()
+    targets: list[str] = []
+    if business_id:
+        targets = [business_id]
+    else:
+        targets = [b["id"] for b in cfg.businesses()]
+
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            user = await conn.fetchrow(
+                "select max_level from clicker_users where tg_id = $1 for update", tg_id,
+            )
+            if not user:
+                return {"ok": False, "error": "no_user"}
+            user_max = int(user["max_level"])
+
+            collected: dict[str, Decimal] = {}
+            for bid in targets:
+                bdef = _business_def(bid)
+                if not bdef:
+                    continue
+                if user_max < int(bdef["unlock_level"]):
+                    continue
+                pending = await _accrue_business_idle(conn, tg_id, bid, now)
+                if pending <= 0:
+                    continue
+                # Drop fractional dust below 1 — collect floor.
+                amount = Decimal(int(pending))
+                if amount <= 0:
+                    continue
+                rest = pending - amount
+                await conn.execute(
+                    """update clicker_businesses set pending_amount = $3
+                       where tg_id = $1 and business_id = $2""",
+                    tg_id, bid, rest,
+                )
+                await conn.execute(
+                    """insert into clicker_resources (tg_id, resource_type, amount) values ($1, $2, $3)
+                       on conflict (tg_id, resource_type) do update set amount = clicker_resources.amount + excluded.amount""",
+                    tg_id, bdef["resource"], amount,
+                )
+                collected[bdef["resource"]] = collected.get(bdef["resource"], Decimal(0)) + amount
+
+    state = await get_state(tg_id)
+    return {"ok": True, "data": {**state["data"], "collected": {k: str(v) for k, v in collected.items()}}}
+
+
+async def business_upgrade(tg_id: int, business_id: str) -> dict:
+    bdef = _business_def(business_id)
+    if not bdef:
+        return {"ok": False, "error": "unknown_business"}
+    now = _now()
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            user = await conn.fetchrow(
+                "select cash, max_level from clicker_users where tg_id = $1 for update", tg_id,
+            )
+            if not user:
+                return {"ok": False, "error": "no_user"}
+            if int(user["max_level"]) < int(bdef["unlock_level"]):
+                return {"ok": False, "error": "locked", "unlock_level": int(bdef["unlock_level"])}
+            level = await _business_level(conn, tg_id, business_id)
+            cost = _business_upgrade_cost(bdef, level)
+            if Decimal(user["cash"]) < cost:
+                return {"ok": False, "error": "not_enough_cash", "needed": str(cost)}
+
+            # First, accrue current rate's idle into pending so the upgrade applies forward only.
+            await _accrue_business_idle(conn, tg_id, business_id, now)
+
+            await conn.execute(
+                """insert into clicker_upgrades (tg_id, kind, slot_id, level) values ($1, 'business', $2, $3)
+                   on conflict (tg_id, kind, slot_id) do update set level = excluded.level""",
+                tg_id, business_id, level + 1,
+            )
+            await conn.execute(
+                "update clicker_users set cash = cash - $2 where tg_id = $1",
+                tg_id, cost,
+            )
+            await _log(conn, tg_id, "business_upgrade", {
+                "business_id": business_id, "from": level, "to": level + 1, "cost": str(cost),
+            })
+
+    state = await get_state(tg_id)
+    return {"ok": True, "data": {**state["data"], "new_level": level + 1, "spent": str(cost)}}
+
+
 # ---------- public config ---------------------------------------------------
 
 
 def public_config() -> dict:
     return {
-        "version": "0.1.0",
+        "version": "0.2.0",
         "weapons": cfg.weapons(),
         "mercs": cfg.mercs(),
         "locations": cfg.locations(),
@@ -845,6 +1080,8 @@ def public_config() -> dict:
         "artifacts": cfg.artifacts(),
         "mythics": cfg.mythics(),
         "crit_luck": cfg.crit_luck(),
+        "businesses": cfg.businesses(),
+        "resources_meta": cfg.resources_meta(),
         "constants": {
             "level_time_normal": cfg.LEVEL_TIME_NORMAL,
             "level_time_boss": cfg.LEVEL_TIME_BOSS,
@@ -856,6 +1093,7 @@ def public_config() -> dict:
             "cost_growth": cfg.COST_GROWTH,
             "damage_per_level": cfg.DAMAGE_PER_LEVEL,
             "checkpoint_every": cfg.CHECKPOINT_EVERY,
+            "business_idle_cap_hours": cfg.BUSINESS_IDLE_CAP_HOURS,
         },
     }
 

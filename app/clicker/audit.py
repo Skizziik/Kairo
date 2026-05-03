@@ -107,13 +107,25 @@ create index if not exists idx_clicker_inventory_user_kind
 create index if not exists idx_clicker_inventory_equipped
     on clicker_inventory(tg_id, equipped_slot) where equipped_slot is not null;
 
--- Resources from businesses (Phase 2 — table created now for forward compat).
+-- Resources from businesses (Phase 2).
 create table if not exists clicker_resources (
     tg_id            bigint not null references clicker_users(tg_id) on delete cascade,
     resource_type    text not null,                       -- 'energy' | 'brass' | 'contraband' | 'case_dust' | 'clean_skins' | 'crypto' | 'gas'
     amount           numeric not null default 0,
     primary key (tg_id, resource_type)
 );
+
+-- Business state (per-user). Level lives in clicker_upgrades(kind='business').
+create table if not exists clicker_businesses (
+    tg_id              bigint not null references clicker_users(tg_id) on delete cascade,
+    business_id        text not null,
+    last_idle_at       timestamptz not null default now(),
+    pending_amount     numeric not null default 0,
+    primary key (tg_id, business_id)
+);
+
+create index if not exists idx_clicker_businesses_user
+    on clicker_businesses(tg_id);
 
 -- Battle pass progress (weekly). Resets each Monday 00:00 UTC.
 create table if not exists clicker_battlepass (

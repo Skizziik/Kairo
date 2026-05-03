@@ -89,6 +89,21 @@ export const api = {
     request<{ state: StateSnap; glory_gained: number }>("/api/clicker/prestige", {
       method: "POST",
     }),
+  businessTap: (business_id: string) =>
+    request<{ state: StateSnap; tapped: string; resource: string }>("/api/clicker/business/tap", {
+      method: "POST",
+      body: JSON.stringify({ business_id }),
+    }),
+  businessCollect: (business_id: string | null = null) =>
+    request<{ state: StateSnap; collected: Record<string, string> }>("/api/clicker/business/collect", {
+      method: "POST",
+      body: JSON.stringify({ business_id }),
+    }),
+  businessUpgrade: (business_id: string) =>
+    request<{ state: StateSnap; new_level: number; spent: string }>("/api/clicker/business/upgrade", {
+      method: "POST",
+      body: JSON.stringify({ business_id }),
+    }),
   leaderboard: (metric: string, limit: number = 50) =>
     request<LeaderboardEntry[]>(`/api/clicker/leaderboard?metric=${encodeURIComponent(metric)}&limit=${limit}`),
 };

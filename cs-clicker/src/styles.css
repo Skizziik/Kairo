@@ -623,6 +623,87 @@ html, body {
   background: var(--awp-orange); color: #000; border-color: #8B4F1C;
 }
 
+/* ---------- BUSINESS TAB ---------- */
+
+.biz-res-hud {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-bottom: 12px;
+}
+.biz-res-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px 4px 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--bg-mid);
+  border-radius: 999px;
+  font-size: 12px; font-weight: 700;
+}
+.biz-res-chip img { width: 22px; height: 22px; object-fit: contain; }
+.biz-res-chip .amt { letter-spacing: 0.5px; }
+
+.collect-all-btn-biz {
+  width: 100%; min-height: 44px;
+  background: linear-gradient(180deg, var(--cs-green), #5D8019);
+  border: 1px solid #4A6815; border-radius: 8px;
+  color: #fff; font-family: inherit; font-weight: 800; font-size: 13px;
+  letter-spacing: 1px;
+  margin-bottom: 12px;
+  cursor: pointer;
+}
+.collect-all-btn-biz:active { transform: translateY(1px); }
+
+.biz-grid {
+  display: flex; flex-direction: column; gap: 10px;
+}
+.biz-card {
+  background: var(--bg-card);
+  border: 1px solid var(--bg-mid);
+  border-radius: 10px;
+  padding: 10px;
+}
+.biz-card.locked { opacity: 0.55; filter: grayscale(0.6); }
+.biz-head {
+  display: flex; align-items: center; gap: 10px;
+}
+.biz-img-wrap {
+  width: 64px; height: 64px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; overflow: hidden;
+}
+.biz-img-wrap img { max-width: 95%; max-height: 95%; object-fit: contain; }
+.biz-head-info { flex: 1; min-width: 0; }
+.biz-name { font-size: 14px; font-weight: 800; color: var(--text-bright); }
+.biz-stat { font-size: 12px; color: var(--text-soft); margin-top: 2px; }
+.biz-rate { font-size: 11px; color: var(--cs-green); font-weight: 700; margin-top: 2px; }
+.biz-lock { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+.biz-pending {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: rgba(0,0,0,0.3); border-radius: 6px;
+  font-size: 12px; font-weight: 600; color: var(--awp-orange);
+}
+.biz-actions {
+  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px;
+  margin-top: 8px;
+}
+.biz-actions button {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  min-height: 48px; padding: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bg-mid);
+  border-radius: 6px;
+  color: var(--text-bright);
+  font-family: inherit; font-weight: 800; font-size: 12px;
+  cursor: pointer;
+}
+.biz-actions button .small { font-size: 9px; opacity: 0.85; font-weight: 600; }
+.biz-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+.biz-actions button:active:not(:disabled) { transform: translateY(1px); }
+.biz-tap-btn { background: linear-gradient(180deg, var(--neon-blue), #1B6FB5) !important; border-color: #154E80 !important; }
+.biz-collect-btn { background: linear-gradient(180deg, var(--cs-green), #5D8019) !important; border-color: #4A6815 !important; }
+.biz-upgrade-btn { background: linear-gradient(180deg, var(--awp-orange), #C77530) !important; color: #000 !important; border-color: #8B4F1C !important; }
+
 /* ---------- LOCKED PLACEHOLDERS ---------- */
 .locked-tab {
   flex: 1;

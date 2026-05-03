@@ -6,6 +6,7 @@ import { mountClickerTab } from "./tabs/clicker";
 import { mountInventoryTab } from "./tabs/inventory";
 import { mountLockedTab } from "./tabs/locked";
 import { mountMoreTab } from "./tabs/more";
+import { mountBusinessTab } from "./tabs/business";
 import { el } from "./util";
 import { toast } from "./ui/toast";
 
@@ -90,12 +91,7 @@ function buildUI() {
   app.appendChild(tabArea);
 
   mountClickerTab(tabArea);
-  mountLockedTab(tabArea, {
-    tabId: "business",
-    icon: "🏭",
-    title: "БИЗНЕСЫ",
-    message: "6 теневых империй: Shop, Gun Range, Black Market, Case Factory, Skin Laundromat, Crypto Bunker. С ресурсами для топ-апгрейдов и P2P-маркета. Раскатываем в Phase 2.",
-  });
+  mountBusinessTab(tabArea);
   mountInventoryTab(tabArea);
   mountLockedTab(tabArea, {
     tabId: "market",

@@ -52,12 +52,27 @@ def crit_luck() -> dict:
     return _load("crit_luck.json")
 
 
+@lru_cache(maxsize=1)
+def businesses() -> list:
+    return _load("businesses.json")
+
+
+@lru_cache(maxsize=1)
+def resources_meta() -> dict:
+    return _load("resources_meta.json")
+
+
 def reload() -> None:
-    for fn in (weapons, mercs, locations, bosses, chests, artifacts, mythics, crit_luck):
+    for fn in (weapons, mercs, locations, bosses, chests, artifacts, mythics, crit_luck, businesses, resources_meta):
         fn.cache_clear()
 
 
 # ---------- gameplay constants -----------------------------------------
+
+# Business idle/upgrade.
+BUSINESS_IDLE_GROWTH = 1.08      # production per_sec × this^level
+BUSINESS_COST_GROWTH = 1.15      # upgrade cost × this^level
+BUSINESS_IDLE_CAP_HOURS = 8      # max accumulation while away
 
 LEVEL_TIME_NORMAL = 30        # seconds to kill normal enemy
 LEVEL_TIME_BOSS = 40          # seconds to kill boss

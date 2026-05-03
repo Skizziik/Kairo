@@ -56,13 +56,45 @@ export interface InventoryItem {
   metadata: Record<string, any>;
 }
 
+export interface BusinessState {
+  id: string;
+  level: number;
+  unlock_level: number;
+  resource: string;
+  rate_per_sec: string;
+  tap_yield: string;
+  pending: string;
+  upgrade_cost: string;
+}
+
 export interface StateSnap {
   user: UserSnap;
   combat: CombatSnap;
   level_meta: LevelMeta;
   upgrades: UpgradeOwn[];
   inventory: InventoryItem[];
+  resources: Record<string, string>;
+  businesses: BusinessState[];
   server_time: string;
+}
+
+export interface BusinessDef {
+  id: string;
+  name: string;
+  resource: string;
+  unlock_level: number;
+  base_idle_per_sec: number;
+  base_tap_yield: number;
+  base_upgrade_cost: number;
+  icon: string;
+  emoji: string;
+}
+
+export interface ResourceMeta {
+  name: string;
+  icon: string;
+  emoji: string;
+  color: string;
 }
 
 export interface WeaponDef {
@@ -148,6 +180,8 @@ export interface ConfigSnap {
   artifacts: ArtifactDef[];
   mythics: MythicDef[];
   crit_luck: { crit_chance: CritLuckDef[]; crit_damage: CritLuckDef[]; luck: CritLuckDef[] };
+  businesses: BusinessDef[];
+  resources_meta: Record<string, ResourceMeta>;
   constants: {
     level_time_normal: number;
     level_time_boss: number;
@@ -159,6 +193,7 @@ export interface ConfigSnap {
     cost_growth: number;
     damage_per_level: number;
     checkpoint_every: number;
+    business_idle_cap_hours: number;
   };
 }
 

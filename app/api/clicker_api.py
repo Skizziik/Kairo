@@ -38,6 +38,14 @@ class UnequipReq(BaseModel):
     inventory_id: int = Field(..., ge=1)
 
 
+class BusinessReq(BaseModel):
+    business_id: str = Field(..., min_length=1, max_length=32)
+
+
+class BusinessCollectReq(BaseModel):
+    business_id: str | None = Field(default=None)
+
+
 @router.get("/config")
 async def api_config() -> dict:
     return {"ok": True, "data": gm.public_config()}
@@ -84,6 +92,21 @@ async def api_unequip(req: UnequipReq, user: dict = Depends(require_user)) -> di
 @router.post("/prestige")
 async def api_prestige(user: dict = Depends(require_user)) -> dict:
     return await gm.prestige(int(user["id"]))
+
+
+@router.post("/business/tap")
+async def api_business_tap(req: BusinessReq, user: dict = Depends(require_user)) -> dict:
+    return await gm.business_tap(int(user["id"]), req.business_id)
+
+
+@router.post("/business/collect")
+async def api_business_collect(req: BusinessCollectReq, user: dict = Depends(require_user)) -> dict:
+    return await gm.business_collect(int(user["id"]), req.business_id)
+
+
+@router.post("/business/upgrade")
+async def api_business_upgrade(req: BusinessReq, user: dict = Depends(require_user)) -> dict:
+    return await gm.business_upgrade(int(user["id"]), req.business_id)
 
 
 @router.get("/leaderboard")

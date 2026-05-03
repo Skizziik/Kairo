@@ -1,0 +1,9 @@
+{
+  "energy":      {"name": "Энергетики", "icon": "resources/01.png", "emoji": "🥤", "color": "#3FA9F5"},
+  "brass":       {"name": "Гильзы",     "icon": "resources/03.png", "emoji": "🔩", "color": "#D4A574"},
+  "contraband":  {"name": "Контрабанда","icon": "resources/04.png", "emoji": "💼", "color": "#7C3AED"},
+  "case_dust":   {"name": "Пыль кейсов","icon": "resources/05.png", "emoji": "📦", "color": "#F2994A"},
+  "clean_skins": {"name": "Чистые скины","icon": "resources/06.png","emoji": "✨", "color": "#EC4899"},
+  "crypto":      {"name": "Крипта",     "icon": "resources/07.png", "emoji": "⛏", "color": "#FFD700"},
+  "gas":         {"name": "Газ",        "icon": "resources/08.png", "emoji": "☣️", "color": "#85B026"}
+}
