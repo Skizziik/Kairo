@@ -108,7 +108,10 @@ def _business_branch_pcts(business_id: str, branch_levels: dict[str, int]) -> di
 
 
 def _business_idle_per_sec(business_def: dict, level: int, branch_pcts: dict[str, float] | None = None) -> Decimal:
-    """Idle production rate scales by BUSINESS_IDLE_GROWTH^level + branch idle/all bonus."""
+    """Idle production rate scales by BUSINESS_IDLE_GROWTH^level + branch idle/all bonus.
+    Level 0 (unlocked but not yet bought) produces NOTHING — must buy first level."""
+    if level <= 0:
+        return Decimal(0)
     base = Decimal(str(business_def["base_idle_per_sec"]))
     rate = base * (Decimal(str(cfg.BUSINESS_IDLE_GROWTH)) ** level)
     if branch_pcts:
@@ -126,7 +129,9 @@ def _business_idle_per_sec(business_def: dict, level: int, branch_pcts: dict[str
 
 def _business_tap_yield(business_def: dict, level: int, branch_pcts: dict[str, float] | None = None) -> Decimal:
     """Tap yield also scales mildly with level + branch tap/all bonus.
-    Includes tap_crit_x_pct (Premium-холодильник Pepsi-style) — chance for ×2 modeled as average uplift."""
+    Level 0 = unbought = no yield. Buy at least level 1 to use the business."""
+    if level <= 0:
+        return Decimal(0)
     base = Decimal(str(business_def["base_tap_yield"]))
     yld = base * (Decimal(str(cfg.BUSINESS_IDLE_GROWTH)) ** level)
     if branch_pcts:

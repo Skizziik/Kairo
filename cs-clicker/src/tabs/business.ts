@@ -73,13 +73,23 @@ function render() {
       haptic("medium");
       const r = await api.businessCollect(null);
       if (r.ok && r.data) {
-        const collected = (r.data as any).collected || {};
-        const totalNum = Object.values(collected).reduce((a: number, b: any) => a + Number(b), 0);
-        if (totalNum > 0) {
-          hapticNotify("success");
-          toast(`+${fmt(totalNum)} ресурсов`, "success");
+        const data = r.data as any;
+        const collected = data.collected || {};
+        const fuelSpent = data.fuel_spent || {};
+        const meta = store.config?.resources_meta || {};
+        const gotParts: string[] = [];
+        for (const [res, amt] of Object.entries(collected)) {
+          if (Number(amt) > 0) gotParts.push(`${meta[res]?.emoji || ""}+${fmt(amt as string)}`);
         }
-        if ((r.data as any).state) store.setState((r.data as any).state);
+        const fuelParts: string[] = [];
+        for (const [res, amt] of Object.entries(fuelSpent)) {
+          if (Number(amt) > 0) fuelParts.push(`${meta[res]?.emoji || ""}-${fmt(amt as string)}`);
+        }
+        if (gotParts.length > 0 || fuelParts.length > 0) {
+          hapticNotify("success");
+          toast([...gotParts, ...fuelParts].join(" "), "info", 3000);
+        }
+        if (data.state) store.setState(data.state);
       }
     };
     content.appendChild(collectAll);
