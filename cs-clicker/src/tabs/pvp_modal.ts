@@ -5,9 +5,12 @@ import { openModal, type ModalHandle } from "../ui/modal";
 import { toast } from "../ui/toast";
 
 let activeModal: ModalHandle | null = null;
-let activeSubTab: "targets" | "history" = "targets";
+let activeSubTab: "targets" | "invites" | "history" = "targets";
 let targetsCache: any[] = [];
 let historyCache: { raids: any[]; duels: any[] } = { raids: [], duels: [] };
+let invitesReceived: any[] = [];
+let invitesSent: any[] = [];
+let bracketInfo: any = null;
 
 export async function showPvPModal() {
   if (activeModal) return;
@@ -34,9 +37,18 @@ export async function showPvPModal() {
 }
 
 async function loadActive() {
+  // Always refresh bracket info — drives all warning banners.
+  const br = await api.pvpBracket();
+  if (br.ok && br.data) bracketInfo = br.data;
+
   if (activeSubTab === "targets") {
     const r = await api.pvpTargets();
     if (r.ok && r.data) targetsCache = r.data;
+  } else if (activeSubTab === "invites") {
+    const a = await api.pvpDuelInvitesReceived();
+    if (a.ok && a.data) invitesReceived = a.data;
+    const b = await api.pvpDuelInvitesSent();
+    if (b.ok && b.data) invitesSent = b.data;
   } else {
     const r = await api.pvpHistory();
     if (r.ok && r.data) historyCache = r.data;
@@ -48,7 +60,13 @@ function render(body: HTMLElement) {
 
   // Sub-tabs
   const tabs = el("div", { className: "lb-tabs" });
-  for (const [id, label] of [["targets","🎯 Цели"], ["history","📜 История"]] as ["targets"|"history", string][]) {
+  const recvCount = invitesReceived?.length || 0;
+  const tabDefs: ["targets"|"invites"|"history", string][] = [
+    ["targets","🎯 Цели"],
+    ["invites", recvCount > 0 ? `📨 Инвайты (${recvCount})` : "📨 Инвайты"],
+    ["history","📜 История"],
+  ];
+  for (const [id, label] of tabDefs) {
     const t = el("div", {
       className: `lb-tab ${id === activeSubTab ? "active" : ""}`,
       textContent: label,
@@ -62,7 +80,21 @@ function render(body: HTMLElement) {
   }
   body.appendChild(tabs);
 
+  // Bracket banner — always visible.
+  if (bracketInfo) {
+    const banner = el("div", { className: "pvp-info" });
+    const lo = bracketInfo.level_range_min, hi = bracketInfo.level_range_max;
+    const rangeStr = bracketInfo.is_top_bracket ? `lvl ${lo}+` : `lvl ${lo}-${hi}`;
+    let html = `Скобка: <b>${rangeStr}</b> · Рейдов сегодня: <b>${bracketInfo.raids_today}/${bracketInfo.raid_daily_limit}</b>`;
+    if (bracketInfo.immune_now) {
+      html += `<br/>🛡️ <b>У тебя иммунитет</b> до ${new Date(bracketInfo.immune_until).toLocaleString()} — рейд/дуэль на тебя нельзя.`;
+    }
+    banner.innerHTML = html;
+    body.appendChild(banner);
+  }
+
   if (activeSubTab === "targets") body.appendChild(renderTargets(body));
+  else if (activeSubTab === "invites") body.appendChild(renderInvites(body));
   else body.appendChild(renderHistory());
 }
 
@@ -216,6 +248,32 @@ function openDuelPicker(target: any, bodyRoot: HTMLElement) {
     style: { fontSize: "11px", color: "#94A3B8", marginTop: "8px", textAlign: "center" },
   }));
 
+  const threshCash = Number(bracketInfo?.duel_invite_threshold_cash || 100000);
+  const threshCC = Number(bracketInfo?.duel_invite_threshold_casecoins || 50);
+
+  const hint = el("div", {
+    className: "pvp-info",
+    style: { fontSize: "11px", marginTop: "8px" },
+  });
+  const updateHint = () => {
+    const big = (stakeKind === "cash" && stakeAmount > threshCash)
+             || (stakeKind === "casecoins" && stakeAmount > threshCC);
+    hint.innerHTML = big
+      ? `📨 Большая ставка — отправится <b>инвайт</b> (24ч на ответ). Деньги в эскроу до решения соперника.`
+      : `Соперник тоже отдаёт ставку, бой мгновенный. Победитель получает 1.8× (10% сжигается). Кэп: ${bracketInfo?.duel_stake_cap_pct || 25}% от меньшей стороны.`;
+  };
+  updateHint();
+  body.appendChild(hint);
+
+  input.oninput = () => {
+    stakeAmount = Math.max(1, Math.floor(Number(input.value) || 1));
+    updateHint();
+  };
+  for (const t of kindRow.querySelectorAll(".asset-kind-tab") as any) {
+    const old = t.onclick;
+    t.onclick = (e: any) => { old?.(e); updateHint(); };
+  }
+
   const modal = openModal({
     title: "⚔️ ДУЭЛЬ",
     body,
@@ -223,6 +281,28 @@ function openDuelPicker(target: any, bodyRoot: HTMLElement) {
       { label: "Отмена", onClick: () => modal.close() },
       { label: "В бой", className: "primary", onClick: async () => {
         haptic("heavy");
+        const big = (stakeKind === "cash" && stakeAmount > threshCash)
+                 || (stakeKind === "casecoins" && stakeAmount > threshCC);
+        // Big stake → mutual-consent invite.
+        if (big) {
+          const r = await api.pvpDuelInvite(target.tg_id, stakeKind, stakeId, stakeAmount);
+          if (r.ok && r.data) {
+            hapticNotify("success");
+            toast(`📨 Инвайт отправлен. Ставка в эскроу до 24ч.`, "success", 3500);
+            modal.close();
+            const st = await api.state();
+            if (st.ok && st.data) {
+              const data: any = st.data;
+              store.setState(data.state ?? data);
+            }
+            await loadActive();
+            render(bodyRoot);
+          } else {
+            hapticNotify("error");
+            toast(translatePvPError(r.error, r), "error");
+          }
+          return;
+        }
         const r = await api.pvpDuel(target.tg_id, stakeKind, stakeId, stakeAmount);
         if (r.ok && r.data) {
           const won = r.data.winner_tg_id === store.state!.user.tg_id;
@@ -243,6 +323,102 @@ function openDuelPicker(target: any, bodyRoot: HTMLElement) {
       } },
     ],
   });
+}
+
+function renderInvites(bodyRoot: HTMLElement): HTMLElement {
+  const wrap = el("div", { className: "pvp-list" });
+
+  if (invitesReceived.length === 0 && invitesSent.length === 0) {
+    wrap.appendChild(el("div", { className: "market-empty", textContent: "Активных инвайтов нет." }));
+    return wrap;
+  }
+
+  if (invitesReceived.length > 0) {
+    wrap.appendChild(el("div", { className: "upg-section-title", textContent: "📨 ВХОДЯЩИЕ" }));
+    for (const inv of invitesReceived) {
+      const card = el("div", { className: "pvp-history-card" });
+      card.appendChild(el("div", { className: "pvp-h-head", textContent: `От ${inv.challenger_name || `player#${inv.challenger_tg_id}`}` }));
+      const stakeLabel = inv.stake_kind === "cash" ? `$${fmt(inv.stake_amount)}` :
+                         inv.stake_kind === "casecoins" ? `⌬${fmt(inv.stake_amount)}` :
+                         `${fmt(inv.stake_amount)} ${inv.stake_id}`;
+      card.appendChild(el("div", { className: "pvp-h-result", textContent: `Ставка: ${stakeLabel}` }));
+      card.appendChild(el("div", {
+        textContent: `До ${new Date(inv.expires_at).toLocaleString()}`,
+        style: { fontSize: "10px", color: "#94A3B8", marginTop: "2px" },
+      }));
+
+      const actions = el("div", { className: "pvp-target-actions", style: { marginTop: "6px" } });
+      const acceptBtn = el("button", { className: "pvp-duel-btn", textContent: "✅ Принять" });
+      acceptBtn.onclick = async () => {
+        haptic("heavy");
+        const r = await api.pvpDuelInviteRespond(inv.id, true);
+        if (r.ok && r.data) {
+          const d = r.data;
+          if (d.accepted) {
+            hapticNotify(d.self_won ? "success" : "error");
+            toast(d.self_won ? `🏆 ПОБЕДА! +${fmt(d.payout)}` : `💀 Поражение. -${fmt(d.stake)}`, d.self_won ? "success" : "error", 4000);
+          }
+          const st = await api.state();
+          if (st.ok && st.data) {
+            const data: any = st.data;
+            store.setState(data.state ?? data);
+          }
+          await loadActive();
+          render(bodyRoot);
+        } else {
+          hapticNotify("error");
+          toast(translatePvPError(r.error, r), "error");
+        }
+      };
+      const declineBtn = el("button", { className: "pvp-raid-btn", textContent: "❌ Отклонить" });
+      declineBtn.onclick = async () => {
+        const r = await api.pvpDuelInviteRespond(inv.id, false);
+        if (r.ok) {
+          hapticNotify("warning");
+          toast("Инвайт отклонён", "info");
+          await loadActive();
+          render(bodyRoot);
+        }
+      };
+      actions.appendChild(acceptBtn);
+      actions.appendChild(declineBtn);
+      card.appendChild(actions);
+      wrap.appendChild(card);
+    }
+  }
+
+  if (invitesSent.length > 0) {
+    wrap.appendChild(el("div", { className: "upg-section-title", textContent: "📤 ОТПРАВЛЕННЫЕ", style: { marginTop: "12px" } }));
+    for (const inv of invitesSent) {
+      const card = el("div", { className: `pvp-history-card ${inv.status === 'pending' ? '' : (inv.status === 'accepted' ? 'win' : 'lose')}` });
+      card.appendChild(el("div", { className: "pvp-h-head", textContent: `→ ${inv.challenged_name || `player#${inv.challenged_tg_id}`}` }));
+      const stakeLabel = inv.stake_kind === "cash" ? `$${fmt(inv.stake_amount)}` :
+                         inv.stake_kind === "casecoins" ? `⌬${fmt(inv.stake_amount)}` :
+                         `${fmt(inv.stake_amount)} ${inv.stake_id}`;
+      card.appendChild(el("div", { className: "pvp-h-result", textContent: `${inv.status} · ${stakeLabel}` }));
+      if (inv.status === "pending") {
+        const cancelBtn = el("button", { className: "pvp-raid-btn", textContent: "Отозвать", style: { marginTop: "6px" } });
+        cancelBtn.onclick = async () => {
+          const r = await api.pvpDuelInviteCancel(inv.id);
+          if (r.ok) {
+            hapticNotify("warning");
+            toast("Инвайт отозван, ставка вернулась", "info");
+            const st = await api.state();
+            if (st.ok && st.data) {
+              const data: any = st.data;
+              store.setState(data.state ?? data);
+            }
+            await loadActive();
+            render(bodyRoot);
+          }
+        };
+        card.appendChild(cancelBtn);
+      }
+      wrap.appendChild(card);
+    }
+  }
+
+  return wrap;
 }
 
 function renderHistory(): HTMLElement {
@@ -300,6 +476,19 @@ function translatePvPError(err?: string, full?: any): string {
     case "opponent_not_enough_cash":
     case "opponent_not_enough_casecoins":
     case "opponent_not_enough_resource": return "У соперника нет ставки";
+    case "out_of_range": return `Вне твоей скобки (lvl ${full?.opponent_level}, твой ±${full?.range || 15})`;
+    case "victim_immune":
+    case "opponent_immune": return "У игрока иммунитет (новый аккаунт <72ч)";
+    case "daily_limit": return `Дневной лимит рейдов (${full?.used}/${full?.limit})`;
+    case "stake_too_high": return `Ставка слишком высокая. Макс: ${fmt(full?.max_stake || "?")} (${full?.cap_pct || 25}%)`;
+    case "needs_invite": return "Большая ставка — нужен инвайт";
+    case "duplicate_invite": return "Уже есть активный инвайт этому игроку";
+    case "invite_expired": return "Инвайт просрочен";
+    case "invite_inactive": return "Инвайт уже неактивен";
+    case "invite_not_found": return "Инвайт не найден";
+    case "self_not_enough_cash": return "У тебя самого не хватает $ для матча";
+    case "self_not_enough_casecoins": return "У тебя самого не хватает ⌬";
+    case "self_not_enough_resource": return "У тебя самого не хватает ресурса";
     default: return err || "Ошибка";
   }
 }

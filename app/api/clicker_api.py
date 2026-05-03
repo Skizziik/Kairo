@@ -289,6 +289,54 @@ async def api_pvp_history(user: dict = Depends(require_user)) -> dict:
     return {"ok": True, "data": await pvp_mod.history(int(user["id"]))}
 
 
+@router.get("/pvp/bracket")
+async def api_pvp_bracket(user: dict = Depends(require_user)) -> dict:
+    return {"ok": True, "data": await pvp_mod.bracket_info(int(user["id"]))}
+
+
+class DuelInviteCreateReq(BaseModel):
+    opponent_tg_id: int = Field(..., ge=1)
+    stake_kind: str = Field(..., min_length=1, max_length=16)
+    stake_id: str | None = Field(default=None, max_length=64)
+    stake_amount: float = Field(..., gt=0)
+
+
+class DuelInviteRespondReq(BaseModel):
+    invite_id: int = Field(..., ge=1)
+    accept: bool
+
+
+class DuelInviteIdReq(BaseModel):
+    invite_id: int = Field(..., ge=1)
+
+
+@router.post("/pvp/duel/invite")
+async def api_pvp_duel_invite(req: DuelInviteCreateReq, user: dict = Depends(require_user)) -> dict:
+    return await pvp_mod.create_duel_invite(
+        int(user["id"]), req.opponent_tg_id, req.stake_kind, req.stake_id, req.stake_amount,
+    )
+
+
+@router.post("/pvp/duel/invite/respond")
+async def api_pvp_duel_invite_respond(req: DuelInviteRespondReq, user: dict = Depends(require_user)) -> dict:
+    return await pvp_mod.respond_duel_invite(int(user["id"]), req.invite_id, req.accept)
+
+
+@router.post("/pvp/duel/invite/cancel")
+async def api_pvp_duel_invite_cancel(req: DuelInviteIdReq, user: dict = Depends(require_user)) -> dict:
+    return await pvp_mod.cancel_duel_invite(int(user["id"]), req.invite_id)
+
+
+@router.get("/pvp/duel/invites/received")
+async def api_pvp_duel_invites_received(user: dict = Depends(require_user)) -> dict:
+    return {"ok": True, "data": await pvp_mod.list_invites_received(int(user["id"]))}
+
+
+@router.get("/pvp/duel/invites/sent")
+async def api_pvp_duel_invites_sent(user: dict = Depends(require_user)) -> dict:
+    return {"ok": True, "data": await pvp_mod.list_invites_sent(int(user["id"]))}
+
+
 @router.post("/prestige/buy_node")
 async def api_prestige_buy_node(req: PrestigeNodeReq, user: dict = Depends(require_user)) -> dict:
     return await gm.buy_prestige_node(int(user["id"]), req.node_id)

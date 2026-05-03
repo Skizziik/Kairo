@@ -166,6 +166,24 @@ export const api = {
       { method: "POST", body: JSON.stringify({ opponent_tg_id, stake_kind, stake_id, stake_amount }) },
     ),
   pvpHistory: () => request<{ raids: any[]; duels: any[] }>("/api/clicker/pvp/history"),
+  pvpBracket: () => request<any>("/api/clicker/pvp/bracket"),
+  pvpDuelInvite: (opponent_tg_id: number, stake_kind: string, stake_id: string | null, stake_amount: number) =>
+    request<{ invite_id: number; expires_at: string; stake_escrowed: string }>(
+      "/api/clicker/pvp/duel/invite",
+      { method: "POST", body: JSON.stringify({ opponent_tg_id, stake_kind, stake_id, stake_amount }) },
+    ),
+  pvpDuelInviteRespond: (invite_id: number, accept: boolean) =>
+    request<any>("/api/clicker/pvp/duel/invite/respond", {
+      method: "POST",
+      body: JSON.stringify({ invite_id, accept }),
+    }),
+  pvpDuelInviteCancel: (invite_id: number) =>
+    request<any>("/api/clicker/pvp/duel/invite/cancel", {
+      method: "POST",
+      body: JSON.stringify({ invite_id }),
+    }),
+  pvpDuelInvitesReceived: () => request<any[]>("/api/clicker/pvp/duel/invites/received"),
+  pvpDuelInvitesSent: () => request<any[]>("/api/clicker/pvp/duel/invites/sent"),
   leaderboard: (metric: string, limit: number = 50) =>
     request<LeaderboardEntry[]>(`/api/clicker/leaderboard?metric=${encodeURIComponent(metric)}&limit=${limit}`),
 };

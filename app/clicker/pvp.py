@@ -20,10 +20,35 @@ RAID_COOLDOWN_HOURS = 24
 RAID_BASE_SUCCESS = Decimal("0.70")
 RAID_MIN_SUCCESS = Decimal("0.10")
 RAID_STEAL_FRACTION = Decimal("0.10")     # of resource produced last 24h
+RAID_STEAL_BALANCE_CAP_PCT = Decimal(25)  # never steal more than 25% of victim's current resource
+RAID_DAILY_LIMIT = 3                       # max successful or attempted raids per day per raider
 
 DUEL_UNLOCK_LEVEL = 15
 DUEL_COOLDOWN_MINUTES = 60
 DUEL_COMMISSION_PCT = Decimal(10)
+DUEL_STAKE_CAP_PCT = Decimal(25)           # max stake = 25% of min(both players' resource pool)
+DUEL_INSTANT_THRESHOLD_CASH = Decimal(100_000)        # > this requires invite + accept
+DUEL_INSTANT_THRESHOLD_CASECOINS = Decimal(50)
+DUEL_INVITE_LIFETIME_HOURS = 24
+
+# PvP matchmaking range. Players outside the bracket are not visible / cannot be attacked.
+PVP_LEVEL_RANGE = 15
+PVP_TOP_BRACKET_FLOOR = 100   # everyone at level 100+ is in one shared endgame bracket
+IMMUNITY_HOURS = 72            # accounts younger than this can't be raided/dueled
+
+
+def _within_pvp_range(my_level: int, opp_level: int) -> bool:
+    """Both endgame (>= 100) → always allowed. Otherwise within ±PVP_LEVEL_RANGE."""
+    if my_level >= PVP_TOP_BRACKET_FLOOR and opp_level >= PVP_TOP_BRACKET_FLOOR:
+        return True
+    return abs(int(my_level) - int(opp_level)) <= PVP_LEVEL_RANGE
+
+
+def _bracket_bounds(my_level: int) -> tuple[int, int]:
+    """Visible target level window for the requester."""
+    if my_level >= PVP_TOP_BRACKET_FLOOR:
+        return (PVP_TOP_BRACKET_FLOOR, 9999)
+    return (max(1, my_level - PVP_LEVEL_RANGE), my_level + PVP_LEVEL_RANGE)
 
 
 def _now() -> datetime:
@@ -47,16 +72,28 @@ def _parse_jsonb(val: Any) -> Any:
 
 
 async def list_targets(self_tg_id: int, limit: int = 30) -> list[dict]:
+    """Targets within the requester's PvP bracket only. Excludes immune (new) accounts."""
     async with pool().acquire() as conn:
+        me = await conn.fetchrow(
+            "select max_level from clicker_users where tg_id = $1", self_tg_id,
+        )
+        if not me:
+            return []
+        my_level = int(me["max_level"])
+        lo, hi = _bracket_bounds(my_level)
+        immunity_cutoff = _now() - timedelta(hours=IMMUNITY_HOURS)
         rows = await conn.fetch(
             """select tg_id, first_name, username, max_level, prestige_count,
                       cash, casecoins, click_damage, auto_dps, crit_chance,
-                      crit_multiplier
+                      crit_multiplier, created_at
                from clicker_users
-               where tg_id != $1 and banned = false and max_level >= 5
+               where tg_id != $1 and banned = false
+                 and max_level >= 5
+                 and max_level >= $2 and max_level <= $3
+                 and created_at <= $4
                order by max_level desc, prestige_count desc
-               limit $2""",
-            self_tg_id, int(limit),
+               limit $5""",
+            self_tg_id, int(lo), int(hi), immunity_cutoff, int(limit),
         )
     out = []
     for r in rows:
@@ -74,6 +111,49 @@ async def list_targets(self_tg_id: int, limit: int = 30) -> list[dict]:
             "crit_multiplier": str(r["crit_multiplier"]),
         })
     return out
+
+
+async def bracket_info(self_tg_id: int) -> dict:
+    """Returns the player's PvP bracket bounds + immunity/limit info for the UI."""
+    async with pool().acquire() as conn:
+        me = await conn.fetchrow(
+            "select max_level, created_at from clicker_users where tg_id = $1", self_tg_id,
+        )
+        if not me:
+            return {}
+        my_level = int(me["max_level"])
+        lo, hi = _bracket_bounds(my_level)
+        # Today's raid count (last 24h).
+        cutoff = _now() - timedelta(hours=24)
+        cnt_row = await conn.fetchrow(
+            """select count(*) as n from clicker_raids
+               where raider_tg_id = $1 and started_at >= $2""",
+            self_tg_id, cutoff,
+        )
+        raids_today = int(cnt_row["n"]) if cnt_row else 0
+        # Immunity status (own).
+        my_created = me["created_at"]
+        if my_created and my_created.tzinfo is None:
+            my_created = my_created.replace(tzinfo=timezone.utc)
+        immune_until = (my_created + timedelta(hours=IMMUNITY_HOURS)) if my_created else None
+        immune = bool(immune_until and immune_until > _now())
+    return {
+        "my_level": my_level,
+        "level_range_min": int(lo),
+        "level_range_max": int(hi),
+        "is_top_bracket": my_level >= PVP_TOP_BRACKET_FLOOR,
+        "raids_today": raids_today,
+        "raid_daily_limit": RAID_DAILY_LIMIT,
+        "raid_cost_cash": str(RAID_COST_CASH),
+        "raid_unlock_level": RAID_UNLOCK_LEVEL,
+        "duel_unlock_level": DUEL_UNLOCK_LEVEL,
+        "duel_stake_cap_pct": str(DUEL_STAKE_CAP_PCT),
+        "duel_invite_threshold_cash": str(DUEL_INSTANT_THRESHOLD_CASH),
+        "duel_invite_threshold_casecoins": str(DUEL_INSTANT_THRESHOLD_CASECOINS),
+        "immunity_hours": IMMUNITY_HOURS,
+        "immune_until": immune_until.isoformat() if immune_until else None,
+        "immune_now": immune,
+    }
 
 
 # ---------- raid ------------------------------------------------------------
@@ -153,6 +233,17 @@ async def execute_raid(raider_tg_id: int, victim_tg_id: int, business_id: str) -
             if Decimal(raider["cash"]) < RAID_COST_CASH:
                 return {"ok": False, "error": "not_enough_cash", "needed": str(RAID_COST_CASH)}
 
+            # Daily raid limit (across all victims).
+            day_cutoff = now - timedelta(hours=24)
+            cnt_row = await conn.fetchrow(
+                """select count(*) as n from clicker_raids
+                   where raider_tg_id = $1 and started_at >= $2""",
+                raider_tg_id, day_cutoff,
+            )
+            if cnt_row and int(cnt_row["n"]) >= RAID_DAILY_LIMIT:
+                return {"ok": False, "error": "daily_limit",
+                        "limit": RAID_DAILY_LIMIT, "used": int(cnt_row["n"])}
+
             victim = await conn.fetchrow(
                 "select * from clicker_users where tg_id = $1 for update", victim_tg_id,
             )
@@ -163,7 +254,23 @@ async def execute_raid(raider_tg_id: int, victim_tg_id: int, business_id: str) -
             if int(victim["max_level"]) < int(bdef["unlock_level"]):
                 return {"ok": False, "error": "victim_business_locked"}
 
-            # Cooldown: same pair within 24h.
+            # PvP level bracket.
+            if not _within_pvp_range(int(raider["max_level"]), int(victim["max_level"])):
+                return {"ok": False, "error": "out_of_range",
+                        "my_level": int(raider["max_level"]),
+                        "opponent_level": int(victim["max_level"]),
+                        "range": PVP_LEVEL_RANGE}
+
+            # Victim immunity (new account).
+            v_created = victim["created_at"]
+            if v_created and v_created.tzinfo is None:
+                v_created = v_created.replace(tzinfo=timezone.utc)
+            if v_created and (now - v_created) < timedelta(hours=IMMUNITY_HOURS):
+                until = v_created + timedelta(hours=IMMUNITY_HOURS)
+                return {"ok": False, "error": "victim_immune",
+                        "immune_until": until.isoformat()}
+
+            # Per-pair cooldown: 24h.
             cd_row = await conn.fetchrow(
                 """select started_at from clicker_raids
                    where raider_tg_id = $1 and victim_tg_id = $2
@@ -212,7 +319,10 @@ async def execute_raid(raider_tg_id: int, victim_tg_id: int, business_id: str) -
                     victim_tg_id, resource_type,
                 )
                 victim_have = Decimal(victim_res["amount"]) if victim_res else Decimal(0)
-                amount_stolen = min(steal, victim_have)
+                # Cap by 25% of the victim's current balance — protects victim from
+                # being cleaned out in a single raid.
+                balance_cap = (victim_have * RAID_STEAL_BALANCE_CAP_PCT / Decimal(100)).quantize(Decimal("1"))
+                amount_stolen = min(steal, balance_cap)
 
                 if amount_stolen > 0:
                     await conn.execute(
@@ -248,6 +358,26 @@ async def execute_raid(raider_tg_id: int, victim_tg_id: int, business_id: str) -
 # ---------- duel ------------------------------------------------------------
 
 
+def _is_high_stake(stake_kind: str, stake: Decimal) -> bool:
+    if stake_kind == "cash":
+        return stake > DUEL_INSTANT_THRESHOLD_CASH
+    if stake_kind == "casecoins":
+        return stake > DUEL_INSTANT_THRESHOLD_CASECOINS
+    return False  # resource stakes are always instant (cap below still applies)
+
+
+def _stake_cap(challenger_row, opponent_row, stake_kind: str) -> Decimal | None:
+    """Return the max stake (25% of the smaller side's pool) for cash/casecoins.
+    None means no cap (e.g. resource stakes — caller validates differently)."""
+    if stake_kind == "cash":
+        smaller = min(Decimal(challenger_row["cash"]), Decimal(opponent_row["cash"]))
+    elif stake_kind == "casecoins":
+        smaller = min(Decimal(challenger_row["casecoins"]), Decimal(opponent_row["casecoins"]))
+    else:
+        return None
+    return (smaller * DUEL_STAKE_CAP_PCT / Decimal(100)).quantize(Decimal("1"))
+
+
 async def execute_duel(challenger_tg_id: int, opponent_tg_id: int,
                        stake_kind: str, stake_id: str | None,
                        stake_amount: int | float | str) -> dict:
@@ -278,6 +408,36 @@ async def execute_duel(challenger_tg_id: int, opponent_tg_id: int,
             if op["banned"]:
                 return {"ok": False, "error": "opponent_banned"}
 
+            # PvP level bracket.
+            if not _within_pvp_range(int(ch["max_level"]), int(op["max_level"])):
+                return {"ok": False, "error": "out_of_range",
+                        "my_level": int(ch["max_level"]),
+                        "opponent_level": int(op["max_level"]),
+                        "range": PVP_LEVEL_RANGE}
+
+            # Opponent immunity.
+            op_created = op["created_at"]
+            if op_created and op_created.tzinfo is None:
+                op_created = op_created.replace(tzinfo=timezone.utc)
+            if op_created and (now - op_created) < timedelta(hours=IMMUNITY_HOURS):
+                until = op_created + timedelta(hours=IMMUNITY_HOURS)
+                return {"ok": False, "error": "opponent_immune",
+                        "immune_until": until.isoformat()}
+
+            # High-stake duels need a mutual-consent invite — instant duel rejected.
+            if _is_high_stake(stake_kind, stake):
+                return {"ok": False, "error": "needs_invite",
+                        "instant_threshold_cash": str(DUEL_INSTANT_THRESHOLD_CASH),
+                        "instant_threshold_casecoins": str(DUEL_INSTANT_THRESHOLD_CASECOINS)}
+
+            # Stake cap: 25% of the smaller side's pool. Prevents a rich attacker from
+            # forcing a small player into a trivial-loss position.
+            cap = _stake_cap(ch, op, stake_kind)
+            if cap is not None and stake > cap:
+                return {"ok": False, "error": "stake_too_high",
+                        "max_stake": str(cap),
+                        "cap_pct": str(DUEL_STAKE_CAP_PCT)}
+
             # Cooldown
             cd_row = await conn.fetchrow(
                 """select started_at from clicker_duels
@@ -299,10 +459,8 @@ async def execute_duel(challenger_tg_id: int, opponent_tg_id: int,
                 return {"ok": False, "error": err}
 
             # Both must be able to afford if they LOSE the same stake.
-            # We check opponent ahead of time so they don't get into a free-loss situation.
             ok2, err2 = await _deduct_stake(conn, opponent_tg_id, stake_kind, stake_id, stake)
             if not ok2:
-                # Refund challenger.
                 await _refund_stake(conn, challenger_tg_id, stake_kind, stake_id, stake)
                 return {"ok": False, "error": "opponent_" + err2}
 
@@ -397,6 +555,253 @@ async def _refund_stake(conn, tg_id: int, kind: str, item_id: str | None, amount
                on conflict (tg_id, resource_type) do update set amount = clicker_resources.amount + excluded.amount""",
             tg_id, item_id, amount,
         )
+
+
+# ---------- duel invites (high-stake mutual-consent flow) -------------------
+
+
+async def create_duel_invite(challenger_tg_id: int, opponent_tg_id: int,
+                              stake_kind: str, stake_id: str | None,
+                              stake_amount: int | float | str) -> dict:
+    """Send a high-stake duel invite. Stake is escrowed from challenger immediately.
+    Opponent has DUEL_INVITE_LIFETIME_HOURS to accept; on accept the duel runs and
+    payouts apply. On decline / expiry, escrow is refunded."""
+    if challenger_tg_id == opponent_tg_id:
+        return {"ok": False, "error": "self_duel"}
+    if stake_kind not in ("cash", "casecoins", "resource"):
+        return {"ok": False, "error": "bad_stake"}
+    stake = Decimal(str(stake_amount))
+    if stake <= 0:
+        return {"ok": False, "error": "bad_stake"}
+
+    now = _now()
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            ch = await conn.fetchrow(
+                "select * from clicker_users where tg_id = $1 for update", challenger_tg_id,
+            )
+            if not ch:
+                return {"ok": False, "error": "no_challenger"}
+            if int(ch["max_level"]) < DUEL_UNLOCK_LEVEL:
+                return {"ok": False, "error": "level_locked", "needed": DUEL_UNLOCK_LEVEL}
+            op = await conn.fetchrow(
+                "select * from clicker_users where tg_id = $1", opponent_tg_id,
+            )
+            if not op:
+                return {"ok": False, "error": "no_opponent"}
+            if op["banned"]:
+                return {"ok": False, "error": "opponent_banned"}
+
+            if not _within_pvp_range(int(ch["max_level"]), int(op["max_level"])):
+                return {"ok": False, "error": "out_of_range",
+                        "my_level": int(ch["max_level"]),
+                        "opponent_level": int(op["max_level"]),
+                        "range": PVP_LEVEL_RANGE}
+
+            op_created = op["created_at"]
+            if op_created and op_created.tzinfo is None:
+                op_created = op_created.replace(tzinfo=timezone.utc)
+            if op_created and (now - op_created) < timedelta(hours=IMMUNITY_HOURS):
+                until = op_created + timedelta(hours=IMMUNITY_HOURS)
+                return {"ok": False, "error": "opponent_immune",
+                        "immune_until": until.isoformat()}
+
+            cap = _stake_cap(ch, op, stake_kind)
+            if cap is not None and stake > cap:
+                return {"ok": False, "error": "stake_too_high",
+                        "max_stake": str(cap),
+                        "cap_pct": str(DUEL_STAKE_CAP_PCT)}
+
+            # No duplicate pending invite to the same opponent.
+            dup = await conn.fetchrow(
+                """select id from clicker_duel_invites
+                   where challenger_tg_id = $1 and challenged_tg_id = $2 and status = 'pending'""",
+                challenger_tg_id, opponent_tg_id,
+            )
+            if dup:
+                return {"ok": False, "error": "duplicate_invite"}
+
+            # Escrow stake from challenger.
+            ok, err = await _deduct_stake(conn, challenger_tg_id, stake_kind, stake_id, stake)
+            if not ok:
+                return {"ok": False, "error": err}
+
+            expires_at = now + timedelta(hours=DUEL_INVITE_LIFETIME_HOURS)
+            row = await conn.fetchrow(
+                """insert into clicker_duel_invites
+                    (challenger_tg_id, challenged_tg_id, stake_kind, stake_id, stake_amount,
+                     status, expires_at)
+                   values ($1, $2, $3, $4, $5, 'pending', $6)
+                   returning id""",
+                challenger_tg_id, opponent_tg_id, stake_kind, stake_id, stake, expires_at,
+            )
+            return {"ok": True, "data": {
+                "invite_id": int(row["id"]),
+                "expires_at": expires_at.isoformat(),
+                "stake_escrowed": str(stake),
+            }}
+
+
+async def respond_duel_invite(opponent_tg_id: int, invite_id: int, accept: bool) -> dict:
+    """Accept → run the duel synchronously (both stakes escrowed, payout to winner).
+    Decline → refund challenger's escrow."""
+    now = _now()
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            inv = await conn.fetchrow(
+                "select * from clicker_duel_invites where id = $1 for update", invite_id,
+            )
+            if not inv:
+                return {"ok": False, "error": "invite_not_found"}
+            if int(inv["challenged_tg_id"]) != opponent_tg_id:
+                return {"ok": False, "error": "not_recipient"}
+            if inv["status"] != "pending":
+                return {"ok": False, "error": "invite_inactive"}
+
+            exp = inv["expires_at"]
+            if exp and exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            if exp and exp <= now:
+                # Auto-expire: refund.
+                await _refund_stake(conn, int(inv["challenger_tg_id"]),
+                                    inv["stake_kind"], inv["stake_id"], Decimal(inv["stake_amount"]))
+                await conn.execute(
+                    "update clicker_duel_invites set status = 'expired', responded_at = $2 where id = $1",
+                    invite_id, now,
+                )
+                return {"ok": False, "error": "invite_expired"}
+
+            challenger_id = int(inv["challenger_tg_id"])
+            stake_kind = inv["stake_kind"]
+            stake_id = inv["stake_id"]
+            stake = Decimal(inv["stake_amount"])
+
+            if not accept:
+                await _refund_stake(conn, challenger_id, stake_kind, stake_id, stake)
+                await conn.execute(
+                    "update clicker_duel_invites set status = 'declined', responded_at = $2 where id = $1",
+                    invite_id, now,
+                )
+                return {"ok": True, "data": {"declined": True, "invite_id": invite_id}}
+
+            # Accept → run the duel right here, mirroring execute_duel's payout logic.
+            ch = await conn.fetchrow(
+                "select * from clicker_users where tg_id = $1 for update", challenger_id,
+            )
+            op = await conn.fetchrow(
+                "select * from clicker_users where tg_id = $1 for update", opponent_tg_id,
+            )
+            if not ch or not op:
+                # Refund on broken state.
+                await _refund_stake(conn, challenger_id, stake_kind, stake_id, stake)
+                await conn.execute(
+                    "update clicker_duel_invites set status = 'expired', responded_at = $2 where id = $1",
+                    invite_id, now,
+                )
+                return {"ok": False, "error": "user_missing"}
+
+            # Opponent must be able to match the stake.
+            ok2, err2 = await _deduct_stake(conn, opponent_tg_id, stake_kind, stake_id, stake)
+            if not ok2:
+                await _refund_stake(conn, challenger_id, stake_kind, stake_id, stake)
+                await conn.execute(
+                    "update clicker_duel_invites set status = 'declined', responded_at = $2 where id = $1",
+                    invite_id, now,
+                )
+                return {"ok": False, "error": "self_" + err2}
+
+            score_ch = _duel_score(ch)
+            score_op = _duel_score(op)
+            winner = challenger_id if score_ch >= score_op else opponent_tg_id
+            commission = (stake * Decimal(2) * DUEL_COMMISSION_PCT / Decimal(100)).quantize(Decimal("1"))
+            payout = (stake * Decimal(2)) - commission
+            await _refund_stake(conn, winner, stake_kind, stake_id, payout)
+
+            duel_row = await conn.fetchrow(
+                """insert into clicker_duels
+                   (challenger_tg_id, challenged_tg_id, stake_kind, stake_id, stake_amount,
+                    challenger_score, challenged_score, winner_tg_id, commission_paid)
+                   values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id""",
+                challenger_id, opponent_tg_id, stake_kind, stake_id, stake,
+                str(score_ch), str(score_op), winner, commission,
+            )
+            await conn.execute(
+                """update clicker_duel_invites set status = 'accepted', responded_at = $2, duel_id = $3
+                   where id = $1""",
+                invite_id, now, int(duel_row["id"]),
+            )
+
+    return {"ok": True, "data": {
+        "accepted": True,
+        "invite_id": invite_id,
+        "duel_id": int(duel_row["id"]),
+        "winner_tg_id": winner,
+        "self_won": winner == opponent_tg_id,
+        "challenger_score": str(score_ch),
+        "challenged_score": str(score_op),
+        "stake": str(stake),
+        "payout": str(payout),
+        "commission_paid": str(commission),
+    }}
+
+
+async def cancel_duel_invite(challenger_tg_id: int, invite_id: int) -> dict:
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            inv = await conn.fetchrow(
+                "select * from clicker_duel_invites where id = $1 for update", invite_id,
+            )
+            if not inv:
+                return {"ok": False, "error": "invite_not_found"}
+            if int(inv["challenger_tg_id"]) != challenger_tg_id:
+                return {"ok": False, "error": "not_owner"}
+            if inv["status"] != "pending":
+                return {"ok": False, "error": "invite_inactive"}
+            await _refund_stake(conn, challenger_tg_id, inv["stake_kind"], inv["stake_id"], Decimal(inv["stake_amount"]))
+            await conn.execute(
+                "update clicker_duel_invites set status = 'cancelled', responded_at = $2 where id = $1",
+                invite_id, _now(),
+            )
+    return {"ok": True, "data": {"invite_id": invite_id, "cancelled": True}}
+
+
+def _serialize_invite(r) -> dict:
+    return {
+        "id": int(r["id"]),
+        "challenger_tg_id": int(r["challenger_tg_id"]),
+        "challenged_tg_id": int(r["challenged_tg_id"]),
+        "stake_kind": r["stake_kind"],
+        "stake_id": r["stake_id"],
+        "stake_amount": str(r["stake_amount"]),
+        "status": r["status"],
+        "expires_at": r["expires_at"].isoformat() if r["expires_at"] else None,
+        "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+    }
+
+
+async def list_invites_received(tg_id: int) -> list[dict]:
+    async with pool().acquire() as conn:
+        rows = await conn.fetch(
+            """select i.*, u.first_name as challenger_name from clicker_duel_invites i
+               left join clicker_users u on u.tg_id = i.challenger_tg_id
+               where i.challenged_tg_id = $1 and i.status = 'pending'
+                 and i.expires_at > now()
+               order by i.created_at desc limit 50""",
+            tg_id,
+        )
+    return [{**_serialize_invite(r), "challenger_name": r["challenger_name"]} for r in rows]
+
+
+async def list_invites_sent(tg_id: int) -> list[dict]:
+    async with pool().acquire() as conn:
+        rows = await conn.fetch(
+            """select i.*, u.first_name as challenged_name from clicker_duel_invites i
+               left join clicker_users u on u.tg_id = i.challenged_tg_id
+               where i.challenger_tg_id = $1
+               order by i.created_at desc limit 50""",
+            tg_id,
+        )
+    return [{**_serialize_invite(r), "challenged_name": r["challenged_name"]} for r in rows]
 
 
 # ---------- history ---------------------------------------------------------

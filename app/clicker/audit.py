@@ -237,6 +237,27 @@ create index if not exists idx_clicker_offers_offerer on clicker_offers(offerer_
 """
 
 
+DUEL_INVITES_SQL = """
+create table if not exists clicker_duel_invites (
+    id                  bigserial primary key,
+    challenger_tg_id    bigint not null references clicker_users(tg_id) on delete cascade,
+    challenged_tg_id    bigint not null references clicker_users(tg_id) on delete cascade,
+    stake_kind          text not null,
+    stake_id            text,
+    stake_amount        numeric not null,
+    status              text not null default 'pending',
+    expires_at          timestamptz not null,
+    created_at          timestamptz not null default now(),
+    responded_at        timestamptz,
+    duel_id             bigint
+);
+create index if not exists idx_duel_invites_challenged_pending
+    on clicker_duel_invites(challenged_tg_id) where status = 'pending';
+create index if not exists idx_duel_invites_challenger
+    on clicker_duel_invites(challenger_tg_id, created_at desc);
+"""
+
+
 async def ensure_schema() -> None:
     async with pool().acquire() as conn:
         await conn.execute(SCHEMA_SQL)
@@ -272,4 +293,5 @@ async def ensure_schema() -> None:
             "alter table clicker_lots add column if not exists multi_assets jsonb"
         )
         await conn.execute(OFFERS_SQL)
+        await conn.execute(DUEL_INVITES_SQL)
     log.info("clicker schema ensured")
