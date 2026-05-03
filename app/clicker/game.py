@@ -655,13 +655,9 @@ async def tap(tg_id: int, taps: int, dt_ms: int) -> dict:
                     win_s = win_s.replace(tzinfo=timezone.utc)
                 if win_s and (now - win_s).total_seconds() < 1.0:
                     remaining = max(0, cfg.TAP_RATE_BASE - win_c)
-                    if remaining <= 0:
-                        # Surface current state so the client can correct optimistic UI.
-                        state = await _build_state(conn, tg_id)
-                        return {"ok": False, "error": "rate_limit", "rate_cap": cfg.TAP_RATE_BASE,
-                                "data": {"state": state}}
-                    if taps > remaining:
-                        taps = remaining
+                    # Silent trim: anything over the cap is dropped without an error.
+                    # Auto_dps still ticks, the request still returns OK.
+                    taps = min(taps, remaining)
                     new_s, new_c = win_s, win_c + taps
                 else:
                     taps = min(taps, cfg.TAP_RATE_BASE)

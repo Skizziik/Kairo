@@ -28,7 +28,6 @@ let statCritEl: HTMLElement;
 let pendingTaps = 0;
 let pendingTapsTimer: any = null;
 let lastTapAt = 0;
-let rateLimitedUntil = 0;
 let timerInterval: any = null;
 let lastLevel = -1;
 let isFlushingTaps = false;
@@ -264,10 +263,6 @@ function onTap(ev: PointerEvent) {
   if (now - lastTapAt < 16) return; // throttle very fast taps
   lastTapAt = now;
 
-  // If we just hit the server rate limit, freeze optimistic feedback so the player
-  // sees that their auto-clicker is being blocked, not just "dampened".
-  if (now < rateLimitedUntil) return;
-
   haptic("light");
   pendingTaps++;
 
@@ -301,25 +296,11 @@ async function flushTaps() {
   pendingTaps = 0;
   try {
     const r = await api.tap(taps, 250);
-    if (!r.ok) {
-      if (r.error === "rate_limit") {
-        // Server hit cap. Drop pending + sync UI to truth (anti-optimistic-bypass).
-        pendingTaps = 0;
-        rateLimitedUntil = Date.now() + 1100;  // suppress local optimistic damage briefly
-        hapticNotify("warning");
-        toast(`⛔ Лимит ${(r as any).rate_cap || 10}/сек. Купи Лицензию (10⌬) для авто-клика`, "error", 3000);
-        const serverState = (r as any).data?.state;
-        if (serverState) {
-          // Force server HP/state — overrides optimistic local edits.
-          store.setState(serverState);
-        }
-      } else {
-        console.warn("tap failed", r);
-      }
+    if (!r.ok || !r.data) {
+      console.warn("tap failed", r);
       isFlushingTaps = false;
       return;
     }
-    if (!r.data) { isFlushingTaps = false; return; }
     handleTapResult(r.data);
   } catch (e) {
     console.error(e);
