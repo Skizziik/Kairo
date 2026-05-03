@@ -832,6 +832,14 @@ async def tap(tg_id: int, taps: int, dt_ms: int) -> dict:
             if combat["is_boss"]:
                 coin_reward = coin_reward * cfg.BOSS_COIN_MULT
 
+            # Frontier vs back-farm: only the player's CURRENT max_level pays full.
+            # Going back to grind low bosses (whose HP × boss_mult exceeds the new
+            # frontier's normal-mob HP) was more profitable than progressing —
+            # discourage by paying 10% on non-frontier kills.
+            cur_max_level_now = int(user["max_level"])
+            if level < cur_max_level_now:
+                coin_reward = (coin_reward * Decimal("0.10")).quantize(Decimal("1"))
+
             chest_dropped: str | None = None
             artifact_dropped: dict | None = None
 
