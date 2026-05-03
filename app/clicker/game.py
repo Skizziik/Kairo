@@ -498,8 +498,21 @@ async def tap(tg_id: int, taps: int, dt_ms: int) -> dict:
                         tg_id,
                     )
 
-            new_level = level + 1
-            new_max = max(int(user["max_level"]), new_level)
+            # Manual level navigation: only auto-advance when player is at the
+            # frontier (their personal max). Otherwise respawn the same enemy
+            # so they can farm freely.
+            cur_max = int(user["max_level"])
+            if level >= cur_max:
+                # Frontier kill — advance both `level` and `max_level`.
+                new_level = level + 1
+                new_max = new_level
+                advanced = True
+            else:
+                # Farm kill — stay on the same level, respawn same tier enemy.
+                new_level = level
+                new_max = cur_max
+                advanced = False
+
             new_checkpoint = int(user["checkpoint"])
             if level % cfg.CHECKPOINT_EVERY == 0 and level > new_checkpoint:
                 new_checkpoint = level
@@ -520,6 +533,7 @@ async def tap(tg_id: int, taps: int, dt_ms: int) -> dict:
             result["coin_reward"] = str(coin_reward)
             result["was_boss"] = combat["is_boss"]
             result["new_level"] = new_level
+            result["advanced"] = advanced
             if chest_dropped:
                 result["chest_dropped"] = chest_dropped
             if artifact_dropped:
@@ -875,6 +889,26 @@ async def prestige(tg_id: int) -> dict:
             return await _wrap_state(conn, tg_id, {"glory_gained": glory_gained, "starter_cash": str(starter_cash)})
 
 
+async def goto_level(tg_id: int, target_level: int) -> dict:
+    """Manually switch to any level in [1, max_level]. Spawns fresh enemy at that level."""
+    now = _now()
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            user = await conn.fetchrow(
+                "select level, max_level, checkpoint from clicker_users where tg_id = $1 for update",
+                tg_id,
+            )
+            if not user:
+                return {"ok": False, "error": "no_user"}
+            tgt = max(1, min(int(target_level), int(user["max_level"])))
+            await conn.execute(
+                "update clicker_users set level = $2, last_combat_at = $3 where tg_id = $1",
+                tg_id, tgt, now,
+            )
+            await _spawn_enemy_for_level(conn, tg_id, tgt, now)
+            return await _wrap_state(conn, tg_id, {"new_level": tgt})
+
+
 async def buy_prestige_node(tg_id: int, node_id: str) -> dict:
     """Spend ★ glory to level a prestige tree node. Each level has its own cost."""
     node = _prestige_node_def(node_id)
@@ -994,6 +1028,7 @@ async def _build_state(conn, tg_id: int) -> dict:
             elapsed = min(elapsed, cap)
             produced = (rate * Decimal(str(elapsed)))
             pending = Decimal(biz_row["pending_amount"]) + produced
+        biz_res_cost = _business_resource_cost(bdef, bus_level)
         biz_state.append({
             "id": bid,
             "level": bus_level,
@@ -1003,6 +1038,7 @@ async def _build_state(conn, tg_id: int) -> dict:
             "tap_yield": str(tap_yield.quantize(Decimal("0.001"))),
             "pending": str(pending.quantize(Decimal("0.01"))),
             "upgrade_cost": str(upgrade_cost),
+            "upgrade_resource_cost": {k: str(v) for k, v in biz_res_cost.items()},
         })
 
     level = int(user["level"])
@@ -1182,6 +1218,13 @@ async def business_collect(tg_id: int, business_id: str | None = None) -> dict:
     return {"ok": True, "data": {**state["data"], "collected": {k: str(v) for k, v in collected.items()}}}
 
 
+def _business_resource_cost(bdef: dict, current_level: int) -> dict[str, Decimal]:
+    """Resource cost scales gently with level (1.10^level)."""
+    base = bdef.get("upgrade_resource_cost") or {}
+    growth = Decimal("1.10") ** current_level
+    return {res: (Decimal(str(amt)) * growth).quantize(Decimal("1")) for res, amt in base.items()}
+
+
 async def business_upgrade(tg_id: int, business_id: str) -> dict:
     bdef = _business_def(business_id)
     if not bdef:
@@ -1201,6 +1244,21 @@ async def business_upgrade(tg_id: int, business_id: str) -> dict:
             if Decimal(user["cash"]) < cost:
                 return {"ok": False, "error": "not_enough_cash", "needed": str(cost)}
 
+            # Resource cost check.
+            res_cost = _business_resource_cost(bdef, level)
+            if res_cost:
+                res_rows = await conn.fetch(
+                    "select resource_type, amount from clicker_resources where tg_id = $1 for update",
+                    tg_id,
+                )
+                have = {r["resource_type"]: Decimal(r["amount"]) for r in res_rows}
+                for res, amt in res_cost.items():
+                    if have.get(res, Decimal(0)) < amt:
+                        return {
+                            "ok": False, "error": "not_enough_resource",
+                            "resource": res, "needed": str(amt), "have": str(have.get(res, Decimal(0))),
+                        }
+
             # First, accrue current rate's idle into pending so the upgrade applies forward only.
             await _accrue_business_idle(conn, tg_id, business_id, now)
 
@@ -1213,12 +1271,19 @@ async def business_upgrade(tg_id: int, business_id: str) -> dict:
                 "update clicker_users set cash = cash - $2 where tg_id = $1",
                 tg_id, cost,
             )
+            for res, amt in res_cost.items():
+                await conn.execute(
+                    "update clicker_resources set amount = amount - $3 where tg_id = $1 and resource_type = $2",
+                    tg_id, res, amt,
+                )
             await _log(conn, tg_id, "business_upgrade", {
                 "business_id": business_id, "from": level, "to": level + 1, "cost": str(cost),
+                "res_cost": {k: str(v) for k, v in res_cost.items()},
             })
 
     state = await get_state(tg_id)
-    return {"ok": True, "data": {**state["data"], "new_level": level + 1, "spent": str(cost)}}
+    return {"ok": True, "data": {**state["data"], "new_level": level + 1, "spent": str(cost),
+                                 "res_spent": {k: str(v) for k, v in res_cost.items()}}}
 
 
 # ---------- public config ---------------------------------------------------

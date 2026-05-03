@@ -50,6 +50,10 @@ class PrestigeNodeReq(BaseModel):
     node_id: str = Field(..., min_length=1, max_length=64)
 
 
+class GotoLevelReq(BaseModel):
+    target_level: int = Field(..., ge=1, le=999)
+
+
 @router.get("/config")
 async def api_config() -> dict:
     return {"ok": True, "data": gm.public_config()}
@@ -116,6 +120,11 @@ async def api_business_upgrade(req: BusinessReq, user: dict = Depends(require_us
 @router.post("/prestige/buy_node")
 async def api_prestige_buy_node(req: PrestigeNodeReq, user: dict = Depends(require_user)) -> dict:
     return await gm.buy_prestige_node(int(user["id"]), req.node_id)
+
+
+@router.post("/level/goto")
+async def api_level_goto(req: GotoLevelReq, user: dict = Depends(require_user)) -> dict:
+    return await gm.goto_level(int(user["id"]), req.target_level)
 
 
 @router.get("/leaderboard")

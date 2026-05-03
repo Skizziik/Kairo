@@ -65,6 +65,7 @@ export interface BusinessState {
   tap_yield: string;
   pending: string;
   upgrade_cost: string;
+  upgrade_resource_cost: Record<string, string>;
 }
 
 export interface StateSnap {
@@ -217,6 +218,8 @@ export interface ApiResponse<T = any> {
   message?: string;
   needed?: string;
   unlock_level?: number;
+  resource?: string;
+  have?: string;
 }
 
 export interface TapResult {

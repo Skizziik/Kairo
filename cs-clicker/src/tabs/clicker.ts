@@ -43,12 +43,35 @@ export function mountClickerTab(parent: HTMLElement): HTMLElement {
   levelHeader.appendChild(levelNameEl);
   content.appendChild(levelHeader);
 
+  // Level navigation row
+  const levelNav = el("div", { className: "level-nav" });
+  const prevBtn = el("button", { className: "level-arrow", textContent: "‹", dataset: { dir: "prev" } });
+  const nextBtn = el("button", { className: "level-arrow", textContent: "›", dataset: { dir: "next" } });
+  const navInfo = el("div", { className: "level-nav-info" });
+  const navCur = el("div", { className: "level-nav-cur", textContent: "lvl 1" });
+  const navMax = el("div", { className: "level-nav-max", textContent: "max 1" });
+  navInfo.appendChild(navCur);
+  navInfo.appendChild(navMax);
+  prevBtn.onclick = () => navigateLevel(-1);
+  nextBtn.onclick = () => navigateLevel(+1);
+  levelNav.appendChild(prevBtn);
+  levelNav.appendChild(navInfo);
+  levelNav.appendChild(nextBtn);
+  content.appendChild(levelNav);
+  // store refs as data so we can update without re-querying
+  (root as any)._navCur = navCur;
+  (root as any)._navMax = navMax;
+  (root as any)._prevBtn = prevBtn;
+  (root as any)._nextBtn = nextBtn;
+
+  const timerRow = el("div", { className: "timer-row" });
   const timerBar = el("div", { className: "timer-bar" });
   timerFillEl = el("div", { className: "timer-fill", style: { width: "100%" } });
   timerTextEl = el("div", { className: "timer-text", textContent: "0:00" });
   timerBar.appendChild(timerFillEl);
-  timerBar.appendChild(timerTextEl);
-  content.appendChild(timerBar);
+  timerRow.appendChild(timerBar);
+  timerRow.appendChild(timerTextEl);
+  content.appendChild(timerRow);
 
   const hpWrap = el("div", { className: "hp-bar-wrap" });
   const hpBar = el("div", { className: "hp-bar" });
@@ -147,6 +170,26 @@ function render() {
   if (s.user.level !== lastLevel) {
     lastLevel = s.user.level;
   }
+
+  // Level navigation status
+  const navCur = (root as any)._navCur as HTMLElement | undefined;
+  const navMax = (root as any)._navMax as HTMLElement | undefined;
+  const prevBtn = (root as any)._prevBtn as HTMLButtonElement | undefined;
+  const nextBtn = (root as any)._nextBtn as HTMLButtonElement | undefined;
+  if (navCur) navCur.textContent = `lvl ${s.user.level}`;
+  if (navMax) navMax.textContent = `frontier ${s.user.max_level}`;
+  if (prevBtn) prevBtn.disabled = s.user.level <= 1;
+  if (nextBtn) nextBtn.disabled = s.user.level >= s.user.max_level;
+}
+
+async function navigateLevel(delta: number) {
+  if (!store.state) return;
+  const s = store.state;
+  const target = Math.max(1, Math.min(s.user.max_level, s.user.level + delta));
+  if (target === s.user.level) return;
+  haptic("light");
+  const r = await api.gotoLevel(target);
+  if (r.ok && r.data?.state) store.setState(r.data.state);
 }
 
 function updateHpBar(s: StateSnap) {

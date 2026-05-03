@@ -28,6 +28,11 @@ export function mountBusinessTab(parent: HTMLElement): HTMLElement {
 function render() {
   if (!root || !store.state || !store.config) return;
   if (store.activeTab !== "business" && root.dataset.lastRender) return;
+
+  // Preserve scroll position across re-renders to fix the "tap → jumps to top" bug.
+  const oldContent = root.querySelector(".tab-page-content") as HTMLElement | null;
+  const savedScroll = oldContent ? oldContent.scrollTop : 0;
+
   root.innerHTML = "";
   const content = el("div", { className: "tab-page-content" });
 
@@ -80,6 +85,13 @@ function render() {
 
   root.appendChild(content);
   root.dataset.lastRender = String(Date.now());
+
+  // Restore scroll position.
+  if (savedScroll > 0) {
+    requestAnimationFrame(() => {
+      content.scrollTop = savedScroll;
+    });
+  }
 }
 
 function renderCard(bdef: BusinessDef): HTMLElement {
@@ -154,8 +166,20 @@ function renderCard(bdef: BusinessDef): HTMLElement {
 
   const upgradeBtn = el("button", { className: "biz-upgrade-btn" });
   upgradeBtn.appendChild(el("span", { textContent: `АП ур.${(state?.level ?? 0) + 1}` }));
-  upgradeBtn.appendChild(el("span", { className: "small", textContent: `$${fmt(state?.upgrade_cost || "0")}` }));
-  if (haveCash < Number(state?.upgrade_cost || 0)) upgradeBtn.disabled = true;
+  // Build cost label: $cost + each resource cost
+  const costParts: string[] = [`$${fmt(state?.upgrade_cost || "0")}`];
+  const resCost = state?.upgrade_resource_cost || {};
+  let resourcesEnough = true;
+  for (const [resType, amount] of Object.entries(resCost)) {
+    const have = Number(store.state.resources[resType] || "0");
+    const need = Number(amount);
+    if (have < need) resourcesEnough = false;
+    const meta = store.config.resources_meta[resType];
+    costParts.push(`${meta?.emoji || ""}${fmt(amount)}`);
+  }
+  upgradeBtn.appendChild(el("span", { className: "small", textContent: costParts.join(" · ") }));
+  const cashOk = haveCash >= Number(state?.upgrade_cost || 0);
+  if (!cashOk || !resourcesEnough) upgradeBtn.disabled = true;
   upgradeBtn.onclick = async () => {
     haptic("medium");
     const r = await api.businessUpgrade(bdef.id);
@@ -165,7 +189,7 @@ function renderCard(bdef: BusinessDef): HTMLElement {
       if ((r.data as any).state) store.setState((r.data as any).state);
     } else {
       hapticNotify("error");
-      toast(translateError(r.error), "error");
+      toast(translateError(r.error, r.resource), "error");
     }
   };
   actions.appendChild(upgradeBtn);
@@ -188,10 +212,16 @@ function refreshPendings() {
   }
 }
 
-function translateError(err?: string): string {
+function translateError(err?: string, resource?: string): string {
   switch (err) {
     case "locked": return "Ещё заблокировано";
     case "not_enough_cash": return "Недостаточно $";
+    case "not_enough_resource":
+      if (resource && store.config) {
+        const meta = store.config.resources_meta[resource];
+        return `Не хватает ${meta?.name || resource}`;
+      }
+      return "Не хватает ресурсов";
     case "unknown_business": return "Бизнес не найден";
     default: return err || "Ошибка";
   }
