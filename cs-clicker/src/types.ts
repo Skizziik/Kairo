@@ -75,7 +75,19 @@ export interface StateSnap {
   inventory: InventoryItem[];
   resources: Record<string, string>;
   businesses: BusinessState[];
+  prestige_nodes: Record<string, number>;
   server_time: string;
+}
+
+export interface PrestigeNodeDef {
+  id: string;
+  name: string;
+  desc: string;
+  max_level: number;
+  cost_per_level: number[];
+  effect: Record<string, any>;
+  tier: number;
+  category: string;
 }
 
 export interface BusinessDef {
@@ -182,6 +194,7 @@ export interface ConfigSnap {
   crit_luck: { crit_chance: CritLuckDef[]; crit_damage: CritLuckDef[]; luck: CritLuckDef[] };
   businesses: BusinessDef[];
   resources_meta: Record<string, ResourceMeta>;
+  prestige_tree: PrestigeNodeDef[];
   constants: {
     level_time_normal: number;
     level_time_boss: number;

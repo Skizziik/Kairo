@@ -5,25 +5,35 @@ const SUFFIXES = [
 ];
 
 export function fmt(value: string | number | bigint, digits = 1): string {
-  let s: string;
-  if (typeof value === "bigint") s = value.toString();
-  else if (typeof value === "number") s = Math.floor(value).toString();
-  else s = String(value).split(".")[0];
+  // Negatives → recurse on the absolute string.
+  const raw = typeof value === "bigint" ? value.toString() : String(value);
+  if (raw.startsWith("-")) return "-" + fmt(raw.substring(1), digits);
 
-  if (s.startsWith("-")) return "-" + fmt(s.substring(1), digits);
-  if (s.length <= 4) return Number(s).toLocaleString("ru-RU");
+  // Small / fractional values: keep up to 1 decimal so weapon-01 lvl 3 shows "1.6".
+  // Up to 9999 we format as a regular Russian-grouped number.
+  const num = Number(raw);
+  if (!Number.isNaN(num) && Math.abs(num) < 10000) {
+    if (Math.abs(num) < 100) {
+      const rounded = Math.round(num * 10) / 10;
+      return rounded.toFixed(1).replace(/\.0$/, "").replace(".", ",");
+    }
+    return Math.floor(num).toLocaleString("ru-RU");
+  }
 
-  const len = s.length;
+  // Big numbers (string-based suffix abbreviation).
+  const intPart = raw.split(".")[0];
+  const len = intPart.length;
+  if (len <= 4) return Number(intPart).toLocaleString("ru-RU");
+
   const groupIndex = Math.floor((len - 1) / 3);
   if (groupIndex < SUFFIXES.length) {
     const suffix = SUFFIXES[groupIndex];
     const headLen = ((len - 1) % 3) + 1;
-    const head = s.slice(0, headLen);
-    const dec = s.slice(headLen, headLen + digits).replace(/0+$/, "");
+    const head = intPart.slice(0, headLen);
+    const dec = intPart.slice(headLen, headLen + digits).replace(/0+$/, "");
     return dec ? `${head}.${dec}${suffix}` : `${head}${suffix}`;
   }
-  // Beyond Decillion → scientific
-  return Number(s).toExponential(2);
+  return Number(intPart).toExponential(2);
 }
 
 export function fmtTimer(ms: number): string {

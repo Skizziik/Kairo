@@ -62,8 +62,13 @@ def resources_meta() -> dict:
     return _load("resources_meta.json")
 
 
+@lru_cache(maxsize=1)
+def prestige_tree() -> list:
+    return _load("prestige_tree.json")
+
+
 def reload() -> None:
-    for fn in (weapons, mercs, locations, bosses, chests, artifacts, mythics, crit_luck, businesses, resources_meta):
+    for fn in (weapons, mercs, locations, bosses, chests, artifacts, mythics, crit_luck, businesses, resources_meta, prestige_tree):
         fn.cache_clear()
 
 

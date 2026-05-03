@@ -104,6 +104,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ business_id }),
     }),
+  prestigeBuyNode: (node_id: string) =>
+    request<{ state: StateSnap; node_id: string; new_level: number; spent: string }>(
+      "/api/clicker/prestige/buy_node",
+      { method: "POST", body: JSON.stringify({ node_id }) },
+    ),
   leaderboard: (metric: string, limit: number = 50) =>
     request<LeaderboardEntry[]>(`/api/clicker/leaderboard?metric=${encodeURIComponent(metric)}&limit=${limit}`),
 };

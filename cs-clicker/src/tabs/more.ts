@@ -1,6 +1,6 @@
 import { api, haptic, hapticNotify } from "../api";
 import { store } from "../state";
-import type { LeaderboardEntry } from "../types";
+import type { LeaderboardEntry, PrestigeNodeDef } from "../types";
 import { el, fmt } from "../util";
 import { toast } from "../ui/toast";
 import { openModal } from "../ui/modal";
@@ -41,6 +41,19 @@ function render() {
   pBtn.onclick = () => doPrestige(projectedGlory);
   prestigeCard.appendChild(pBtn);
   content.appendChild(prestigeCard);
+
+  // Prestige Tree (only when there's glory or any node already bought)
+  const hasGlory = Number(u.glory) > 0 || u.prestige_count > 0;
+  if (hasGlory && store.config) {
+    content.appendChild(el("div", { className: "upg-section-title", textContent: "ДРЕВО ПРЕСТИЖА", style: { marginTop: "16px" } }));
+    const ptList = el("div", { className: "pt-grid" });
+    const owned = store.state.prestige_nodes || {};
+    const sorted = [...store.config.prestige_tree].sort((a, b) => a.tier - b.tier);
+    for (const node of sorted) {
+      ptList.appendChild(renderPrestigeNode(node, owned[node.id] || 0, Number(u.glory)));
+    }
+    content.appendChild(ptList);
+  }
 
   // Stats
   content.appendChild(el("div", { className: "upg-section-title", textContent: "СТАТИСТИКА", style: { marginTop: "16px" } }));
@@ -89,6 +102,59 @@ function render() {
 
   if (!cachedLb || cachedLb.metric !== lbMetric) {
     void loadLeaderboard();
+  }
+}
+
+function renderPrestigeNode(node: PrestigeNodeDef, owned: number, glory: number): HTMLElement {
+  const card = el("div", { className: `pt-node tier-${node.tier}` });
+  const maxed = owned >= node.max_level;
+  const costIdx = Math.min(owned, node.cost_per_level.length - 1);
+  const cost = node.cost_per_level[costIdx];
+  const can = !maxed && glory >= cost;
+
+  const head = el("div", { className: "pt-head" });
+  head.appendChild(el("span", { className: "pt-name", textContent: node.name }));
+  head.appendChild(el("span", { className: "pt-lvl", textContent: `${owned}/${node.max_level}` }));
+  card.appendChild(head);
+
+  card.appendChild(el("div", { className: "pt-desc", textContent: node.desc }));
+
+  const btn = el("button", { className: "pt-buy" });
+  if (maxed) {
+    btn.textContent = "MAX";
+    btn.disabled = true;
+  } else {
+    btn.appendChild(document.createTextNode(`Купить за ${cost}★`));
+    if (!can) btn.disabled = true;
+  }
+  btn.onclick = async () => {
+    if (!can || maxed) {
+      hapticNotify("error");
+      toast("Не хватает ★", "error");
+      return;
+    }
+    haptic("medium");
+    btn.disabled = true;
+    const r = await api.prestigeBuyNode(node.id);
+    if (r.ok && r.data) {
+      hapticNotify("success");
+      toast(`${node.name} → ${r.data.new_level}`, "success");
+      if (r.data.state) store.setState(r.data.state);
+    } else {
+      hapticNotify("error");
+      toast(translatePrestigeError(r.error), "error");
+    }
+  };
+  card.appendChild(btn);
+
+  return card;
+}
+
+function translatePrestigeError(err?: string): string {
+  switch (err) {
+    case "not_enough_glory": return "Мало ★ Славы";
+    case "max_level": return "Максимум";
+    default: return err || "Ошибка";
   }
 }
 

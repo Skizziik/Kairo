@@ -106,6 +106,43 @@ async def _business_level(conn, tg_id: int, business_id: str) -> int:
     return int(row["level"]) if row else 0
 
 
+def _prestige_node_def(node_id: str) -> dict | None:
+    for n in cfg.prestige_tree():
+        if n["id"] == node_id:
+            return n
+    return None
+
+
+async def _prestige_levels(conn, tg_id: int) -> dict[str, int]:
+    """Map node_id → owned level (default 0)."""
+    rows = await conn.fetch(
+        """select slot_id, level from clicker_upgrades
+           where tg_id = $1 and kind = 'prestige_node'""",
+        tg_id,
+    )
+    return {r["slot_id"]: int(r["level"]) for r in rows}
+
+
+def _prestige_effects(levels: dict[str, int]) -> dict:
+    """Sum all node effects according to owned level for each."""
+    totals: dict[str, float] = {}
+    flags: dict[str, bool] = {}
+    for nid, lvl in levels.items():
+        if lvl <= 0:
+            continue
+        node = _prestige_node_def(nid)
+        if not node:
+            continue
+        eff = node.get("effect") or {}
+        for k, v in eff.items():
+            if isinstance(v, bool):
+                if v:
+                    flags[k] = True
+            elif isinstance(v, (int, float)):
+                totals[k] = totals.get(k, 0.0) + float(v) * lvl
+    return {"pct": totals, "flags": flags}
+
+
 async def _ensure_business_state(conn, tg_id: int, business_id: str, now: datetime) -> dict:
     row = await conn.fetchrow(
         "select * from clicker_businesses where tg_id = $1 and business_id = $2 for update",
@@ -273,18 +310,29 @@ async def _recompute_stats(conn, tg_id: int) -> dict:
     equipped = await _equipped_artifacts(conn, tg_id)
     eff = _artifact_effects(equipped)
 
+    # Apply prestige tree effects.
+    pt = _prestige_effects(await _prestige_levels(conn, tg_id))
+    pt_pct = pt["pct"]
+
     def pct(name: str, base: Decimal) -> Decimal:
         return base * (Decimal(1) + Decimal(str(eff.get(name, 0))) / Decimal(100))
 
     click_dmg = pct("click_damage_pct", click_dmg)
     click_dmg = pct("all_dmg_pct", click_dmg)
     click_dmg = pct("all_income_pct", click_dmg)  # mild — affects damage too via Stickers HL3 lore
+    # Prestige tree click bonus
+    click_dmg = click_dmg * (Decimal(1) + Decimal(str(pt_pct.get("click_damage_pct", 0))) / Decimal(100))
     auto_dps = pct("auto_dps_pct", auto_dps)
     auto_dps = pct("all_dmg_pct", auto_dps)
+    auto_dps = auto_dps * (Decimal(1) + Decimal(str(pt_pct.get("auto_dps_pct", 0))) / Decimal(100))
+    auto_dps = auto_dps * (Decimal(1) + Decimal(str(pt_pct.get("merc_dps_pct", 0))) / Decimal(100))
     crit_chance_pct = pct("crit_chance_pct", crit_chance_pct) if crit_chance_pct > 0 else crit_chance_pct
     crit_chance_pct += Decimal(str(eff.get("crit_chance_pct", 0)))
+    crit_chance_pct += Decimal(str(pt_pct.get("crit_chance_pct", 0)))
     crit_dmg_mult += Decimal(str(eff.get("crit_dmg_pct", 0))) / Decimal(100)
+    crit_dmg_mult += Decimal(str(pt_pct.get("crit_dmg_pct", 0))) / Decimal(100)
     luck = pct("luck_pct", luck)
+    luck += Decimal(str(pt_pct.get("luck_pct", 0)))
 
     # Cap crit chance at 100%.
     if crit_chance_pct > 100:
@@ -736,7 +784,7 @@ async def unequip(tg_id: int, inventory_id: int) -> dict:
 
 
 async def prestige(tg_id: int) -> dict:
-    """Reset progress for ★ glory. Keeps artifacts, casecoins, glory, prestige count."""
+    """Reset progress for ★ glory. Keeps artifacts, casecoins, glory, prestige count + tree."""
     async with pool().acquire() as conn:
         async with conn.transaction():
             user = await conn.fetchrow(
@@ -748,14 +796,29 @@ async def prestige(tg_id: int) -> dict:
             if max_level < 20:
                 return {"ok": False, "error": "level_too_low", "needed": 20}
 
+            # Read prestige tree for bonuses applied at prestige time.
+            pt_levels = await _prestige_levels(conn, tg_id)
+            pt = _prestige_effects(pt_levels)
+            pt_flags = pt["flags"]
+            pt_pct = pt["pct"]
+
             glory_gained = max(1, int((max_level / cfg.PRESTIGE_GLORY_DIVISOR) ** cfg.PRESTIGE_GLORY_EXP))
-            new_slots = min(cfg.ARTIFACT_SLOT_MAX, int(user["artifact_slots"]) + 1)
+            if pt_flags.get("next_glory_x2"):
+                glory_gained *= 2
+
+            # Artifact slots: base 2 + node levels (max 6).
+            base_slots = cfg.ARTIFACT_SLOT_BASE
+            slot_bonus = int(pt_pct.get("artifact_slot", 0))
+            new_slots = min(cfg.ARTIFACT_SLOT_MAX, max(int(user["artifact_slots"]), base_slots + slot_bonus))
+
+            # Starter cash from prestige tree.
+            starter_cash = Decimal(int(pt_pct.get("starter_cash", 0)))
 
             await conn.execute(
                 """update clicker_users set
                       level = 1,
                       checkpoint = 1,
-                      cash = 0,
+                      cash = $4,
                       glory = glory + $2,
                       prestige_count = prestige_count + 1,
                       artifact_slots = $3,
@@ -765,21 +828,110 @@ async def prestige(tg_id: int) -> dict:
                       crit_multiplier = 2,
                       luck = 0
                    where tg_id = $1""",
-                tg_id, glory_gained, new_slots,
+                tg_id, glory_gained, new_slots, starter_cash,
             )
-            # Wipe all upgrades except keep weapon_01 owned at level 0.
-            await conn.execute("delete from clicker_upgrades where tg_id = $1", tg_id)
+            # Wipe combat upgrades but keep prestige_node and (optionally) business levels.
+            keep_business = pt_flags.get("business_keep_lvl1", False)
+            await conn.execute(
+                """delete from clicker_upgrades
+                   where tg_id = $1 and kind not in ('prestige_node')""",
+                tg_id,
+            )
+            # Re-seed weapon_01.
             await conn.execute(
                 """insert into clicker_upgrades (tg_id, kind, slot_id, level)
                    values ($1, 'weapon', 'weapon_01', 0)""",
                 tg_id,
             )
+            # If business_reserve flag, re-give level 1 of every business they had unlocked.
+            if keep_business:
+                user_max = max_level  # use pre-prestige peak
+                for bdef in cfg.businesses():
+                    if user_max >= int(bdef["unlock_level"]):
+                        await conn.execute(
+                            """insert into clicker_upgrades (tg_id, kind, slot_id, level)
+                               values ($1, 'business', $2, 1)""",
+                            tg_id, bdef["id"],
+                        )
+            # Reset business idle/pending.
+            await conn.execute("delete from clicker_businesses where tg_id = $1", tg_id)
+            # Reset resources except keep gas (rare).
+            await conn.execute(
+                "delete from clicker_resources where tg_id = $1 and resource_type != 'gas'",
+                tg_id,
+            )
+            # If glory_doubler was used, consume it.
+            if pt_flags.get("next_glory_x2"):
+                await conn.execute(
+                    """delete from clicker_upgrades
+                       where tg_id = $1 and kind = 'prestige_node' and slot_id = 'pt_glory_doubler'""",
+                    tg_id,
+                )
             # Spawn enemy for level 1.
             await _spawn_enemy_for_level(conn, tg_id, 1, _now())
 
             await _recompute_stats(conn, tg_id)
             await _log(conn, tg_id, "prestige", {"max_level": max_level, "glory_gained": glory_gained})
-            return await _wrap_state(conn, tg_id, {"glory_gained": glory_gained})
+            return await _wrap_state(conn, tg_id, {"glory_gained": glory_gained, "starter_cash": str(starter_cash)})
+
+
+async def buy_prestige_node(tg_id: int, node_id: str) -> dict:
+    """Spend ★ glory to level a prestige tree node. Each level has its own cost."""
+    node = _prestige_node_def(node_id)
+    if not node:
+        return {"ok": False, "error": "unknown_node"}
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            user = await conn.fetchrow(
+                "select glory from clicker_users where tg_id = $1 for update", tg_id,
+            )
+            if not user:
+                return {"ok": False, "error": "no_user"}
+            cur = await conn.fetchrow(
+                """select level from clicker_upgrades
+                   where tg_id = $1 and kind = 'prestige_node' and slot_id = $2 for update""",
+                tg_id, node_id,
+            )
+            cur_level = int(cur["level"]) if cur else 0
+            if cur_level >= int(node.get("max_level", 1)):
+                return {"ok": False, "error": "max_level"}
+
+            costs = node.get("cost_per_level") or [1]
+            cost_idx = min(cur_level, len(costs) - 1)
+            cost = Decimal(int(costs[cost_idx]))
+            if Decimal(user["glory"]) < cost:
+                return {"ok": False, "error": "not_enough_glory", "needed": str(cost)}
+
+            new_level = cur_level + 1
+            if cur:
+                await conn.execute(
+                    """update clicker_upgrades set level = $3
+                       where tg_id = $1 and kind = 'prestige_node' and slot_id = $2""",
+                    tg_id, node_id, new_level,
+                )
+            else:
+                await conn.execute(
+                    """insert into clicker_upgrades (tg_id, kind, slot_id, level)
+                       values ($1, 'prestige_node', $2, $3)""",
+                    tg_id, node_id, new_level,
+                )
+            await conn.execute(
+                "update clicker_users set glory = glory - $2 where tg_id = $1",
+                tg_id, cost,
+            )
+            # If artifact_slot purchased, raise artifact_slots by the per-level value (1).
+            if "artifact_slot" in (node.get("effect") or {}):
+                await conn.execute(
+                    """update clicker_users
+                       set artifact_slots = least($2, artifact_slots + 1)
+                       where tg_id = $1""",
+                    tg_id, cfg.ARTIFACT_SLOT_MAX,
+                )
+            await _recompute_stats(conn, tg_id)
+            await _log(conn, tg_id, "prestige_node_bought", {
+                "node_id": node_id, "from": cur_level, "to": new_level, "cost": str(cost),
+            })
+            return await _wrap_state(conn, tg_id, {"node_id": node_id, "new_level": new_level, "spent": str(cost)})
 
 
 # ---------- state snapshot --------------------------------------------------
@@ -914,6 +1066,9 @@ async def _build_state(conn, tg_id: int) -> dict:
         ],
         "resources": {r["resource_type"]: str(r["amount"]) for r in res_rows},
         "businesses": biz_state,
+        "prestige_nodes": {
+            u["slot_id"]: int(u["level"]) for u in upg_rows if u["kind"] == "prestige_node"
+        },
         "server_time": _now().isoformat(),
     }
 
@@ -1082,6 +1237,7 @@ def public_config() -> dict:
         "crit_luck": cfg.crit_luck(),
         "businesses": cfg.businesses(),
         "resources_meta": cfg.resources_meta(),
+        "prestige_tree": cfg.prestige_tree(),
         "constants": {
             "level_time_normal": cfg.LEVEL_TIME_NORMAL,
             "level_time_boss": cfg.LEVEL_TIME_BOSS,
