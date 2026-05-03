@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from app.api.auth import require_user
 from app.clicker import game as gm
 from app.clicker import market as mk
+from app.clicker import pvp as pvp_mod
 
 log = logging.getLogger(__name__)
 
@@ -76,6 +77,18 @@ class CreateLotReq(BaseModel):
 
 class LotIdReq(BaseModel):
     lot_id: int = Field(..., ge=1)
+
+
+class RaidReq(BaseModel):
+    victim_tg_id: int = Field(..., ge=1)
+    business_id: str = Field(..., min_length=1, max_length=32)
+
+
+class DuelReq(BaseModel):
+    opponent_tg_id: int = Field(..., ge=1)
+    stake_kind: str = Field(..., min_length=1, max_length=16)
+    stake_id: str | None = Field(default=None, max_length=64)
+    stake_amount: float = Field(..., gt=0)
 
 
 @router.get("/config")
@@ -199,6 +212,32 @@ async def api_market_accept(req: LotIdReq, user: dict = Depends(require_user)) -
 @router.post("/market/cancel")
 async def api_market_cancel(req: LotIdReq, user: dict = Depends(require_user)) -> dict:
     return await mk.cancel_lot(int(user["id"]), req.lot_id)
+
+
+# ---- PvP ----
+
+@router.get("/pvp/targets")
+async def api_pvp_targets(user: dict = Depends(require_user)) -> dict:
+    targets = await pvp_mod.list_targets(int(user["id"]))
+    return {"ok": True, "data": targets}
+
+
+@router.post("/pvp/raid")
+async def api_pvp_raid(req: RaidReq, user: dict = Depends(require_user)) -> dict:
+    return await pvp_mod.execute_raid(int(user["id"]), req.victim_tg_id, req.business_id)
+
+
+@router.post("/pvp/duel")
+async def api_pvp_duel(req: DuelReq, user: dict = Depends(require_user)) -> dict:
+    return await pvp_mod.execute_duel(
+        int(user["id"]), req.opponent_tg_id,
+        req.stake_kind, req.stake_id, req.stake_amount,
+    )
+
+
+@router.get("/pvp/history")
+async def api_pvp_history(user: dict = Depends(require_user)) -> dict:
+    return {"ok": True, "data": await pvp_mod.history(int(user["id"]))}
 
 
 @router.post("/prestige/buy_node")

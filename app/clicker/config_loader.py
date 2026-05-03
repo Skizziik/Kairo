@@ -96,8 +96,7 @@ HP_GROWTH = 1.55
 HP_BOSS_MULT = 7.5
 COIN_DROP_RATIO = 0.18
 BOSS_COIN_MULT = 5
-BOSS_CHEST_DROP_BASE = 0.12
-BOSS_CHEST_PITY_THRESHOLD = 10   # 11th boss kill without a chest = guaranteed
+BOSS_CHEST_DROP_BASE = 0.10      # flat 10% drop chance per boss kill
 BOSS_GAS_DROP_CHANCE = 0.005     # 0.5% chance for direct gas drop on boss kill (lvl 30+)
 BOSS_GAS_LEVEL_THRESHOLD = 30
 COST_GROWTH = 1.15

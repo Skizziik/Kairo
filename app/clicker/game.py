@@ -522,29 +522,12 @@ async def tap(tg_id: int, taps: int, dt_ms: int) -> dict:
             if combat["is_boss"]:
                 boss_def = cfg.boss_for_level(level)
                 if boss_def:
-                    # Drop chance: base + prestige Boss-Hunter bonus.
+                    # Drop chance: flat base + prestige Boss-Hunter bonus. Pure RNG, no pity.
                     pt_now = _prestige_effects(await _prestige_levels(conn, tg_id))
                     drop_chance = cfg.BOSS_CHEST_DROP_BASE + float(pt_now["pct"].get("boss_chest_drop_pct", 0)) / 100.0
-                    user_kills = int(user["bosses_killed"])
-                    pity = int(user["boss_no_chest_streak"])
-                    is_first_kill_of_first_boss = (boss_def["id"] == "01") and user_kills == 0
-                    is_pity_guaranteed = pity >= cfg.BOSS_CHEST_PITY_THRESHOLD
-
-                    rolled = random.random() < drop_chance
-                    if is_first_kill_of_first_boss or is_pity_guaranteed or rolled:
+                    if random.random() < drop_chance:
                         chest_dropped = boss_def["chest"]
                         await _grant_chest(conn, tg_id, chest_dropped)
-                        # Reset streak.
-                        await conn.execute(
-                            "update clicker_users set boss_no_chest_streak = 0 where tg_id = $1",
-                            tg_id,
-                        )
-                    else:
-                        # Bump streak.
-                        await conn.execute(
-                            "update clicker_users set boss_no_chest_streak = boss_no_chest_streak + 1 where tg_id = $1",
-                            tg_id,
-                        )
 
                     # Direct gas chance on bosses lvl 30+ (rarest).
                     if level >= cfg.BOSS_GAS_LEVEL_THRESHOLD:
@@ -1399,6 +1382,29 @@ async def _accrue_casecoin_time(conn, tg_id: int, user_row, now: datetime) -> in
     return awards
 
 
+async def _check_timeout_respawn(conn, tg_id: int, now: datetime) -> bool:
+    """If the current enemy's timer expired without a kill, respawn it at full HP.
+    Returns True if a respawn happened. Without this, the player has to tap to
+    unstick a timed-out enemy — bad UX when they walk away mid-fight."""
+    user = await conn.fetchrow(
+        "select level from clicker_users where tg_id = $1", tg_id,
+    )
+    if not user:
+        return False
+    combat = await conn.fetchrow(
+        "select * from clicker_combat_state where tg_id = $1 for update", tg_id,
+    )
+    if not combat:
+        return False
+    timer_ends = combat["timer_ends_at"]
+    if timer_ends and timer_ends.tzinfo is None:
+        timer_ends = timer_ends.replace(tzinfo=timezone.utc)
+    if timer_ends and timer_ends <= now and Decimal(combat["enemy_max_hp"]) > 0:
+        await _spawn_enemy_for_level(conn, tg_id, int(user["level"]), now)
+        return True
+    return False
+
+
 async def get_state(tg_id: int) -> dict:
     async with pool().acquire() as conn:
         async with conn.transaction():
@@ -1406,7 +1412,9 @@ async def get_state(tg_id: int) -> dict:
                 "select * from clicker_users where tg_id = $1 for update", tg_id,
             )
             if user_row:
-                await _accrue_casecoin_time(conn, tg_id, user_row, _now())
+                now = _now()
+                await _accrue_casecoin_time(conn, tg_id, user_row, now)
+                await _check_timeout_respawn(conn, tg_id, now)
         return await _wrap_state(conn, tg_id)
 
 

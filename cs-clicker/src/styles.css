@@ -942,6 +942,77 @@ html, body {
   -webkit-appearance: none;
 }
 
+/* ---------- PVP ---------- */
+
+.pvp-body { display: flex; flex-direction: column; gap: 10px; }
+.pvp-info {
+  font-size: 11px; color: var(--text-soft);
+  background: var(--bg-card); border: 1px solid var(--bg-mid);
+  border-radius: 6px; padding: 8px; line-height: 1.5;
+  text-align: center;
+}
+.pvp-list { display: flex; flex-direction: column; gap: 6px; }
+.pvp-target {
+  background: var(--bg-card);
+  border: 1px solid var(--bg-mid);
+  border-radius: 8px;
+  padding: 8px;
+}
+.pvp-target-head {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 4px;
+}
+.pvp-target-name { font-weight: 800; color: var(--text-bright); font-size: 13px; }
+.pvp-target-meta { font-size: 11px; color: var(--text-soft); }
+.pvp-target-stats {
+  display: flex; gap: 8px;
+  font-size: 11px; color: var(--text-soft);
+  margin-bottom: 6px;
+}
+.pvp-target-actions {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+}
+.pvp-raid-btn, .pvp-duel-btn {
+  min-height: 36px;
+  border: none; border-radius: 6px;
+  font-family: inherit; font-weight: 800; font-size: 12px;
+  cursor: pointer; letter-spacing: 1px;
+}
+.pvp-raid-btn {
+  background: linear-gradient(180deg, #DC2626, #7F1D1D); color: #fff;
+}
+.pvp-duel-btn {
+  background: linear-gradient(180deg, var(--rarity-mythic), #9F2766); color: #fff;
+}
+.pvp-raid-btn:disabled, .pvp-duel-btn:disabled {
+  opacity: 0.4; cursor: not-allowed; filter: grayscale(0.5);
+}
+.pvp-raid-btn:active:not(:disabled), .pvp-duel-btn:active:not(:disabled) { transform: translateY(1px); }
+
+.raid-biz-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;
+}
+.raid-biz-card {
+  background: var(--bg-card); border: 1px solid var(--bg-mid);
+  border-radius: 8px;
+  padding: 8px;
+  display: flex; flex-direction: column; align-items: center;
+  cursor: pointer;
+  transition: transform 100ms;
+}
+.raid-biz-card img { width: 56px; height: 56px; object-fit: contain; }
+.raid-biz-card:active { transform: scale(0.96); }
+
+.pvp-history-card {
+  background: var(--bg-card); border: 1px solid var(--bg-mid);
+  border-left: 3px solid var(--text-dim);
+  border-radius: 6px; padding: 6px 10px;
+}
+.pvp-history-card.win { border-left-color: var(--cs-green); }
+.pvp-history-card.lose { border-left-color: var(--rarity-rare); }
+.pvp-h-head { font-weight: 700; font-size: 12px; color: var(--text-bright); }
+.pvp-h-result { font-size: 11px; color: var(--text-soft); margin-top: 2px; }
+
 /* ---------- BATTLE PASS ---------- */
 
 .bp-body { display: flex; flex-direction: column; gap: 10px; }

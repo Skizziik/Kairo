@@ -7,6 +7,7 @@ import { toast } from "../ui/toast";
 import { showChestRollModal } from "./chest_modal";
 import { showPrestigeModal } from "./prestige_modal";
 import { showBattlepassModal } from "./battlepass_modal";
+import { showPvPModal } from "./pvp_modal";
 
 let root: HTMLElement | null = null;
 let bgEl: HTMLElement;
@@ -121,6 +122,11 @@ export function mountClickerTab(parent: HTMLElement): HTMLElement {
   bpBtn.onclick = () => { haptic("light"); showBattlepassModal(); };
   actionBar.appendChild(bpBtn);
 
+  const pvpBtn = el("button", { className: "action-btn icon-btn", textContent: "⚔️" });
+  pvpBtn.title = "PvP";
+  pvpBtn.onclick = () => { haptic("light"); showPvPModal(); };
+  actionBar.appendChild(pvpBtn);
+
   content.appendChild(actionBar);
 
   root.appendChild(content);
@@ -213,6 +219,7 @@ function updateHpBar(s: StateSnap) {
   hpTextEl.textContent = `${fmt(s.combat.enemy_hp)} / ${fmt(s.combat.enemy_max_hp)}`;
 }
 
+let timeoutForceFetched = false;
 function startTimerLoop() {
   if (timerInterval) clearInterval(timerInterval);
   timerInterval = setInterval(() => {
@@ -231,6 +238,19 @@ function startTimerLoop() {
     timerTextEl.textContent = fmtTimer(remaining);
     if (pct < 25) timerFillEl.classList.add("warn");
     else timerFillEl.classList.remove("warn");
+
+    // Force-refresh state if timer expired and enemy still alive — server will respawn.
+    const enemyAlive = Number(s.combat.enemy_hp) > 0 && Number(s.combat.enemy_max_hp) > 0;
+    if (remaining < -500 && enemyAlive && !timeoutForceFetched) {
+      timeoutForceFetched = true;
+      void api.state().then((r) => {
+        if (r.ok && r.data) {
+          const data: any = r.data;
+          store.setState(data.state ?? data);
+        }
+        timeoutForceFetched = false;
+      });
+    }
   }, 200);
 }
 

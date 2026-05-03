@@ -153,6 +153,19 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ lot_id }),
     }),
+
+  pvpTargets: () => request<any[]>("/api/clicker/pvp/targets"),
+  pvpRaid: (victim_tg_id: number, business_id: string) =>
+    request<{ success: boolean; success_chance: string; resource_type: string | null; amount_stolen: string; cost_paid: string }>(
+      "/api/clicker/pvp/raid",
+      { method: "POST", body: JSON.stringify({ victim_tg_id, business_id }) },
+    ),
+  pvpDuel: (opponent_tg_id: number, stake_kind: string, stake_id: string | null, stake_amount: number) =>
+    request<{ winner_tg_id: number; challenger_score: string; challenged_score: string; stake: string; payout: string; commission_paid: string }>(
+      "/api/clicker/pvp/duel",
+      { method: "POST", body: JSON.stringify({ opponent_tg_id, stake_kind, stake_id, stake_amount }) },
+    ),
+  pvpHistory: () => request<{ raids: any[]; duels: any[] }>("/api/clicker/pvp/history"),
   leaderboard: (metric: string, limit: number = 50) =>
     request<LeaderboardEntry[]>(`/api/clicker/leaderboard?metric=${encodeURIComponent(metric)}&limit=${limit}`),
 };

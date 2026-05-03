@@ -159,6 +159,41 @@ create index if not exists idx_clicker_lots_seller
 create index if not exists idx_clicker_lots_offer
     on clicker_lots(offer_kind, offer_id) where status = 'active';
 
+-- PvP raids: one player attacks one of another player's businesses.
+create table if not exists clicker_raids (
+    id              bigserial primary key,
+    raider_tg_id    bigint not null,
+    victim_tg_id    bigint not null,
+    business_id     text not null,
+    success         boolean,
+    resource_type   text,
+    amount_stolen   numeric not null default 0,
+    cost_paid       numeric not null default 0,
+    success_chance  numeric,
+    started_at      timestamptz not null default now()
+);
+create index if not exists idx_clicker_raids_pair_time
+    on clicker_raids(raider_tg_id, victim_tg_id, started_at desc);
+create index if not exists idx_clicker_raids_victim
+    on clicker_raids(victim_tg_id, started_at desc);
+
+-- PvP duels: async DPS comparison.
+create table if not exists clicker_duels (
+    id                 bigserial primary key,
+    challenger_tg_id   bigint not null,
+    challenged_tg_id   bigint not null,
+    stake_kind         text not null,
+    stake_id           text,
+    stake_amount       numeric not null,
+    challenger_score   numeric,
+    challenged_score   numeric,
+    winner_tg_id       bigint,
+    commission_paid    numeric not null default 0,
+    started_at         timestamptz not null default now()
+);
+create index if not exists idx_clicker_duels_pair_time
+    on clicker_duels(challenger_tg_id, challenged_tg_id, started_at desc);
+
 -- Battle pass progress (weekly). Resets each Monday 00:00 UTC.
 create table if not exists clicker_battlepass (
     tg_id            bigint not null references clicker_users(tg_id) on delete cascade,
