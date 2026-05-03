@@ -139,22 +139,33 @@ def _business_tap_yield(business_def: dict, level: int, branch_pcts: dict[str, f
 
 
 def _business_consumption_per_sec(business_def: dict, level: int, branch_pcts: dict[str, float] | None = None) -> dict[str, Decimal]:
-    """Idle consumption (resources eaten while producing). Scales BUSINESS_CONS_GROWTH^level.
-    consumption_red_pct branch reduces it (capped at 90% reduction)."""
-    base = business_def.get("idle_consumption_per_sec") or {}
-    if not base:
+    """Idle consumption is PROPORTIONAL to own production rate.
+    consumption_per_unit defines how much of each input is needed per 1 unit of output.
+    So scaling production via level/branches automatically scales consumption — you can't
+    pump tier 5 without keeping the upstream chain alive.
+    consumption_red_pct branch reduces consumption (capped at 90%).
+
+    Legacy fallback: if a config still uses idle_consumption_per_sec (absolute), respect it."""
+    ratios = business_def.get("consumption_per_unit") or {}
+    legacy = business_def.get("idle_consumption_per_sec") or {}
+    if not ratios and not legacy:
         return {}
-    growth = Decimal(str(cfg.BUSINESS_CONS_GROWTH)) ** level
+
     red = Decimal(0)
     if branch_pcts:
         red = Decimal(str(branch_pcts.get("consumption_red_pct", 0)))
     if red > Decimal(90):
         red = Decimal(90)
     mult = (Decimal(100) - red) / Decimal(100)
-    out: dict[str, Decimal] = {}
-    for res, rate in base.items():
-        out[res] = (Decimal(str(rate)) * growth * mult)
-    return out
+
+    if ratios:
+        # Proportional model: consumption[r] = production_rate × ratio[r] × (1 − red%).
+        prod_rate = _business_idle_per_sec(business_def, level, branch_pcts)
+        return {res: (prod_rate * Decimal(str(ratio)) * mult) for res, ratio in ratios.items()}
+
+    # Legacy absolute model (kept for forward-compat in case any business sticks with it).
+    growth = Decimal("1.075") ** level
+    return {res: (Decimal(str(rate)) * growth * mult) for res, rate in legacy.items()}
 
 
 def _business_upgrade_cost(business_def: dict, current_level: int) -> Decimal:

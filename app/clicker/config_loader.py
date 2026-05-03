@@ -87,8 +87,10 @@ def reload() -> None:
 # Business idle/upgrade.
 BUSINESS_IDLE_GROWTH = 1.075     # production per_sec × this^level (was 1.08 — slower scaling)
 BUSINESS_COST_GROWTH = 1.18      # upgrade cost × this^level (was 1.15 — steeper)
-BUSINESS_CONS_GROWTH = 1.06      # idle consumption × this^level (slower than production)
 BUSINESS_IDLE_CAP_HOURS = 8      # max accumulation while away
+# Consumption is proportional to OWN production rate via consumption_per_unit ratios in
+# businesses.json — so it scales naturally with level/branches and the upstream chain
+# always matters (you can't pump Tier 5 without supplying Tier 1-4).
 
 LEVEL_TIME_NORMAL = 30        # seconds to kill normal enemy
 LEVEL_TIME_BOSS = 40          # seconds to kill boss
