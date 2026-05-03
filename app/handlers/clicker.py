@@ -38,8 +38,12 @@ def _fmt(v) -> str:
 
 
 async def _send_app_button(msg: Message, text: str) -> None:
-    """Send a Mini-App launch button. Works in private + groups + channels via the
-    same web_app button as long as BotFather has the domain whitelisted."""
+    """Mirrors casino's strategy:
+    - Private chat: web_app button with raw Mini App URL (opens in-place).
+    - Group / channel: url button to t.me Direct-Link Mini App (registered via
+      BotFather /newapp). Telegram opens it inline as a Mini App, not browser.
+    - On any TelegramBadRequest, fall back to plain text with the URL.
+    """
     s = get_settings()
     raw = s.clicker_url
     tme = s.clicker_tme_url
@@ -47,29 +51,25 @@ async def _send_app_button(msg: Message, text: str) -> None:
         await msg.reply(text + "\n\n<i>Mini App не настроен (CLICKER_URL пустой).</i>")
         return
 
-    # Primary: web_app button — opens Mini App in-place in any chat type.
-    if raw:
-        try:
+    is_private = msg.chat.type == "private"
+    try:
+        if is_private and raw:
             kb = InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(text="🎯 Запустить CS:CLICKER", web_app=WebAppInfo(url=raw)),
             ]])
             await msg.reply(text, reply_markup=kb)
             return
-        except TelegramBadRequest as e:
-            # web_app rejected (e.g. domain not whitelisted in BotFather, or chat type
-            # restriction). Fall through to t.me deep-link below.
-            log.warning("clicker web_app button rejected: %s — falling back to t.me", e.message)
-
-    # Fallback: t.me/<bot>/<app> deep link as a plain url button.
-    target = tme or raw
-    try:
+        # Group / channel — Direct Link Mini App via t.me URL.
+        target = tme or raw
         kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="🎯 Запустить CS:CLICKER", url=target or ""),
+            InlineKeyboardButton(text="🎯 Запустить CS:CLICKER", url=target),
         ]])
         await msg.reply(text, reply_markup=kb)
+        return
     except TelegramBadRequest as e:
-        log.warning("clicker url button rejected: %s", e.message)
-        await msg.reply(text + f"\n\n{target}")
+        log.warning("clicker button rejected (%s), fall back to text URL", e.message)
+
+    await msg.reply(f"{text}\n\n{tme or raw}")
 
 
 @router.message(Command("clicker"))
