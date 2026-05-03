@@ -693,6 +693,11 @@ async def buy_upgrade(tg_id: int, kind: str, slot_id: str, count: int = 1) -> di
             if int(user["max_level"]) < unlock:
                 return {"ok": False, "error": "locked", "unlock_level": unlock}
 
+            # Some weapons require a boss kill threshold (e.g. HL3 Crowbar).
+            requires_boss = spec.get("requires_boss_kill")
+            if requires_boss is not None and int(user["bosses_killed"]) < int(requires_boss):
+                return {"ok": False, "error": "boss_kill_locked", "needed_boss_kills": int(requires_boss)}
+
             cur = await conn.fetchrow(
                 """select level from clicker_upgrades where tg_id = $1 and kind = $2 and slot_id = $3 for update""",
                 tg_id, kind, slot_id,
@@ -708,8 +713,27 @@ async def buy_upgrade(tg_id: int, kind: str, slot_id: str, count: int = 1) -> di
             for i in range(requested):
                 total_cost += _upgrade_cost(base_cost, cur_level + i)
 
+            # Resource costs (per-level × count).
+            res_cost_per_level = spec.get("resource_cost_per_level") or {}
+            total_res_cost: dict[str, Decimal] = {}
+            for res, amt in res_cost_per_level.items():
+                total_res_cost[res] = Decimal(str(amt)) * Decimal(requested)
+
             if Decimal(user["cash"]) < total_cost:
                 return {"ok": False, "error": "not_enough_cash", "needed": str(total_cost)}
+
+            if total_res_cost:
+                res_rows = await conn.fetch(
+                    "select resource_type, amount from clicker_resources where tg_id = $1 for update",
+                    tg_id,
+                )
+                have = {r["resource_type"]: Decimal(r["amount"]) for r in res_rows}
+                for res, amt in total_res_cost.items():
+                    if have.get(res, Decimal(0)) < amt:
+                        return {
+                            "ok": False, "error": "not_enough_resource",
+                            "resource": res, "needed": str(amt), "have": str(have.get(res, Decimal(0))),
+                        }
 
             new_level = cur_level + requested
 
@@ -730,15 +754,22 @@ async def buy_upgrade(tg_id: int, kind: str, slot_id: str, count: int = 1) -> di
                 "update clicker_users set cash = cash - $2 where tg_id = $1",
                 tg_id, total_cost,
             )
+            for res, amt in total_res_cost.items():
+                await conn.execute(
+                    "update clicker_resources set amount = amount - $3 where tg_id = $1 and resource_type = $2",
+                    tg_id, res, amt,
+                )
 
             await _recompute_stats(conn, tg_id)
             await _log(conn, tg_id, "upgrade_bought", {
                 "kind": kind, "slot": slot_id, "from": cur_level, "to": new_level,
                 "cost": str(total_cost),
+                "res_cost": {k: str(v) for k, v in total_res_cost.items()},
             })
             return await _wrap_state(conn, tg_id, {
                 "kind": kind, "slot_id": slot_id, "new_level": new_level,
                 "spent": str(total_cost),
+                "res_spent": {k: str(v) for k, v in total_res_cost.items()},
             })
 
 

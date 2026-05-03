@@ -292,13 +292,27 @@ function handleTapResult(data: TapResult) {
       toast("💀 Босс повержен!", "success");
     }
     if (data.chest_dropped && data.state) {
-      // Auto-open prompt — for now just toast; user opens via inventory.
       toast(`🎁 Сундук: ${data.chest_dropped}!`, "success", 3000);
     }
   } else if (data.timeout) {
     hapticNotify("error");
     toast("⏱ Время вышло — откат на уровень ниже", "error");
   }
+
+  // ANTI-BOUNCE: server's view of enemy_hp can lag behind local optimistic taps
+  // because we batch every 250ms. If user is mid-clicking, server sees fewer
+  // taps than local has done. Returning that "older" HP would visibly bounce
+  // the bar back UP. Solution: never let server-state HP exceed our current
+  // local HP (unless the enemy was killed/timeout/level changed).
+  if (data.state && store.state && !data.killed && !data.timeout) {
+    const localHp = Number(store.state.combat.enemy_hp);
+    const serverHp = Number(data.state.combat.enemy_hp);
+    const sameMax = data.state.combat.enemy_max_hp === store.state.combat.enemy_max_hp;
+    if (sameMax && serverHp > localHp) {
+      data.state.combat.enemy_hp = String(localHp);
+    }
+  }
+
   if (data.state) store.setState(data.state);
 }
 

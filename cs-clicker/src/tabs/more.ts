@@ -42,10 +42,19 @@ function render() {
   prestigeCard.appendChild(pBtn);
   content.appendChild(prestigeCard);
 
-  // Prestige Tree (only when there's glory or any node already bought)
-  const hasGlory = Number(u.glory) > 0 || u.prestige_count > 0;
-  if (hasGlory && store.config) {
-    content.appendChild(el("div", { className: "upg-section-title", textContent: "ДРЕВО ПРЕСТИЖА", style: { marginTop: "16px" } }));
+  // Prestige Tree (always visible so player sees the path forward).
+  if (store.config) {
+    content.appendChild(el("div", {
+      className: "upg-section-title",
+      textContent: `ДРЕВО ПРЕСТИЖА (${u.glory}★)`,
+      style: { marginTop: "16px" },
+    }));
+    if (Number(u.glory) === 0 && u.prestige_count === 0) {
+      content.appendChild(el("div", {
+        textContent: "Сделай первый престиж (с уровня 20+) чтобы получить ★ Славу и купить узлы.",
+        style: { fontSize: "12px", color: "#94A3B8", marginBottom: "10px", padding: "0 4px", lineHeight: "1.4" },
+      }));
+    }
     const ptList = el("div", { className: "pt-grid" });
     const owned = store.state.prestige_nodes || {};
     const sorted = [...store.config.prestige_tree].sort((a, b) => a.tier - b.tier);

@@ -1,14 +1,14 @@
 [
-  {"id": "01", "name": "Кулак Бабы",          "base_dmg": 1,        "base_cost": 10,            "unlock_level": 1,  "max_level": 50, "icon": "weapons/01.png"},
-  {"id": "02", "name": "Кастет Гопника",      "base_dmg": 5,        "base_cost": 150,           "unlock_level": 3,  "max_level": 50, "icon": "weapons/02.png"},
-  {"id": "03", "name": "Биток Школьника",     "base_dmg": 35,       "base_cost": 2000,          "unlock_level": 8,  "max_level": 50, "icon": "weapons/03.png"},
-  {"id": "04", "name": "USP-Призрак",         "base_dmg": 250,      "base_cost": 30000,         "unlock_level": 15, "max_level": 50, "icon": "weapons/04.png"},
-  {"id": "05", "name": "AK-47 Базар",         "base_dmg": 2500,     "base_cost": 500000,        "unlock_level": 22, "max_level": 50, "icon": "weapons/05.png"},
-  {"id": "06", "name": "M4A1-S Молчун",       "base_dmg": 25000,    "base_cost": 8000000,       "unlock_level": 32, "max_level": 50, "icon": "weapons/06.png"},
-  {"id": "07", "name": "AWP Стрелок",         "base_dmg": 250000,   "base_cost": 120000000,     "unlock_level": 42, "max_level": 50, "icon": "weapons/07.png"},
-  {"id": "08", "name": "Karambit Танцор",     "base_dmg": 2500000,  "base_cost": 2000000000,    "unlock_level": 52, "max_level": 50, "icon": "weapons/08.png"},
-  {"id": "09", "name": "Negev Грузчик",       "base_dmg": 25000000, "base_cost": 30000000000,   "unlock_level": 62, "max_level": 50, "icon": "weapons/09.png"},
-  {"id": "10", "name": "Decoy Прикол",        "base_dmg": 250000000,"base_cost": 500000000000,  "unlock_level": 72, "max_level": 50, "icon": "weapons/10.png"},
-  {"id": "11", "name": "C4 Финалист",         "base_dmg": 2500000000,"base_cost": 10000000000000,"unlock_level": 85,"max_level": 50, "icon": "weapons/11.png"},
-  {"id": "12", "name": "Half-Life 3 Crowbar", "base_dmg": 50000000000,"base_cost": 1000000000000000,"unlock_level": 999, "max_level": 50, "icon": "weapons/12.png", "requires_boss_kill": 30}
+  {"id": "01", "name": "Кулак Бабы",          "base_dmg": 1,        "base_cost": 10,            "unlock_level": 1,  "max_level": 50, "icon": "weapons/01.png", "resource_cost_per_level": {}},
+  {"id": "02", "name": "Кастет Гопника",      "base_dmg": 5,        "base_cost": 150,           "unlock_level": 3,  "max_level": 50, "icon": "weapons/02.png", "resource_cost_per_level": {}},
+  {"id": "03", "name": "Биток Школьника",     "base_dmg": 35,       "base_cost": 2000,          "unlock_level": 8,  "max_level": 50, "icon": "weapons/03.png", "resource_cost_per_level": {}},
+  {"id": "04", "name": "USP-Призрак",         "base_dmg": 250,      "base_cost": 30000,         "unlock_level": 15, "max_level": 50, "icon": "weapons/04.png", "resource_cost_per_level": {"energy": 5}},
+  {"id": "05", "name": "AK-47 Базар",         "base_dmg": 2500,     "base_cost": 500000,        "unlock_level": 22, "max_level": 50, "icon": "weapons/05.png", "resource_cost_per_level": {"brass": 10}},
+  {"id": "06", "name": "M4A1-S Молчун",       "base_dmg": 25000,    "base_cost": 8000000,       "unlock_level": 32, "max_level": 50, "icon": "weapons/06.png", "resource_cost_per_level": {"brass": 25, "energy": 30}},
+  {"id": "07", "name": "AWP Стрелок",         "base_dmg": 250000,   "base_cost": 120000000,     "unlock_level": 42, "max_level": 50, "icon": "weapons/07.png", "resource_cost_per_level": {"brass": 50, "contraband": 8}},
+  {"id": "08", "name": "Karambit Танцор",     "base_dmg": 2500000,  "base_cost": 2000000000,    "unlock_level": 52, "max_level": 50, "icon": "weapons/08.png", "resource_cost_per_level": {"contraband": 20, "case_dust": 5}},
+  {"id": "09", "name": "Negev Грузчик",       "base_dmg": 25000000, "base_cost": 30000000000,   "unlock_level": 62, "max_level": 50, "icon": "weapons/09.png", "resource_cost_per_level": {"brass": 200, "case_dust": 25}},
+  {"id": "10", "name": "Decoy Прикол",        "base_dmg": 250000000,"base_cost": 500000000000,  "unlock_level": 72, "max_level": 50, "icon": "weapons/10.png", "resource_cost_per_level": {"contraband": 100, "clean_skins": 5}},
+  {"id": "11", "name": "C4 Финалист",         "base_dmg": 2500000000,"base_cost": 10000000000000,"unlock_level": 85,"max_level": 50, "icon": "weapons/11.png", "resource_cost_per_level": {"clean_skins": 50, "gas": 1}},
+  {"id": "12", "name": "Half-Life 3 Crowbar", "base_dmg": 50000000000,"base_cost": 1000000000000000,"unlock_level": 999, "max_level": 50, "icon": "weapons/12.png", "requires_boss_kill": 30, "resource_cost_per_level": {"crypto": 100, "gas": 5}}
 ]

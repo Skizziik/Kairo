@@ -113,6 +113,7 @@ function renderWeapon(w: WeaponDef): HTMLElement {
     unlock_level: w.unlock_level,
     base_cost: w.base_cost,
     description: `Урон: ${fmt(w.base_dmg * (1 + lvl * 0.20))}`,
+    resource_cost_per_level: (w as any).resource_cost_per_level,
   });
 }
 
@@ -129,6 +130,7 @@ function renderMerc(m: MercDef): HTMLElement {
     unlock_level: m.unlock_level,
     base_cost: m.base_cost,
     description: `${m.role} · ${fmt(m.base_dps * (1 + lvl * 0.20))}/сек`,
+    resource_cost_per_level: (m as any).resource_cost_per_level,
   });
 }
 
@@ -148,6 +150,7 @@ function renderCritLuck(kind: "crit_chance" | "crit_damage" | "luck", u: CritLuc
     unlock_level: u.unlock_level,
     base_cost: u.base_cost,
     description: `${label}: +${totalPct}% (+${u.per_level_pct}%/ур)`,
+    resource_cost_per_level: undefined,
   });
 }
 
@@ -155,6 +158,7 @@ function renderUpgCard(opts: {
   kind: string; slot_id: string; name: string; icon: string;
   level: number; maxLevel: number; unlock_level: number; base_cost: number;
   description: string;
+  resource_cost_per_level?: Record<string, number>;
 }): HTMLElement {
   const card = el("div", { className: "upg-card" });
   const userLevel = store.state?.user.max_level || 0;
@@ -178,19 +182,39 @@ function renderUpgCard(opts: {
 
   const buyN = Math.max(1, Math.min(bulkSize, opts.maxLevel - opts.level));
   const cost = totalCost(opts.base_cost, opts.level, buyN);
-  const can = !locked && !maxed && cash >= cost;
+
+  // Resource cost (per-level × count).
+  const rc = opts.resource_cost_per_level || {};
+  const totalResCost: Record<string, number> = {};
+  for (const [res, amt] of Object.entries(rc)) totalResCost[res] = Number(amt) * buyN;
+  let resOk = true;
+  for (const [res, amt] of Object.entries(totalResCost)) {
+    const have = Number(store.state?.resources[res] || "0");
+    if (have < amt) { resOk = false; break; }
+  }
+
+  const can = !locked && !maxed && cash >= cost && resOk;
   const btn = el("button", { className: "buy" });
   btn.appendChild(document.createTextNode(maxed ? "MAX" : `×${buyN}`));
   if (!maxed && !locked) {
     const costSpan = el("span", { className: "cost", textContent: `$${fmt(cost)}` });
     btn.appendChild(costSpan);
+    if (Object.keys(totalResCost).length > 0) {
+      const resStr = Object.entries(totalResCost).map(([res, amt]) => {
+        const meta = store.config?.resources_meta[res];
+        return `${meta?.emoji || ""}${fmt(amt)}`;
+      }).join(" ");
+      const resSpan = el("span", { className: "cost", textContent: resStr, style: { color: resOk ? "#94A3B8" : "#FCA5A5" } });
+      btn.appendChild(resSpan);
+    }
   }
   if (!can || maxed) btn.disabled = true;
   btn.onclick = async (e) => {
     e.stopPropagation();
     if (!can) {
       hapticNotify("error");
-      toast("Не хватает $ или заблокировано", "error");
+      if (!resOk) toast("Не хватает ресурсов", "error");
+      else toast("Не хватает $ или заблокировано", "error");
       return;
     }
     haptic("medium");
@@ -199,7 +223,7 @@ function renderUpgCard(opts: {
       const r = await api.upgrade(opts.kind, opts.slot_id, buyN);
       if (!r.ok || !r.data) {
         hapticNotify("error");
-        toast(translateError(r.error), "error");
+        toast(translateError(r.error, r.resource), "error");
         return;
       }
       hapticNotify("success");
@@ -213,11 +237,18 @@ function renderUpgCard(opts: {
   return card;
 }
 
-function translateError(err?: string): string {
+function translateError(err?: string, resource?: string): string {
   switch (err) {
     case "not_enough_cash": return "Недостаточно $";
     case "max_level": return "Уже максимальный уровень";
     case "locked": return "Ещё заблокировано";
+    case "boss_kill_locked": return "Нужно убить финального босса";
+    case "not_enough_resource":
+      if (resource && store.config) {
+        const meta = store.config.resources_meta[resource];
+        return `Не хватает: ${meta?.name || resource}`;
+      }
+      return "Не хватает ресурсов";
     default: return err || "Ошибка";
   }
 }
