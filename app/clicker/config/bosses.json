@@ -1,19 +1,19 @@
 [
-  {"id": "01", "level": 5,   "name": "Баба Зина — Шаверма Хаоса",    "chest": "common",     "flavor": "Я тебе не пиццария, тут мясо настоящее", "icon": "bosses/01.png"},
+  {"id": "01", "level": 5,   "name": "Баба Зина — Шаверма Хаоса",    "chest": "common",     "flavor": "Я тебе не пиццария, тут мясо настоящее", "icon": "bosses/01.png", "mechanic": {"type": "heal", "interval_sec": 8, "amount_pct": 5, "shout": "🍞 Зина бросает шаверму!"}},
   {"id": "02", "level": 10,  "name": "Дядя Боря — Сварщик-Берсерк",  "chest": "common",     "flavor": "Сварю тебя как 21 модель", "icon": "bosses/02.png"},
-  {"id": "03", "level": 15,  "name": "CEO Виктор — Дедлайн",         "chest": "uncommon",   "flavor": "Sync up на десять минут?", "icon": "bosses/03.png"},
+  {"id": "03", "level": 15,  "name": "CEO Виктор — Дедлайн",         "chest": "uncommon",   "flavor": "Sync up на десять минут?", "icon": "bosses/03.png", "mechanic": {"type": "timer_drain", "interval_sec": 10, "drain_sec": 5, "shout": "⏰ Виктор торопит дедлайн!"}},
   {"id": "04", "level": 20,  "name": "Султан Скам — Король NFT",     "chest": "uncommon",   "flavor": "Trust me bro, это будущее", "icon": "bosses/04.png"},
-  {"id": "05", "level": 25,  "name": "Реактор-Чан",                  "chest": "rare",       "flavor": "Senpai, давай я тебя расщеплю?", "icon": "bosses/05.png"},
-  {"id": "06", "level": 30,  "name": "Машинист Геннадий",            "chest": "rare",       "flavor": "Мы отправляемся… без тебя", "icon": "bosses/06.png"},
+  {"id": "05", "level": 25,  "name": "Реактор-Чан",                  "chest": "rare",       "flavor": "Senpai, давай я тебя расщеплю?", "icon": "bosses/05.png", "mechanic": {"type": "click_debuff", "interval_sec": 12, "debuff_pct": 25, "duration_sec": 6, "shout": "☢️ Радиация! Click −25%"}},
+  {"id": "06", "level": 30,  "name": "Машинист Геннадий",            "chest": "rare",       "flavor": "Мы отправляемся… без тебя", "icon": "bosses/06.png", "mechanic": {"type": "silence_auto", "interval_sec": 12, "duration_sec": 3, "shout": "🚂 Гудок! Auto-DPS 3 сек"}},
   {"id": "07", "level": 35,  "name": "Майор Бубль",                  "chest": "rare",       "flavor": "А чего это у вас тут такое?", "icon": "bosses/07.png"},
   {"id": "08", "level": 40,  "name": "Чёрный Сталкер",               "chest": "epic",       "flavor": "Сталкер, прими мою аномалию", "icon": "bosses/08.png"},
   {"id": "09", "level": 45,  "name": "Граффити-Кинг 2Pack",          "chest": "epic",       "flavor": "Bombing this whole spot, brah", "icon": "bosses/09.png"},
-  {"id": "10", "level": 50,  "name": "Дубайский Скам-Шейх",          "chest": "epic",       "flavor": "Brother, trust me bro", "icon": "bosses/10.png"},
+  {"id": "10", "level": 50,  "name": "Дубайский Скам-Шейх",          "chest": "epic",       "flavor": "Brother, trust me bro", "icon": "bosses/10.png", "mechanic": {"type": "heal", "interval_sec": 14, "amount_pct": 10, "shout": "💰 Шейх делает скам-сделку!"}},
   {"id": "11", "level": 55,  "name": "Анонимус — Маска Гая Фокса",   "chest": "epic",       "flavor": "We are legion. You are click", "icon": "bosses/11.png"},
-  {"id": "12", "level": 60,  "name": "AWP-er-чан — Бывший Pro",      "chest": "legendary",  "flavor": "One tap, one click, your choice", "icon": "bosses/12.png"},
+  {"id": "12", "level": 60,  "name": "AWP-er-чан — Бывший Pro",      "chest": "legendary",  "flavor": "One tap, one click, your choice", "icon": "bosses/12.png", "mechanic": {"type": "click_debuff", "interval_sec": 8, "debuff_pct": 50, "duration_sec": 4, "shout": "🎯 No-scope! Click −50%"}},
   {"id": "13", "level": 65,  "name": "Олигарх Иван Иваныч",          "chest": "legendary",  "flavor": "Сколько надо? Я же говорил, не дёшево", "icon": "bosses/13.png"},
   {"id": "14", "level": 70,  "name": "Картонный Гейб",               "chest": "legendary",  "flavor": "Кстати, скоро Half-Life 3", "icon": "bosses/14.png"},
-  {"id": "15", "level": 75,  "name": "Глобал Элит Бати — ФИНАЛ",     "chest": "legendary",  "flavor": "От шавермы до меня. Покажи свои клики", "icon": "bosses/15.png", "guaranteed_artifact": true},
+  {"id": "15", "level": 75,  "name": "Глобал Элит Бати — ФИНАЛ",     "chest": "legendary",  "flavor": "От шавермы до меня. Покажи свои клики", "icon": "bosses/15.png", "guaranteed_artifact": true, "mechanic": {"type": "phase_heal", "phases": [{"hp_pct": 60, "heal_pct": 15, "shout": "💀 ФАЗА 2: призыв миньонов!"}, {"hp_pct": 25, "heal_pct": 10, "shout": "💀 ФАЗА 3: финальный рывок!"}]}},
   {"id": "16", "level": 80,  "name": "Cheater-Бог",                  "chest": "mythic",     "flavor": "gg ez", "icon": "bosses/16.png"},
   {"id": "17", "level": 85,  "name": "Ред-Тип Школьник",             "chest": "mythic",     "flavor": "Эй, ты чё, я тебя видел в подъезде?", "icon": "bosses/17.png"},
   {"id": "18", "level": 90,  "name": "Мама с Ремнём",                "chest": "mythic",     "flavor": "А ну быстро домой!", "icon": "bosses/18.png"},
@@ -28,5 +28,5 @@
   {"id": "27", "level": 135, "name": "Toxic Тимейт",                 "chest": "mythic",     "flavor": "Я один тут играю или что?", "icon": "bosses/27.png"},
   {"id": "28", "level": 140, "name": "Beta-Тестер Half-Life 3",      "chest": "mythic",     "flavor": "Билд 0.0.1, ждём 19 лет", "icon": "bosses/28.png"},
   {"id": "29", "level": 145, "name": "Античит-Демон",                "chest": "mythic",     "flavor": "VAC-ban пенсия — ваше будущее", "icon": "bosses/29.png"},
-  {"id": "30", "level": 150, "name": "Сам Габен — Истинная Форма",   "chest": "mythic",     "flavor": "Three.", "icon": "bosses/30.png", "guaranteed_artifact": true, "guaranteed_mythic": true}
+  {"id": "30", "level": 150, "name": "Сам Габен — Истинная Форма",   "chest": "mythic",     "flavor": "Three.", "icon": "bosses/30.png", "guaranteed_artifact": true, "guaranteed_mythic": true, "mechanic": {"type": "phase_heal", "phases": [{"hp_pct": 75, "heal_pct": 10, "shout": "🌟 ГЕЙБ: Sale!"}, {"hp_pct": 50, "heal_pct": 15, "shout": "🌟 ГЕЙБ: Update!"}, {"hp_pct": 25, "heal_pct": 20, "shout": "🌟 ГЕЙБ: Half-Life 3 reveal!"}]}}
 ]

@@ -237,6 +237,16 @@ export interface ApiResponse<T = any> {
   have?: string;
 }
 
+export interface BossMechanicEvent {
+  type: "heal" | "timer_drain" | "click_debuff" | "silence_auto" | "phase_heal";
+  shout: string;
+  amount?: string;
+  drained_sec?: number;
+  pct?: number;
+  duration_sec?: number;
+  phase?: number;
+}
+
 export interface TapResult {
   state: StateSnap;
   tap_damage: string;
@@ -250,6 +260,8 @@ export interface TapResult {
   was_boss?: boolean;
   chest_dropped?: string;
   artifact_dropped?: ArtifactDef | MythicDef | null;
+  boss_mechanics?: BossMechanicEvent[];
+  gas_dropped?: number;
 }
 
 export interface OpenChestResult {

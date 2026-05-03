@@ -238,23 +238,145 @@ async def ensure_user(tg_id: int, **profile) -> dict:
 
 
 async def _spawn_enemy_for_level(conn, tg_id: int, level: int, now: datetime) -> dict:
-    """Set the combat HP bar for the given level."""
+    """Set the combat HP bar for the given level. Resets mechanic_state."""
     hp = _hp_for_level(level)
     is_boss = _is_boss_level(level)
     timer_s = _level_timer_seconds(level)
     timer_ends_at = now + timedelta(seconds=timer_s)
+    # Initial mechanic_state: timestamp anchored to spawn so first trigger is N sec later.
+    initial_mech = {"spawned_at": now.isoformat(), "phases_triggered": [], "active_debuffs": []}
     await conn.execute(
-        """insert into clicker_combat_state (tg_id, enemy_hp, enemy_max_hp, is_boss, timer_ends_at, updated_at)
-           values ($1, $2, $2, $3, $4, $5)
+        """insert into clicker_combat_state (tg_id, enemy_hp, enemy_max_hp, is_boss, timer_ends_at, mechanic_state, updated_at)
+           values ($1, $2, $2, $3, $4, $5::jsonb, $6)
            on conflict (tg_id) do update set
              enemy_hp = excluded.enemy_hp,
              enemy_max_hp = excluded.enemy_max_hp,
              is_boss = excluded.is_boss,
              timer_ends_at = excluded.timer_ends_at,
+             mechanic_state = excluded.mechanic_state,
              updated_at = excluded.updated_at""",
-        tg_id, hp, is_boss, timer_ends_at, now,
+        tg_id, hp, is_boss, timer_ends_at, json.dumps(initial_mech), now,
     )
     return {"hp": hp, "max_hp": hp, "is_boss": is_boss, "timer_ends_at": timer_ends_at}
+
+
+async def _process_boss_mechanics(conn, tg_id: int, level: int, combat_row,
+                                   now: datetime, base_click_dmg: Decimal) -> dict:
+    """Run periodic boss mechanics. Returns dict of events + mutations:
+       {events: [...], hp_delta: Decimal, click_mult: float, auto_mult: float}.
+    Mutates combat row (enemy_hp, timer_ends_at, mechanic_state) directly."""
+    boss_def = cfg.boss_for_level(level)
+    if not boss_def or not boss_def.get("mechanic"):
+        return {"events": [], "click_mult": 1.0, "auto_mult": 1.0}
+
+    mech = boss_def["mechanic"]
+    state = _parse_jsonb(combat_row["mechanic_state"]) or {}
+    state.setdefault("phases_triggered", [])
+    state.setdefault("active_debuffs", [])
+    events: list[dict] = []
+
+    mech_type = mech.get("type")
+
+    # Handle expiring debuffs first.
+    new_debuffs = []
+    for d in state["active_debuffs"]:
+        ends_iso = d.get("ends_at")
+        if ends_iso:
+            ends = datetime.fromisoformat(ends_iso)
+            if ends.tzinfo is None:
+                ends = ends.replace(tzinfo=timezone.utc)
+            if ends > now:
+                new_debuffs.append(d)
+    state["active_debuffs"] = new_debuffs
+
+    click_mult = 1.0
+    auto_mult = 1.0
+    for d in state["active_debuffs"]:
+        if d.get("kind") == "click_debuff":
+            click_mult *= 1.0 - float(d.get("pct", 0)) / 100.0
+        elif d.get("kind") == "silence_auto":
+            auto_mult *= 0.0
+
+    # Periodic mechanics
+    if mech_type in ("heal", "timer_drain", "click_debuff", "silence_auto"):
+        last_iso = state.get("last_trigger_at") or state.get("spawned_at")
+        last = datetime.fromisoformat(last_iso) if last_iso else now
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        interval = float(mech.get("interval_sec", 10))
+        if (now - last).total_seconds() >= interval:
+            state["last_trigger_at"] = now.isoformat()
+            shout = mech.get("shout", "")
+            if mech_type == "heal":
+                heal = (Decimal(combat_row["enemy_max_hp"]) * Decimal(str(mech.get("amount_pct", 5))) / Decimal(100)).quantize(Decimal("1"))
+                new_hp = min(Decimal(combat_row["enemy_hp"]) + heal, Decimal(combat_row["enemy_max_hp"]))
+                await conn.execute(
+                    "update clicker_combat_state set enemy_hp = $2 where tg_id = $1",
+                    tg_id, new_hp,
+                )
+                combat_row = dict(combat_row)
+                combat_row["enemy_hp"] = new_hp
+                events.append({"type": "heal", "shout": shout, "amount": str(heal)})
+            elif mech_type == "timer_drain":
+                drain = int(mech.get("drain_sec", 5))
+                old_ends = combat_row["timer_ends_at"]
+                if old_ends and old_ends.tzinfo is None:
+                    old_ends = old_ends.replace(tzinfo=timezone.utc)
+                new_ends = old_ends - timedelta(seconds=drain) if old_ends else now
+                await conn.execute(
+                    "update clicker_combat_state set timer_ends_at = $2 where tg_id = $1",
+                    tg_id, new_ends,
+                )
+                combat_row = dict(combat_row)
+                combat_row["timer_ends_at"] = new_ends
+                events.append({"type": "timer_drain", "shout": shout, "drained_sec": drain})
+            elif mech_type == "click_debuff":
+                pct = float(mech.get("debuff_pct", 25))
+                duration = int(mech.get("duration_sec", 5))
+                state["active_debuffs"].append({
+                    "kind": "click_debuff",
+                    "pct": pct,
+                    "ends_at": (now + timedelta(seconds=duration)).isoformat(),
+                })
+                click_mult *= (1.0 - pct / 100.0)
+                events.append({"type": "click_debuff", "shout": shout, "pct": pct, "duration_sec": duration})
+            elif mech_type == "silence_auto":
+                duration = int(mech.get("duration_sec", 3))
+                state["active_debuffs"].append({
+                    "kind": "silence_auto",
+                    "ends_at": (now + timedelta(seconds=duration)).isoformat(),
+                })
+                auto_mult *= 0.0
+                events.append({"type": "silence_auto", "shout": shout, "duration_sec": duration})
+
+    # Phase-based heal (final bosses)
+    if mech_type == "phase_heal":
+        phases = mech.get("phases") or []
+        cur_hp_pct = float(Decimal(combat_row["enemy_hp"]) / Decimal(combat_row["enemy_max_hp"]) * 100) if Decimal(combat_row["enemy_max_hp"]) > 0 else 100
+        triggered: list = list(state.get("phases_triggered") or [])
+        for idx, p in enumerate(phases):
+            if idx in triggered:
+                continue
+            if cur_hp_pct <= float(p.get("hp_pct", 50)):
+                heal = (Decimal(combat_row["enemy_max_hp"]) * Decimal(str(p.get("heal_pct", 10))) / Decimal(100)).quantize(Decimal("1"))
+                new_hp = min(Decimal(combat_row["enemy_hp"]) + heal, Decimal(combat_row["enemy_max_hp"]))
+                await conn.execute(
+                    "update clicker_combat_state set enemy_hp = $2 where tg_id = $1",
+                    tg_id, new_hp,
+                )
+                combat_row = dict(combat_row)
+                combat_row["enemy_hp"] = new_hp
+                triggered.append(idx)
+                events.append({"type": "phase_heal", "shout": p.get("shout", ""), "amount": str(heal), "phase": idx + 1})
+                break  # one phase per tap
+        state["phases_triggered"] = triggered
+
+    await conn.execute(
+        "update clicker_combat_state set mechanic_state = $2::jsonb where tg_id = $1",
+        tg_id, json.dumps(state),
+    )
+
+    return {"events": events, "click_mult": click_mult, "auto_mult": auto_mult, "combat_row": combat_row}
 
 
 # ---------- damage / stat aggregation --------------------------------------
@@ -449,18 +571,35 @@ async def tap(tg_id: int, taps: int, dt_ms: int) -> dict:
                     last_combat = last_combat.replace(tzinfo=timezone.utc)
                 elapsed_s = max(0.0, min(5.0, (now - last_combat).total_seconds()))
 
+            # Process boss mechanics (only for boss enemies).
+            mechanic_events: list[dict] = []
+            click_mult = Decimal(1)
+            auto_mult = Decimal(1)
+            if combat["is_boss"]:
+                mech_result = await _process_boss_mechanics(
+                    conn, tg_id, level, combat, now, click_dmg,
+                )
+                mechanic_events = mech_result.get("events") or []
+                click_mult = Decimal(str(mech_result.get("click_mult", 1.0)))
+                auto_mult = Decimal(str(mech_result.get("auto_mult", 1.0)))
+                # Refresh combat reference if mutated.
+                new_combat = mech_result.get("combat_row")
+                if new_combat:
+                    combat = new_combat
+
             # Apply tap damage with crits.
             tap_damage = Decimal(0)
             crits = 0
+            effective_click = click_dmg * click_mult
             for _ in range(taps):
                 if random.random() * 100 < crit_chance:
-                    tap_damage += click_dmg * crit_mult
+                    tap_damage += effective_click * crit_mult
                     crits += 1
                 else:
-                    tap_damage += click_dmg
+                    tap_damage += effective_click
 
             # Apply auto-DPS for elapsed window.
-            auto_damage = (auto_dps * Decimal(str(elapsed_s))).quantize(Decimal("1"))
+            auto_damage = (auto_dps * auto_mult * Decimal(str(elapsed_s))).quantize(Decimal("1"))
 
             total_damage = tap_damage + auto_damage
             new_hp = Decimal(combat["enemy_hp"]) - total_damage
@@ -476,6 +615,7 @@ async def tap(tg_id: int, taps: int, dt_ms: int) -> dict:
                 "auto_damage": str(auto_damage),
                 "crits": crits,
                 "killed": False,
+                "boss_mechanics": mechanic_events,
             }
 
             if not killed:

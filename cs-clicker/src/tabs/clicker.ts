@@ -314,6 +314,22 @@ async function flushTaps() {
 }
 
 function handleTapResult(data: TapResult) {
+  // Boss mechanic events — display before kill so player sees what happened.
+  if (data.boss_mechanics && data.boss_mechanics.length > 0) {
+    for (const ev of data.boss_mechanics) {
+      hapticNotify("warning");
+      const kind = ev.type === "phase_heal" || ev.type === "heal" ? "error"
+        : ev.type === "click_debuff" || ev.type === "silence_auto" ? "error"
+        : "info";
+      toast(ev.shout, kind, 2200);
+      flashEnemy(ev.type);
+    }
+  }
+  if (data.gas_dropped) {
+    hapticNotify("success");
+    toast(`☣️ Газ! +${data.gas_dropped}`, "success", 3000);
+  }
+
   if (data.killed) {
     haptic("medium");
     spawnKillFlash();
@@ -372,4 +388,14 @@ function spawnKillFlash() {
   const flash = el("div", { className: "kill-flash" });
   stageEl.appendChild(flash);
   setTimeout(() => flash.remove(), 420);
+}
+
+function flashEnemy(kind: string) {
+  // Brief screen-edge flash when boss mechanic fires.
+  const flash = el("div", { className: `mech-flash mech-${kind}` });
+  stageEl.appendChild(flash);
+  setTimeout(() => flash.remove(), 600);
+  enemyBubbleEl.classList.remove("shake");
+  void enemyBubbleEl.offsetWidth;
+  enemyBubbleEl.classList.add("shake");
 }

@@ -73,6 +73,7 @@ create table if not exists clicker_combat_state (
     enemy_max_hp     numeric not null default 0,
     is_boss          boolean not null default false,
     timer_ends_at    timestamptz,
+    mechanic_state   jsonb not null default '{}'::jsonb,
     updated_at       timestamptz not null default now()
 );
 
@@ -228,5 +229,8 @@ async def ensure_schema() -> None:
         )
         await conn.execute(
             "alter table clicker_users add column if not exists boss_no_chest_streak integer not null default 0"
+        )
+        await conn.execute(
+            "alter table clicker_combat_state add column if not exists mechanic_state jsonb not null default '{}'::jsonb"
         )
     log.info("clicker schema ensured")
