@@ -79,6 +79,23 @@ class LotIdReq(BaseModel):
     lot_id: int = Field(..., ge=1)
 
 
+class MakeOfferReq(BaseModel):
+    lot_id: int = Field(..., ge=1)
+    offer_kind: str = Field(..., min_length=1, max_length=16)
+    offer_id: str | None = Field(default=None, max_length=64)
+    offer_amount: float = Field(..., ge=0.0001)
+    note: str | None = Field(default=None, max_length=200)
+
+
+class OfferRespondReq(BaseModel):
+    offer_id: int = Field(..., ge=1)
+    accept: bool
+
+
+class OfferIdReq(BaseModel):
+    offer_id: int = Field(..., ge=1)
+
+
 class RaidReq(BaseModel):
     victim_tg_id: int = Field(..., ge=1)
     business_id: str = Field(..., min_length=1, max_length=32)
@@ -212,6 +229,38 @@ async def api_market_accept(req: LotIdReq, user: dict = Depends(require_user)) -
 @router.post("/market/cancel")
 async def api_market_cancel(req: LotIdReq, user: dict = Depends(require_user)) -> dict:
     return await mk.cancel_lot(int(user["id"]), req.lot_id)
+
+
+@router.get("/market/index")
+async def api_market_index(hours: int = Query(default=48, ge=1, le=168),
+                           user: dict = Depends(require_user)) -> dict:
+    return {"ok": True, "data": await mk.price_index(hours=hours)}
+
+
+@router.post("/market/offer/make")
+async def api_market_offer_make(req: MakeOfferReq, user: dict = Depends(require_user)) -> dict:
+    return await mk.make_offer(int(user["id"]), req.lot_id, req.offer_kind,
+                               req.offer_id, req.offer_amount, req.note)
+
+
+@router.post("/market/offer/respond")
+async def api_market_offer_respond(req: OfferRespondReq, user: dict = Depends(require_user)) -> dict:
+    return await mk.respond_offer(int(user["id"]), req.offer_id, req.accept)
+
+
+@router.post("/market/offer/cancel")
+async def api_market_offer_cancel(req: OfferIdReq, user: dict = Depends(require_user)) -> dict:
+    return await mk.cancel_offer(int(user["id"]), req.offer_id)
+
+
+@router.get("/market/offers/received")
+async def api_market_offers_received(user: dict = Depends(require_user)) -> dict:
+    return {"ok": True, "data": await mk.list_offers_received(int(user["id"]))}
+
+
+@router.get("/market/offers/made")
+async def api_market_offers_made(user: dict = Depends(require_user)) -> dict:
+    return {"ok": True, "data": await mk.list_offers_made(int(user["id"]))}
 
 
 # ---- PvP ----

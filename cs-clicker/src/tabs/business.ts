@@ -117,6 +117,23 @@ function renderCard(bdef: BusinessDef): HTMLElement {
   } else {
     headInfo.appendChild(el("div", { className: "biz-stat", innerHTML: `Ур. <b>${state?.level ?? 0}</b> · ${meta?.emoji || ""} ${meta?.name || bdef.resource}` }));
     headInfo.appendChild(el("div", { className: "biz-rate", textContent: `+${fmt(state?.rate_per_sec || "0")}/сек` }));
+    // Idle consumption (Gun Range eats Energy etc).
+    const cons = state?.idle_consumption_per_sec || {};
+    const consParts: string[] = [];
+    let starving = false;
+    for (const [resType, amount] of Object.entries(cons)) {
+      const m = store.config.resources_meta[resType];
+      const haveR = Number(store.state.resources[resType] || "0");
+      const need = Number(amount);
+      if (need > 0 && haveR < need * 5) starving = true; // <5 sec sustainable
+      consParts.push(`${m?.emoji || ""}-${fmt(amount)}/сек`);
+    }
+    if (consParts.length > 0) {
+      headInfo.appendChild(el("div", {
+        className: starving ? "biz-cons biz-cons-low" : "biz-cons",
+        textContent: `Жрёт: ${consParts.join(" · ")}${starving ? " ⚠" : ""}`,
+      }));
+    }
   }
   head.appendChild(headInfo);
   card.appendChild(head);

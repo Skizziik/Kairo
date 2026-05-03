@@ -220,6 +220,23 @@ create index if not exists idx_clicker_event_log_user_time
 """
 
 
+OFFERS_SQL = """
+create table if not exists clicker_offers (
+    id              bigserial primary key,
+    lot_id          bigint not null references clicker_lots(id) on delete cascade,
+    offerer_tg_id   bigint not null references clicker_users(tg_id) on delete cascade,
+    offer_payload   jsonb not null default '{}'::jsonb,
+    status          text not null default 'pending',
+    expires_at      timestamptz not null,
+    created_at      timestamptz not null default now(),
+    responded_at    timestamptz,
+    note            text
+);
+create index if not exists idx_clicker_offers_lot on clicker_offers(lot_id) where status = 'pending';
+create index if not exists idx_clicker_offers_offerer on clicker_offers(offerer_tg_id, created_at desc);
+"""
+
+
 async def ensure_schema() -> None:
     async with pool().acquire() as conn:
         await conn.execute(SCHEMA_SQL)
@@ -231,6 +248,16 @@ async def ensure_schema() -> None:
             "alter table clicker_users add column if not exists boss_no_chest_streak integer not null default 0"
         )
         await conn.execute(
+            "alter table clicker_users add column if not exists tap_counter integer not null default 0"
+        )
+        await conn.execute(
+            "alter table clicker_users add column if not exists last_cleanse_at timestamptz"
+        )
+        await conn.execute(
             "alter table clicker_combat_state add column if not exists mechanic_state jsonb not null default '{}'::jsonb"
         )
+        await conn.execute(
+            "alter table clicker_lots add column if not exists multi_assets jsonb"
+        )
+        await conn.execute(OFFERS_SQL)
     log.info("clicker schema ensured")

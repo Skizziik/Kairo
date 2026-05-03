@@ -108,23 +108,53 @@ def _business_branch_pcts(business_id: str, branch_levels: dict[str, int]) -> di
 
 
 def _business_idle_per_sec(business_def: dict, level: int, branch_pcts: dict[str, float] | None = None) -> Decimal:
-    """Idle production rate scales by 1.08^level + branch idle/all bonus."""
+    """Idle production rate scales by BUSINESS_IDLE_GROWTH^level + branch idle/all bonus."""
     base = Decimal(str(business_def["base_idle_per_sec"]))
     rate = base * (Decimal(str(cfg.BUSINESS_IDLE_GROWTH)) ** level)
     if branch_pcts:
         bonus = Decimal(str(branch_pcts.get("idle_pct", 0))) + Decimal(str(branch_pcts.get("all_yield_pct", 0)))
         rate = rate * (Decimal(1) + bonus / Decimal(100))
+        # Crit-yield branch: chance/2 average bonus modeled as straight ×1.5 mult per "pct".
+        # crit_yield_pct = N → average idle bumped by N/100 (rare-drop crit on idle ticks).
+        crit_avg = Decimal(str(branch_pcts.get("crit_yield_pct", 0))) / Decimal(100)
+        rate = rate * (Decimal(1) + crit_avg)
+        # rare_drop_pct: averages a ×5 yield burst — model as +rare/20 mean uplift.
+        rare = Decimal(str(branch_pcts.get("rare_drop_pct", 0))) / Decimal(20)
+        rate = rate * (Decimal(1) + rare)
     return rate
 
 
 def _business_tap_yield(business_def: dict, level: int, branch_pcts: dict[str, float] | None = None) -> Decimal:
-    """Tap yield also scales mildly with level + branch tap/all bonus."""
+    """Tap yield also scales mildly with level + branch tap/all bonus.
+    Includes tap_crit_x_pct (Premium-холодильник Pepsi-style) — chance for ×2 modeled as average uplift."""
     base = Decimal(str(business_def["base_tap_yield"]))
     yld = base * (Decimal(str(cfg.BUSINESS_IDLE_GROWTH)) ** level)
     if branch_pcts:
         bonus = Decimal(str(branch_pcts.get("tap_pct", 0))) + Decimal(str(branch_pcts.get("all_yield_pct", 0)))
         yld = yld * (Decimal(1) + bonus / Decimal(100))
+        # tap_crit_x_pct = N% chance for ×2 → average +N% per tap.
+        tap_crit = Decimal(str(branch_pcts.get("tap_crit_x_pct", 0))) / Decimal(100)
+        yld = yld * (Decimal(1) + tap_crit)
     return yld
+
+
+def _business_consumption_per_sec(business_def: dict, level: int, branch_pcts: dict[str, float] | None = None) -> dict[str, Decimal]:
+    """Idle consumption (resources eaten while producing). Scales BUSINESS_CONS_GROWTH^level.
+    consumption_red_pct branch reduces it (capped at 90% reduction)."""
+    base = business_def.get("idle_consumption_per_sec") or {}
+    if not base:
+        return {}
+    growth = Decimal(str(cfg.BUSINESS_CONS_GROWTH)) ** level
+    red = Decimal(0)
+    if branch_pcts:
+        red = Decimal(str(branch_pcts.get("consumption_red_pct", 0)))
+    if red > Decimal(90):
+        red = Decimal(90)
+    mult = (Decimal(100) - red) / Decimal(100)
+    out: dict[str, Decimal] = {}
+    for res, rate in base.items():
+        out[res] = (Decimal(str(rate)) * growth * mult)
+    return out
 
 
 def _business_upgrade_cost(business_def: dict, current_level: int) -> Decimal:
@@ -238,11 +268,20 @@ async def ensure_user(tg_id: int, **profile) -> dict:
 
 
 async def _spawn_enemy_for_level(conn, tg_id: int, level: int, now: datetime) -> dict:
-    """Set the combat HP bar for the given level. Resets mechanic_state."""
+    """Set the combat HP bar for the given level. Resets mechanic_state.
+    Adds bonus seconds from artifacts (timer_extend_sec) + prestige (boss_timer_bonus)."""
     hp = _hp_for_level(level)
     is_boss = _is_boss_level(level)
     timer_s = _level_timer_seconds(level)
-    timer_ends_at = now + timedelta(seconds=timer_s)
+    # Artifact: Песочные Часы Major → +N sec.
+    equipped = await _equipped_artifacts(conn, tg_id)
+    art_flags = _artifact_flags(equipped)
+    bonus = int(art_flags.get("timer_extend_sec", 0))
+    # Prestige tree: boss_timer_bonus on bosses only.
+    if is_boss:
+        pt = _prestige_effects(await _prestige_levels(conn, tg_id))
+        bonus += int(pt["pct"].get("boss_timer_bonus", 0))
+    timer_ends_at = now + timedelta(seconds=timer_s + bonus)
     # Initial mechanic_state: timestamp anchored to spawn so first trigger is N sec later.
     initial_mech = {"spawned_at": now.isoformat(), "phases_triggered": [], "active_debuffs": []}
     await conn.execute(
@@ -296,9 +335,13 @@ async def _process_boss_mechanics(conn, tg_id: int, level: int, combat_row,
             click_mult *= 1.0 - float(d.get("pct", 0)) / 100.0
         elif d.get("kind") == "silence_auto":
             auto_mult *= 0.0
+        elif d.get("kind") == "shield":
+            red = 1.0 - float(d.get("pct", 0)) / 100.0
+            click_mult *= red
+            auto_mult *= red
 
     # Periodic mechanics
-    if mech_type in ("heal", "timer_drain", "click_debuff", "silence_auto"):
+    if mech_type in ("heal", "timer_drain", "click_debuff", "silence_auto", "shield"):
         last_iso = state.get("last_trigger_at") or state.get("spawned_at")
         last = datetime.fromisoformat(last_iso) if last_iso else now
         if last.tzinfo is None:
@@ -348,6 +391,18 @@ async def _process_boss_mechanics(conn, tg_id: int, level: int, combat_row,
                 })
                 auto_mult *= 0.0
                 events.append({"type": "silence_auto", "shout": shout, "duration_sec": duration})
+            elif mech_type == "shield":
+                duration = int(mech.get("duration_sec", 4))
+                pct = float(mech.get("reduce_pct", 70))
+                state["active_debuffs"].append({
+                    "kind": "shield",
+                    "pct": pct,
+                    "ends_at": (now + timedelta(seconds=duration)).isoformat(),
+                })
+                red = 1.0 - pct / 100.0
+                click_mult *= red
+                auto_mult *= red
+                events.append({"type": "shield", "shout": shout, "pct": pct, "duration_sec": duration})
 
     # Phase-based heal (final bosses)
     if mech_type == "phase_heal":
@@ -418,6 +473,21 @@ async def _equipped_artifacts(conn, tg_id: int) -> list[dict]:
     return out
 
 
+def _artifact_flags(equipped: list[dict]) -> dict[str, bool | int]:
+    """Collect non-pct artifact effects (flags + raw values)."""
+    flags: dict[str, bool | int] = {}
+    for inst in equipped:
+        eff = inst.get("effect") or {}
+        for k, v in eff.items():
+            if isinstance(v, bool):
+                if v:
+                    flags[k] = True
+            elif k in ("timer_extend_sec", "max_lots_bonus", "online_friend_max",
+                       "prestige_casecoins_bonus") and isinstance(v, (int, float)):
+                flags[k] = int(flags.get(k, 0)) + int(v)
+    return flags
+
+
 async def _recompute_stats(conn, tg_id: int) -> dict:
     """Recompute combat stats from upgrades + artifacts + prestige bonuses."""
     upg_rows = await conn.fetch(
@@ -465,6 +535,12 @@ async def _recompute_stats(conn, tg_id: int) -> dict:
     # Apply artifact/mythic percentage bonuses.
     equipped = await _equipped_artifacts(conn, tg_id)
     eff = _artifact_effects(equipped)
+    art_flags = _artifact_flags(equipped)
+
+    # Stream-Camera 4090 — online_friend_pct/max → flat all_dmg uplift (simplified, no friend graph).
+    friend_max = int(art_flags.get("online_friend_max", 0))
+    if friend_max > 0:
+        eff["all_dmg_pct"] = float(eff.get("all_dmg_pct", 0)) + float(friend_max)
 
     # Apply prestige tree effects.
     pt = _prestige_effects(await _prestige_levels(conn, tg_id))
@@ -503,6 +579,10 @@ async def _recompute_stats(conn, tg_id: int) -> dict:
     # Cap crit chance at 100%.
     if crit_chance_pct > 100:
         crit_chance_pct = Decimal(100)
+
+    # HL3 mythic — click_dmg_quadratic: gentle exponential uplift (^1.05).
+    if art_flags.get("click_dmg_quadratic") and click_dmg > 0:
+        click_dmg = (click_dmg ** Decimal("1.05")).quantize(Decimal("1"))
 
     await conn.execute(
         """update clicker_users set
@@ -571,6 +651,35 @@ async def tap(tg_id: int, taps: int, dt_ms: int) -> dict:
                     last_combat = last_combat.replace(tzinfo=timezone.utc)
                 elapsed_s = max(0.0, min(5.0, (now - last_combat).total_seconds()))
 
+            # Read equipped artifacts ONCE for tap-time effects.
+            equipped_now = await _equipped_artifacts(conn, tg_id)
+            art_flags_now = _artifact_flags(equipped_now)
+
+            # Жетон Valve mythic — auto_cleanse_30s: clear active debuffs every 30s.
+            if art_flags_now.get("auto_cleanse_30s") and combat["is_boss"]:
+                try:
+                    last_cleanse = user["last_cleanse_at"]
+                except (KeyError, IndexError):
+                    last_cleanse = None
+                if last_cleanse and last_cleanse.tzinfo is None:
+                    last_cleanse = last_cleanse.replace(tzinfo=timezone.utc)
+                if not last_cleanse or (now - last_cleanse).total_seconds() >= 30:
+                    state_jsonb = _parse_jsonb(combat["mechanic_state"]) or {}
+                    if state_jsonb.get("active_debuffs"):
+                        state_jsonb["active_debuffs"] = []
+                        await conn.execute(
+                            "update clicker_combat_state set mechanic_state = $2::jsonb where tg_id = $1",
+                            tg_id, json.dumps(state_jsonb),
+                        )
+                        # Refresh combat row.
+                        combat = await conn.fetchrow(
+                            "select * from clicker_combat_state where tg_id = $1 for update", tg_id,
+                        )
+                    await conn.execute(
+                        "update clicker_users set last_cleanse_at = $2 where tg_id = $1",
+                        tg_id, now,
+                    )
+
             # Process boss mechanics (only for boss enemies).
             mechanic_events: list[dict] = []
             click_mult = Decimal(1)
@@ -598,6 +707,23 @@ async def tap(tg_id: int, taps: int, dt_ms: int) -> dict:
                 else:
                     tap_damage += effective_click
 
+            # Glove Case (every_50_taps_minichest): grant common chest at every 50-tap boundary crossed.
+            mini_chests = 0
+            if taps > 0 and art_flags_now.get("every_50_taps_minichest"):
+                try:
+                    cur_tc = int(user["tap_counter"] or 0)
+                except (KeyError, IndexError, TypeError):
+                    cur_tc = 0
+                new_tc = cur_tc + taps
+                mini_chests = (new_tc // 50) - (cur_tc // 50)
+                if mini_chests > 0:
+                    for _ in range(mini_chests):
+                        await _grant_chest(conn, tg_id, "common")
+                await conn.execute(
+                    "update clicker_users set tap_counter = $2 where tg_id = $1",
+                    tg_id, new_tc % 50,
+                )
+
             # Apply auto-DPS for elapsed window.
             auto_damage = (auto_dps * auto_mult * Decimal(str(elapsed_s))).quantize(Decimal("1"))
 
@@ -617,6 +743,8 @@ async def tap(tg_id: int, taps: int, dt_ms: int) -> dict:
                 "killed": False,
                 "boss_mechanics": mechanic_events,
             }
+            if mini_chests > 0:
+                result["mini_chests"] = mini_chests
 
             if not killed:
                 # Check timer expiry.
@@ -689,6 +817,10 @@ async def tap(tg_id: int, taps: int, dt_ms: int) -> dict:
                         m = random.choice(cfg.mythics())
                         await _grant_artifact(conn, tg_id, m, "mythic")
                         artifact_dropped = m
+                    # Кубик Steam mythic — boss_kill_free_common_chest.
+                    if art_flags_now.get("boss_kill_free_common_chest"):
+                        await _grant_chest(conn, tg_id, "common")
+                        result["bonus_chest"] = "common"
                     await conn.execute(
                         "update clicker_users set bosses_killed = bosses_killed + 1 where tg_id = $1",
                         tg_id,
@@ -1108,6 +1240,11 @@ async def prestige(tg_id: int) -> dict:
             slot_bonus = int(pt_pct.get("artifact_slot", 0))
             new_slots = min(cfg.ARTIFACT_SLOT_MAX, max(int(user["artifact_slots"]), base_slots + slot_bonus))
 
+            # Контракт с Гейбом legendary — prestige_casecoins_bonus.
+            equipped = await _equipped_artifacts(conn, tg_id)
+            art_flags = _artifact_flags(equipped)
+            cc_bonus = int(art_flags.get("prestige_casecoins_bonus", 0))
+
             # Starter cash from prestige tree.
             starter_cash = Decimal(int(pt_pct.get("starter_cash", 0)))
 
@@ -1117,6 +1254,7 @@ async def prestige(tg_id: int) -> dict:
                       checkpoint = 1,
                       cash = $4,
                       glory = glory + $2,
+                      casecoins = casecoins + $5,
                       prestige_count = prestige_count + 1,
                       artifact_slots = $3,
                       click_damage = 1,
@@ -1125,7 +1263,7 @@ async def prestige(tg_id: int) -> dict:
                       crit_multiplier = 2,
                       luck = 0
                    where tg_id = $1""",
-                tg_id, glory_gained, new_slots, starter_cash,
+                tg_id, glory_gained, new_slots, starter_cash, cc_bonus,
             )
             # Wipe combat upgrades but keep prestige_node and (optionally) business levels.
             keep_business = pt_flags.get("business_keep_lvl1", False)
@@ -1610,6 +1748,7 @@ async def _build_state(conn, tg_id: int) -> dict:
         branch_pcts = _business_branch_pcts(bid, branch_lvls)
         rate = _business_idle_per_sec(bdef, bus_level, branch_pcts)
         tap_yield = _business_tap_yield(bdef, bus_level, branch_pcts)
+        consumption = _business_consumption_per_sec(bdef, bus_level, branch_pcts)
         biz_state.append({
             "id": bid,
             "level": bus_level,
@@ -1620,6 +1759,7 @@ async def _build_state(conn, tg_id: int) -> dict:
             "pending": str(pending.quantize(Decimal("0.01"))),
             "upgrade_cost": str(upgrade_cost),
             "upgrade_resource_cost": {k: str(v) for k, v in biz_res_cost.items()},
+            "idle_consumption_per_sec": {k: str(v.quantize(Decimal("0.0001"))) for k, v in consumption.items()},
             "branches": branch_lvls,
             "branch_bonuses": branch_pcts,
         })
@@ -1703,7 +1843,9 @@ def _next_boss_level(level: int) -> int:
 
 
 async def _accrue_business_idle(conn, tg_id: int, business_id: str, now: datetime) -> Decimal:
-    """Compute new idle pending amount and update last_idle_at to `now`."""
+    """Compute new idle pending amount and update last_idle_at to `now`.
+    Drains idle_consumption_per_sec from resources for sustainable seconds.
+    If the player runs out of a consumed resource mid-window, production stops at that point."""
     bdef = _business_def(business_id)
     if not bdef:
         return Decimal(0)
@@ -1715,15 +1857,64 @@ async def _accrue_business_idle(conn, tg_id: int, business_id: str, now: datetim
     cap = cfg.BUSINESS_IDLE_CAP_HOURS * 3600
     elapsed = min(elapsed, cap)
     level = await _business_level(conn, tg_id, business_id)
-    # Apply branch idle bonus.
     upg_rows = await conn.fetch(
         "select kind, slot_id, level from clicker_upgrades where tg_id = $1 and kind = 'business_branch'",
         tg_id,
     )
     branch_lvls = _business_branch_levels(upg_rows, business_id)
     branch_pcts = _business_branch_pcts(business_id, branch_lvls)
-    rate = _business_idle_per_sec(bdef, level, branch_pcts)
-    produced = (rate * Decimal(str(elapsed))).quantize(Decimal("0.0001"))
+
+    # Fetch equipped artifacts once for both offline_pct and all_production_x3.
+    equipped = await _equipped_artifacts(conn, tg_id)
+    eff = _artifact_effects(equipped)
+    art_flags = _artifact_flags(equipped)
+
+    # Apply offline_pct branch when window > 60 sec (treat as offline accrual).
+    offline_mult = Decimal(1)
+    if elapsed > 60:
+        off_pct = Decimal(str(branch_pcts.get("offline_pct", 0)))
+        off_pct += Decimal(str(eff.get("offline_pct", 0)))
+        offline_mult = Decimal(1) + off_pct / Decimal(100)
+
+    # Λ-Кристалл mythic — all_production_x3 multiplies production AND consumption.
+    prod_mult = Decimal(3) if art_flags.get("all_production_x3") else Decimal(1)
+    # Resource-specific bonus from artifacts (e.g. brass_pct, contraband_pct, all_resources_pct).
+    res_id = bdef.get("resource") or ""
+    res_bonus = Decimal(str(eff.get(f"{res_id}_pct", 0))) + Decimal(str(eff.get("all_resources_pct", 0)))
+    res_mult = Decimal(1) + res_bonus / Decimal(100)
+
+    rate = _business_idle_per_sec(bdef, level, branch_pcts) * offline_mult * prod_mult * res_mult
+    consumption = _business_consumption_per_sec(bdef, level, branch_pcts)
+    if art_flags.get("all_production_x3"):
+        consumption = {k: v * Decimal(3) for k, v in consumption.items()}
+
+    # Determine how many of `elapsed` seconds we can actually sustain given resources.
+    sustainable_s = Decimal(str(elapsed))
+    if consumption:
+        # Read current resources for the consumed types.
+        res_rows = await conn.fetch(
+            "select resource_type, amount from clicker_resources where tg_id = $1 and resource_type = any($2::text[]) for update",
+            tg_id, list(consumption.keys()),
+        )
+        have = {r["resource_type"]: Decimal(r["amount"]) for r in res_rows}
+        for res, cons_rate in consumption.items():
+            if cons_rate <= 0:
+                continue
+            avail = have.get(res, Decimal(0))
+            max_for_res = avail / cons_rate
+            if max_for_res < sustainable_s:
+                sustainable_s = max_for_res
+        # Drain consumption for the sustainable window.
+        if sustainable_s > 0:
+            for res, cons_rate in consumption.items():
+                drained = (cons_rate * sustainable_s).quantize(Decimal("0.0001"))
+                await conn.execute(
+                    """insert into clicker_resources (tg_id, resource_type, amount) values ($1, $2, 0)
+                       on conflict (tg_id, resource_type) do update set amount = clicker_resources.amount - $3""",
+                    tg_id, res, drained,
+                )
+
+    produced = (rate * sustainable_s).quantize(Decimal("0.0001"))
     new_pending = Decimal(state["pending_amount"]) + produced
     await conn.execute(
         """update clicker_businesses set pending_amount = $3, last_idle_at = $4

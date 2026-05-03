@@ -66,6 +66,7 @@ export interface BusinessState {
   pending: string;
   upgrade_cost: string;
   upgrade_resource_cost: Record<string, string>;
+  idle_consumption_per_sec?: Record<string, string>;
   branches: Record<string, number>;
   branch_bonuses: Record<string, number>;
 }
@@ -80,6 +81,7 @@ export interface BusinessBranchDef {
   cost_per_level?: number;
   effect: string;
   per_level: number;
+  desc?: string;
 }
 
 export interface StateSnap {
@@ -238,7 +240,7 @@ export interface ApiResponse<T = any> {
 }
 
 export interface BossMechanicEvent {
-  type: "heal" | "timer_drain" | "click_debuff" | "silence_auto" | "phase_heal";
+  type: "heal" | "timer_drain" | "click_debuff" | "silence_auto" | "phase_heal" | "shield";
   shout: string;
   amount?: string;
   drained_sec?: number;
@@ -262,6 +264,8 @@ export interface TapResult {
   artifact_dropped?: ArtifactDef | MythicDef | null;
   boss_mechanics?: BossMechanicEvent[];
   gas_dropped?: number;
+  mini_chests?: number;
+  bonus_chest?: string;
 }
 
 export interface OpenChestResult {

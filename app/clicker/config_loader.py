@@ -85,22 +85,23 @@ def reload() -> None:
 # ---------- gameplay constants -----------------------------------------
 
 # Business idle/upgrade.
-BUSINESS_IDLE_GROWTH = 1.08      # production per_sec × this^level
-BUSINESS_COST_GROWTH = 1.15      # upgrade cost × this^level
+BUSINESS_IDLE_GROWTH = 1.075     # production per_sec × this^level (was 1.08 — slower scaling)
+BUSINESS_COST_GROWTH = 1.18      # upgrade cost × this^level (was 1.15 — steeper)
+BUSINESS_CONS_GROWTH = 1.06      # idle consumption × this^level (slower than production)
 BUSINESS_IDLE_CAP_HOURS = 8      # max accumulation while away
 
 LEVEL_TIME_NORMAL = 30        # seconds to kill normal enemy
 LEVEL_TIME_BOSS = 40          # seconds to kill boss
 HP_BASE = 10
-HP_GROWTH = 1.55
-HP_BOSS_MULT = 7.5
-COIN_DROP_RATIO = 0.18
+HP_GROWTH = 1.58              # was 1.55 — slightly steeper TTK
+HP_BOSS_MULT = 8.0            # was 7.5 — bosses tougher
+COIN_DROP_RATIO = 0.16        # was 0.18 — less cash per kill
 BOSS_COIN_MULT = 5
 BOSS_CHEST_DROP_BASE = 0.10      # flat 10% drop chance per boss kill
 BOSS_GAS_DROP_CHANCE = 0.005     # 0.5% chance for direct gas drop on boss kill (lvl 30+)
 BOSS_GAS_LEVEL_THRESHOLD = 30
-COST_GROWTH = 1.15
-DAMAGE_PER_LEVEL = 0.20       # +20% damage per upgrade level
+COST_GROWTH = 1.18            # was 1.15 — upgrade prices climb faster
+DAMAGE_PER_LEVEL = 0.18       # was 0.20 — slightly less damage per upgrade level
 CHECKPOINT_EVERY = 10
 CASECOINS_RATE_SECONDS = 600  # 1 ⌬ per 10 minutes
 CASECOINS_DAILY_CAP = 60

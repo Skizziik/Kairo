@@ -329,6 +329,10 @@ function handleTapResult(data: TapResult) {
     hapticNotify("success");
     toast(`☣️ Газ! +${data.gas_dropped}`, "success", 3000);
   }
+  if (data.mini_chests && data.mini_chests > 0) {
+    hapticNotify("success");
+    toast(`🎁×${data.mini_chests} Glove Case срабатывает!`, "success", 2400);
+  }
 
   if (data.killed) {
     haptic("medium");
@@ -342,6 +346,9 @@ function handleTapResult(data: TapResult) {
     }
     if (data.chest_dropped && data.state) {
       toast(`🎁 Сундук: ${data.chest_dropped}!`, "success", 3000);
+    }
+    if (data.bonus_chest) {
+      toast(`🎁 Bonus: ${data.bonus_chest} (Кубик Steam)`, "success", 3000);
     }
   } else if (data.timeout) {
     hapticNotify("warning");
