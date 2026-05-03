@@ -19,8 +19,9 @@ export function showUpgradeModal() {
     { id: "mercs",    label: "НАЁМНИКИ" },
     { id: "crit",     label: "КРИТ" },
     { id: "luck",     label: "УДАЧА" },
+    { id: "permits",  label: "🎟" },
   ];
-  let currentSection: "weapons" | "mercs" | "crit" | "luck" = "weapons";
+  let currentSection: "weapons" | "mercs" | "crit" | "luck" | "permits" = "weapons";
 
   // bulk-buy switch
   const bulkRow = el("div", { className: "lb-tabs", style: { marginTop: "0", marginBottom: "8px" } });
@@ -85,8 +86,65 @@ export function showUpgradeModal() {
       for (const u of store.config.crit_luck.crit_damage) list.appendChild(renderCritLuck("crit_damage", u));
     } else if (currentSection === "luck") {
       for (const u of store.config.crit_luck.luck) list.appendChild(renderCritLuck("luck", u));
+    } else if (currentSection === "permits") {
+      const permits = (store.config as any).permits || [];
+      if (permits.length === 0) {
+        list.appendChild(el("div", { className: "muted small", textContent: "Нет доступных лицензий", style: { padding: "20px", textAlign: "center" } }));
+      } else {
+        for (const p of permits) list.appendChild(renderPermit(p));
+      }
     }
   }
+}
+
+function renderPermit(p: any): HTMLElement {
+  const slot = p.id;
+  const lvl = ownedLevel("permit", slot);
+  const owned = lvl > 0;
+  const card = el("div", { className: `upg-card ${owned ? "" : ""}` });
+  const imgWrap = el("div", { className: "img-wrap" });
+  imgWrap.appendChild(el("img", { src: `${ASSET_BASE}/${p.icon}`, alt: p.name }));
+  card.appendChild(imgWrap);
+
+  const info = el("div", { className: "info" });
+  const name = el("div", { className: "name" });
+  name.appendChild(el("span", { className: "lvl-pill", textContent: owned ? "✅ КУПЛЕНО" : "—" }));
+  name.appendChild(document.createTextNode(p.name));
+  info.appendChild(name);
+  info.appendChild(el("div", { className: "meta", textContent: p.desc || "" }));
+  card.appendChild(info);
+
+  const cc = Number(store.state?.user.casecoins || "0");
+  const can = !owned && cc >= p.casecoin_cost;
+  const btn = el("button", { className: "buy" });
+  if (owned) {
+    btn.textContent = "✅";
+    btn.disabled = true;
+  } else {
+    btn.appendChild(document.createTextNode("Купить"));
+    btn.appendChild(el("span", { className: "cost", textContent: `⌬${p.casecoin_cost}`, style: { color: can ? "#34D399" : "#FCA5A5" } }));
+    if (!can) btn.disabled = true;
+  }
+  btn.onclick = async () => {
+    if (!can) {
+      hapticNotify("error");
+      toast(`Не хватает ⌬ (нужно ${p.casecoin_cost})`, "error");
+      return;
+    }
+    haptic("medium");
+    btn.disabled = true;
+    const r = await api.upgrade("permit", slot, 1);
+    if (r.ok && r.data) {
+      hapticNotify("success");
+      toast("Лицензия активна — лимит снят", "success");
+      if ((r.data as any).state) store.setState((r.data as any).state);
+    } else {
+      hapticNotify("error");
+      toast(r.error || "Ошибка", "error");
+    }
+  };
+  card.appendChild(btn);
+  return card;
 }
 
 function ownedLevel(kind: string, slot_id: string): number {

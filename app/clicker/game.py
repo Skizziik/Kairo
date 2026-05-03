@@ -621,12 +621,13 @@ async def _recompute_stats(conn, tg_id: int) -> dict:
 async def tap(tg_id: int, taps: int, dt_ms: int) -> dict:
     """Apply N taps to current enemy. Includes auto-DPS for elapsed seconds.
 
-    `taps` is clamped server-side (anti-spam: max 30/sec).
+    `taps` is rate-limited to TAP_RATE_BASE (5/sec) by default, or
+    TAP_RATE_WITH_PERMIT (10/sec) if the player owns clicker_permit.
     `dt_ms` is the ms elapsed since the player's previous request — server uses
-    its own time delta if smaller (anti-cheat).
+    its own time delta as the source of truth.
     """
     now = _now()
-    taps = max(0, min(int(taps), 60))  # max 60 taps per request
+    taps = max(0, min(int(taps), 60))  # hard cap per request, then rate-cap below
     async with pool().acquire() as conn:
         async with conn.transaction():
             user = await conn.fetchrow(
@@ -636,6 +637,23 @@ async def tap(tg_id: int, taps: int, dt_ms: int) -> dict:
                 return {"ok": False, "error": "no_user"}
             if user["banned"]:
                 return {"ok": False, "error": "banned"}
+
+            # Rate-limit taps to TAP_RATE_BASE/sec unless the player owns clicker_permit.
+            # Permit removes the cap so external auto-clickers are tolerated.
+            permit_lvl = await conn.fetchval(
+                "select level from clicker_upgrades where tg_id = $1 and kind = 'permit' and slot_id = 'clicker_permit'",
+                tg_id,
+            )
+            if not permit_lvl:
+                last_combat_for_rate = user["last_combat_at"]
+                if last_combat_for_rate is None:
+                    rate_window_s = 1.0
+                else:
+                    if last_combat_for_rate.tzinfo is None:
+                        last_combat_for_rate = last_combat_for_rate.replace(tzinfo=timezone.utc)
+                    rate_window_s = max(0.05, min(5.0, (now - last_combat_for_rate).total_seconds()))
+                max_allowed = max(1, int(rate_window_s * cfg.TAP_RATE_BASE))
+                taps = min(taps, max_allowed)
 
             combat = await conn.fetchrow(
                 "select * from clicker_combat_state where tg_id = $1 for update", tg_id,
@@ -1059,6 +1077,10 @@ def _upgrade_spec(kind: str, slot_id: str) -> tuple[dict | None, int]:
         for u in cfg.crit_luck().get("luck", []):
             if f"lk_{u['id']}" == slot_id:
                 return u, u.get("max_level", 20)
+    elif kind == "permit":
+        for p in cfg.permits():
+            if p["id"] == slot_id:
+                return p, p.get("max_level", 1)
     return None, 0
 
 
@@ -1079,6 +1101,36 @@ async def buy_upgrade(tg_id: int, kind: str, slot_id: str, count: int = 1) -> di
             unlock = int(spec.get("unlock_level", 1))
             if int(user["max_level"]) < unlock:
                 return {"ok": False, "error": "locked", "unlock_level": unlock}
+
+            # Permits: paid in casecoins (⌬), not cash. Always count=1 (max_level=1).
+            if kind == "permit":
+                cur_p = await conn.fetchrow(
+                    """select level from clicker_upgrades where tg_id = $1 and kind = 'permit' and slot_id = $2 for update""",
+                    tg_id, slot_id,
+                )
+                if cur_p and int(cur_p["level"]) >= int(max_level):
+                    return {"ok": False, "error": "max_level"}
+                cc_cost = int(spec.get("casecoin_cost", 0))
+                if Decimal(user["casecoins"]) < Decimal(cc_cost):
+                    return {"ok": False, "error": "not_enough_casecoins", "needed": str(cc_cost)}
+                await conn.execute(
+                    "update clicker_users set casecoins = casecoins - $2 where tg_id = $1",
+                    tg_id, cc_cost,
+                )
+                if cur_p:
+                    await conn.execute(
+                        "update clicker_upgrades set level = level + 1 where tg_id = $1 and kind = 'permit' and slot_id = $2",
+                        tg_id, slot_id,
+                    )
+                else:
+                    await conn.execute(
+                        "insert into clicker_upgrades (tg_id, kind, slot_id, level) values ($1, 'permit', $2, 1)",
+                        tg_id, slot_id,
+                    )
+                await _log(conn, tg_id, "permit_bought", {"slot": slot_id, "cc_cost": cc_cost})
+                return await _wrap_state(conn, tg_id, {
+                    "kind": "permit", "slot_id": slot_id, "new_level": 1, "spent_casecoins": cc_cost,
+                })
 
             # Some weapons require a boss kill threshold (e.g. HL3 Crowbar).
             requires_boss = spec.get("requires_boss_kill")
@@ -1943,12 +1995,37 @@ async def business_tap(tg_id: int, business_id: str) -> dict:
     async with pool().acquire() as conn:
         async with conn.transaction():
             user = await conn.fetchrow(
-                "select max_level from clicker_users where tg_id = $1 for update", tg_id,
+                "select * from clicker_users where tg_id = $1 for update", tg_id,
             )
             if not user:
                 return {"ok": False, "error": "no_user"}
             if int(user["max_level"]) < int(bdef["unlock_level"]):
                 return {"ok": False, "error": "locked", "unlock_level": int(bdef["unlock_level"])}
+
+            # Rate-limit business taps via 1-sec sliding window — unless permit owned.
+            permit_lvl = await conn.fetchval(
+                "select level from clicker_upgrades where tg_id = $1 and kind = 'permit' and slot_id = 'clicker_permit'",
+                tg_id,
+            )
+            if not permit_lvl:
+                try:
+                    win_start = user["biz_tap_window_start"]
+                    win_count = int(user["biz_tap_window_count"] or 0)
+                except (KeyError, IndexError):
+                    win_start, win_count = None, 0
+                if win_start and win_start.tzinfo is None:
+                    win_start = win_start.replace(tzinfo=timezone.utc)
+                if win_start and (now - win_start).total_seconds() < 1.0:
+                    if win_count >= cfg.TAP_RATE_BASE:
+                        return {"ok": False, "error": "throttled", "rate_cap": cfg.TAP_RATE_BASE}
+                    new_start, new_count = win_start, win_count + 1
+                else:
+                    new_start, new_count = now, 1
+                await conn.execute(
+                    "update clicker_users set biz_tap_window_start = $2, biz_tap_window_count = $3 where tg_id = $1",
+                    tg_id, new_start, new_count,
+                )
+
             level = await _business_level(conn, tg_id, business_id)
             upg_rows = await conn.fetch(
                 "select kind, slot_id, level from clicker_upgrades where tg_id = $1 and kind = 'business_branch'",
@@ -2197,6 +2274,7 @@ def public_config() -> dict:
         "resources_meta": cfg.resources_meta(),
         "prestige_tree": cfg.prestige_tree(),
         "business_tree": cfg.business_tree(),
+        "permits": cfg.permits(),
         "constants": {
             "level_time_normal": cfg.LEVEL_TIME_NORMAL,
             "level_time_boss": cfg.LEVEL_TIME_BOSS,

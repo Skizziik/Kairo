@@ -254,6 +254,12 @@ async def ensure_schema() -> None:
             "alter table clicker_users add column if not exists last_cleanse_at timestamptz"
         )
         await conn.execute(
+            "alter table clicker_users add column if not exists biz_tap_window_start timestamptz"
+        )
+        await conn.execute(
+            "alter table clicker_users add column if not exists biz_tap_window_count integer not null default 0"
+        )
+        await conn.execute(
             "alter table clicker_combat_state add column if not exists mechanic_state jsonb not null default '{}'::jsonb"
         )
         await conn.execute(

@@ -1,0 +1,3 @@
+[
+  {"id": "clicker_permit", "name": "Лицензия Авто-Клика", "base_cost": 0, "casecoin_cost": 10, "unlock_level": 1, "max_level": 1, "icon": "ui/01.png", "desc": "Снимает лимит 5/сек, поднимает до 10/сек на бойцах и бизнесах. Платится в ⌬."}
+]

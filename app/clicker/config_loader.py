@@ -77,8 +77,13 @@ def battlepass() -> dict:
     return _load("battlepass.json")
 
 
+@lru_cache(maxsize=1)
+def permits() -> list:
+    return _load("permits.json")
+
+
 def reload() -> None:
-    for fn in (weapons, mercs, locations, bosses, chests, artifacts, mythics, crit_luck, businesses, resources_meta, prestige_tree, business_tree, battlepass):
+    for fn in (weapons, mercs, locations, bosses, chests, artifacts, mythics, crit_luck, businesses, resources_meta, prestige_tree, business_tree, battlepass, permits):
         fn.cache_clear()
 
 
@@ -108,6 +113,10 @@ DAMAGE_PER_LEVEL = 0.18       # was 0.20 — slightly less damage per upgrade le
 CHECKPOINT_EVERY = 10
 CASECOINS_RATE_SECONDS = 600  # 1 ⌬ per 10 minutes
 CASECOINS_DAILY_CAP = 60
+
+# Tap rate caps (anti-macro, anti-spam).
+TAP_RATE_BASE = 10            # default cap — comfortable for human clicking
+# With clicker_permit (10⌬) the rate cap is removed, so external auto-clickers are OK.
 PRESTIGE_GLORY_DIVISOR = 20
 PRESTIGE_GLORY_EXP = 1.5
 ARTIFACT_SLOT_BASE = 2

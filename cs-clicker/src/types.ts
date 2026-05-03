@@ -200,6 +200,17 @@ export interface CritLuckDef {
   icon: string;
 }
 
+export interface PermitDef {
+  id: string;
+  name: string;
+  base_cost: number;
+  casecoin_cost: number;
+  unlock_level: number;
+  max_level: number;
+  icon: string;
+  desc?: string;
+}
+
 export interface ConfigSnap {
   version: string;
   weapons: WeaponDef[];
@@ -214,6 +225,7 @@ export interface ConfigSnap {
   resources_meta: Record<string, ResourceMeta>;
   prestige_tree: PrestigeNodeDef[];
   business_tree: Record<string, BusinessBranchDef[]>;
+  permits?: PermitDef[];
   constants: {
     level_time_normal: number;
     level_time_boss: number;
