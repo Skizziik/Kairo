@@ -38,28 +38,38 @@ def _fmt(v) -> str:
 
 
 async def _send_app_button(msg: Message, text: str) -> None:
+    """Send a Mini-App launch button. Works in private + groups + channels via the
+    same web_app button as long as BotFather has the domain whitelisted."""
     s = get_settings()
     raw = s.clicker_url
     tme = s.clicker_tme_url
     if not raw and not tme:
         await msg.reply(text + "\n\n<i>Mini App не настроен (CLICKER_URL пустой).</i>")
         return
-    is_private = msg.chat.type == "private"
-    try:
-        if is_private and raw:
+
+    # Primary: web_app button — opens Mini App in-place in any chat type.
+    if raw:
+        try:
             kb = InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(text="🎯 Запустить CS:CLICKER", web_app=WebAppInfo(url=raw)),
             ]])
             await msg.reply(text, reply_markup=kb)
             return
-        target = tme or raw
+        except TelegramBadRequest as e:
+            # web_app rejected (e.g. domain not whitelisted in BotFather, or chat type
+            # restriction). Fall through to t.me deep-link below.
+            log.warning("clicker web_app button rejected: %s — falling back to t.me", e.message)
+
+    # Fallback: t.me/<bot>/<app> deep link as a plain url button.
+    target = tme or raw
+    try:
         kb = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="🎯 Запустить CS:CLICKER", url=target or ""),
         ]])
         await msg.reply(text, reply_markup=kb)
     except TelegramBadRequest as e:
-        log.warning("clicker button rejected: %s", e.message)
-        await msg.reply(text + f"\n\n{raw or tme}")
+        log.warning("clicker url button rejected: %s", e.message)
+        await msg.reply(text + f"\n\n{target}")
 
 
 @router.message(Command("clicker"))
