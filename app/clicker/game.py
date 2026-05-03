@@ -1826,23 +1826,9 @@ async def _build_state(conn, tg_id: int) -> dict:
             elapsed = min(elapsed, cap)
             produced = rate * Decimal(str(elapsed))
             pending = Decimal(biz_row["pending_amount"]) + produced
-        # Preview "collectable_now": pending capped by fuel currently in balance,
-        # so the HUD shows what will actually drop on Collect.
+        # collectable_now == pending. Fuel is paid from balance at Collect (capped
+        # at what balance can provide), but never reduces what you collect.
         collectable = pending
-        ratios = bdef.get("consumption_per_unit") or {}
-        if ratios:
-            red = Decimal(str(branch_pcts.get("consumption_red_pct", 0)))
-            if red > Decimal(90):
-                red = Decimal(90)
-            cons_mult = (Decimal(100) - red) / Decimal(100)
-            for res, ratio in ratios.items():
-                per_unit = Decimal(str(ratio)) * cons_mult
-                if per_unit <= 0:
-                    continue
-                avail = res_balance.get(res, Decimal(0))
-                max_for_res = avail / per_unit
-                if max_for_res < collectable:
-                    collectable = max_for_res
         biz_state.append({
             "id": bid,
             "level": bus_level,
@@ -2185,55 +2171,44 @@ async def business_collect(tg_id: int, business_id: str | None = None) -> dict:
                 if pending <= 0:
                     continue
 
-                # Compute fuel cost for the FULL pending. If the balance can't cover
-                # it, scale collect down so that exactly what can be fueled gets paid.
+                # Always collect the full pending. Fuel is paid from the balance
+                # but capped at balance availability — never reduces what you collect.
                 bus_level = next((int(u["level"]) for u in upg_rows if u["kind"] == "business" and u["slot_id"] == bid), 0)
                 level_cache[bid] = bus_level
                 branch_lvls = _business_branch_levels(upg_rows, bid)
                 branch_pcts = _business_branch_pcts(bid, branch_lvls)
                 branch_pcts_cache[bid] = branch_pcts
                 ratios = bdef.get("consumption_per_unit") or {}
-                # Apply consumption_red_pct branch + Λ-Кристалл x3.
                 red = Decimal(str(branch_pcts.get("consumption_red_pct", 0)))
                 if red > Decimal(90):
                     red = Decimal(90)
                 cons_mult = (Decimal(100) - red) / Decimal(100)
-                # Equipped artifacts for x3 cons.
                 equipped = await _equipped_artifacts(conn, tg_id)
                 art_flags = _artifact_flags(equipped)
                 if art_flags.get("all_production_x3"):
                     cons_mult = cons_mult * Decimal(3)
 
-                # Cap collectable amount by balance for each fuel resource.
-                collectable = pending
-                if ratios:
-                    for res, ratio in ratios.items():
-                        per_unit = Decimal(str(ratio)) * cons_mult
-                        if per_unit <= 0:
-                            continue
-                        avail = balance.get(res, Decimal(0))
-                        max_for_res = avail / per_unit
-                        if max_for_res < collectable:
-                            collectable = max_for_res
-
-                amount = Decimal(int(collectable))
+                amount = Decimal(int(pending))
                 if amount <= 0:
-                    # Update last_idle_at was done by _accrue but pending stays.
                     continue
                 rest = pending - amount
 
-                # Pay fuel for the collected amount.
-                if ratios:
+                # Drain fuel from balance, clamped at availability (never goes negative).
+                if ratios and amount > 0:
                     for res, ratio in ratios.items():
                         per_unit = Decimal(str(ratio)) * cons_mult
-                        cost = (per_unit * amount).quantize(Decimal("0.0001"))
-                        if cost > 0:
-                            balance[res] = balance.get(res, Decimal(0)) - cost
+                        cost_full = (per_unit * amount).quantize(Decimal("0.0001"))
+                        avail = balance.get(res, Decimal(0))
+                        if avail < 0:
+                            avail = Decimal(0)
+                        actual = cost_full if cost_full <= avail else avail
+                        if actual > 0:
+                            balance[res] = balance.get(res, Decimal(0)) - actual
                             await conn.execute(
                                 "update clicker_resources set amount = amount - $3 where tg_id = $1 and resource_type = $2",
-                                tg_id, res, cost,
+                                tg_id, res, actual,
                             )
-                            spent[res] = spent.get(res, Decimal(0)) + cost
+                            spent[res] = spent.get(res, Decimal(0)) + actual
 
                 await conn.execute(
                     """update clicker_businesses set pending_amount = $3
