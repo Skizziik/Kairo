@@ -54,6 +54,11 @@ class GotoLevelReq(BaseModel):
     target_level: int = Field(..., ge=1, le=999)
 
 
+class BusinessBranchReq(BaseModel):
+    business_id: str = Field(..., min_length=1, max_length=32)
+    branch_id: str = Field(..., min_length=1, max_length=32)
+
+
 @router.get("/config")
 async def api_config() -> dict:
     return {"ok": True, "data": gm.public_config()}
@@ -115,6 +120,11 @@ async def api_business_collect(req: BusinessCollectReq, user: dict = Depends(req
 @router.post("/business/upgrade")
 async def api_business_upgrade(req: BusinessReq, user: dict = Depends(require_user)) -> dict:
     return await gm.business_upgrade(int(user["id"]), req.business_id)
+
+
+@router.post("/business/branch/buy")
+async def api_business_branch_buy(req: BusinessBranchReq, user: dict = Depends(require_user)) -> dict:
+    return await gm.buy_business_branch(int(user["id"]), req.business_id, req.branch_id)
 
 
 @router.post("/prestige/buy_node")

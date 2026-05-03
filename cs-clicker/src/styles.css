@@ -163,15 +163,15 @@ html, body {
 
 .level-header {
   text-align: center;
-  padding: 8px 12px 4px;
+  padding: 4px 12px 0;
 }
 .level-loc {
-  font-size: 11px; color: var(--text-soft); letter-spacing: 1px;
+  font-size: 10px; color: var(--text-soft); letter-spacing: 1px;
   text-transform: uppercase;
 }
 .level-name {
-  font-size: 18px; color: var(--text-bright); font-weight: 700;
-  margin-top: 2px;
+  font-size: 14px; color: var(--text-bright); font-weight: 700;
+  margin-top: 1px;
 }
 .level-name.boss { color: var(--awp-orange); text-shadow: 0 0 12px rgba(242,153,74,0.4); }
 
@@ -200,30 +200,32 @@ html, body {
   text-shadow: 0 0 3px rgba(0,0,0,0.6);
 }
 
-/* Level navigation buttons */
+/* Level navigation buttons — compact, single-row with level info */
 .level-nav {
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  margin: 4px 12px 0;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  margin: 2px 12px 0;
 }
 .level-arrow {
-  width: 36px; height: 36px;
+  width: 28px; height: 28px;
   background: var(--bg-elevated);
   border: 1px solid var(--bg-mid);
-  border-radius: 8px;
-  color: var(--awp-orange); font-size: 18px; font-weight: 800;
+  border-radius: 6px;
+  color: var(--awp-orange); font-size: 16px; font-weight: 800;
   cursor: pointer;
   font-family: inherit;
+  padding: 0; line-height: 1;
 }
 .level-arrow:disabled { opacity: 0.3; cursor: not-allowed; }
 .level-arrow:active:not(:disabled) { transform: translateY(1px); }
 .level-nav-info {
-  flex: 1; display: flex; flex-direction: column; align-items: center; line-height: 1.1;
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
+  line-height: 1;
 }
 .level-nav-cur {
-  font-size: 13px; font-weight: 800; color: var(--awp-orange); letter-spacing: 1px;
+  font-size: 12px; font-weight: 800; color: var(--awp-orange); letter-spacing: 1px;
 }
 .level-nav-max {
-  font-size: 9px; color: var(--text-soft);
+  font-size: 10px; color: var(--text-dim);
 }
 
 .hp-bar-wrap { padding: 0 12px; }
@@ -659,9 +661,14 @@ html, body {
 /* ---------- BUSINESS TAB ---------- */
 
 .biz-res-hud {
-  display: flex; flex-wrap: wrap; gap: 6px;
+  display: flex; gap: 6px;
   margin-bottom: 12px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding-bottom: 2px;
 }
+.biz-res-hud::-webkit-scrollbar { display: none; }
 .biz-res-chip {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 4px 10px 4px 6px;
@@ -669,9 +676,18 @@ html, body {
   border: 1px solid var(--bg-mid);
   border-radius: 999px;
   font-size: 12px; font-weight: 700;
+  flex-shrink: 0;
+  min-width: 84px;
+  white-space: nowrap;
+  justify-content: flex-start;
 }
-.biz-res-chip img { width: 22px; height: 22px; object-fit: contain; }
-.biz-res-chip .amt { letter-spacing: 0.5px; }
+.biz-res-chip img { width: 22px; height: 22px; object-fit: contain; flex-shrink: 0; }
+.biz-res-chip .amt {
+  letter-spacing: 0.5px;
+  flex: 1;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 
 .collect-all-btn-biz {
   width: 100%; min-height: 44px;
@@ -710,19 +726,27 @@ html, body {
 .biz-stat { font-size: 12px; color: var(--text-soft); margin-top: 2px; }
 .biz-rate { font-size: 11px; color: var(--cs-green); font-weight: 700; margin-top: 2px; }
 .biz-lock { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
-.biz-pending {
+.biz-pending-row {
   margin-top: 8px;
+  display: grid; grid-template-columns: 1fr auto; gap: 6px;
+}
+.biz-pending {
   padding: 6px 10px;
   background: rgba(0,0,0,0.3); border-radius: 6px;
   font-size: 12px; font-weight: 600; color: var(--awp-orange);
 }
+.biz-owned {
+  padding: 6px 10px;
+  background: rgba(0,0,0,0.3); border-radius: 6px;
+  font-size: 12px; font-weight: 700;
+}
 .biz-actions {
-  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
   margin-top: 8px;
 }
 .biz-actions button {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
-  min-height: 48px; padding: 4px;
+  min-height: 44px; padding: 4px;
   background: var(--bg-elevated);
   border: 1px solid var(--bg-mid);
   border-radius: 6px;
@@ -736,6 +760,48 @@ html, body {
 .biz-tap-btn { background: linear-gradient(180deg, var(--neon-blue), #1B6FB5) !important; border-color: #154E80 !important; }
 .biz-collect-btn { background: linear-gradient(180deg, var(--cs-green), #5D8019) !important; border-color: #4A6815 !important; }
 .biz-upgrade-btn { background: linear-gradient(180deg, var(--awp-orange), #C77530) !important; color: #000 !important; border-color: #8B4F1C !important; }
+.biz-tree-btn { background: linear-gradient(180deg, var(--rarity-mythic), #9F2766) !important; border-color: #6F1746 !important; }
+
+/* Business branch modal */
+.biz-branch-list { display: flex; flex-direction: column; gap: 8px; }
+.biz-branch-card {
+  background: var(--bg-card);
+  border: 1px solid var(--bg-mid);
+  border-radius: 8px;
+  padding: 10px;
+}
+.biz-branch-head { display: flex; gap: 10px; align-items: center; }
+.biz-branch-img {
+  width: 56px; height: 56px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; overflow: hidden;
+}
+.biz-branch-img img { max-width: 92%; max-height: 92%; object-fit: contain; }
+.biz-branch-info { flex: 1; min-width: 0; }
+.biz-branch-title-row {
+  display: flex; justify-content: space-between; align-items: center;
+}
+.biz-branch-name { font-size: 13px; font-weight: 800; color: var(--text-bright); }
+.biz-branch-lvl {
+  font-size: 11px; padding: 2px 8px;
+  background: var(--bg-mid); border-radius: 999px;
+  color: var(--gold); font-weight: 700;
+}
+.biz-branch-effect { font-size: 11px; color: var(--text-soft); margin-top: 2px; line-height: 1.4; }
+.biz-branch-buy {
+  margin-top: 8px;
+  width: 100%; min-height: 44px;
+  background: linear-gradient(180deg, var(--cs-green), #5D8019);
+  color: #fff; border: 1px solid #4A6815; border-radius: 6px;
+  font-family: inherit; font-weight: 800; font-size: 13px;
+  cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+}
+.biz-branch-buy:disabled { opacity: 0.4; cursor: not-allowed; filter: grayscale(0.5); }
+.biz-branch-buy .small { font-size: 11px; opacity: 0.95; font-weight: 600; }
+.biz-branch-buy:active:not(:disabled) { transform: translateY(1px); }
 
 /* ---------- LOCKED PLACEHOLDERS ---------- */
 .locked-tab {

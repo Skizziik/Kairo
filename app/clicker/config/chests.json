@@ -1,26 +1,67 @@
 {
   "common": {
     "name": "Common Chest (Шаверма)", "icon": "chests/01.png", "rarity_color": "#9CA3AF",
-    "rolls": {"cash": [200, 500], "artifact_chance": 0.01, "artifact_pool": ["common"], "casecoins": 0}
+    "rolls": {
+      "cash": [500, 2000],
+      "artifact_chance": 0.25,
+      "artifact_pool": ["common"],
+      "casecoins": 0,
+      "resources": {"energy": [10, 30]}
+    }
   },
   "uncommon": {
     "name": "Uncommon Chest (Базар)", "icon": "chests/02.png", "rarity_color": "#22D3EE",
-    "rolls": {"cash": [800, 2000], "artifact_chance": 0.03, "artifact_pool": ["common","uncommon"], "casecoins": [1, 3]}
+    "rolls": {
+      "cash": [3000, 12000],
+      "artifact_chance": 0.40,
+      "artifact_pool": ["common", "uncommon"],
+      "casecoins": [1, 3],
+      "resources": {"energy": [20, 60], "brass": [10, 30]}
+    }
   },
   "rare": {
     "name": "Rare Chest (Контрабанда)", "icon": "chests/03.png", "rarity_color": "#3B82F6",
-    "rolls": {"cash": [5000, 20000], "artifact_chance": 0.08, "artifact_pool": ["common","uncommon","rare"], "casecoins": [3, 5], "perma_buff_chance": 0.10}
+    "rolls": {
+      "cash": [25000, 100000],
+      "artifact_chance": 0.60,
+      "artifact_pool": ["common", "uncommon", "rare"],
+      "casecoins": [3, 7],
+      "resources": {"brass": [30, 80], "contraband": [5, 15]}
+    }
   },
   "epic": {
     "name": "Epic Chest (Аномальный)", "icon": "chests/04.png", "rarity_color": "#A855F7",
-    "rolls": {"cash": [50000, 200000], "artifact_chance": 0.15, "artifact_pool": ["uncommon","rare","epic"], "casecoins": [10, 20], "perma_buff": "crit_chance_0_5"}
+    "rolls": {
+      "cash": [200000, 800000],
+      "artifact_chance": 0.85,
+      "artifact_pool": ["uncommon", "rare", "epic"],
+      "casecoins": [10, 25],
+      "resources": {"contraband": [20, 60], "case_dust": [3, 10]},
+      "gas_chance": 0.05
+    }
   },
   "legendary": {
     "name": "Legendary Chest (Pro)", "icon": "chests/05.png", "rarity_color": "#F59E0B",
-    "rolls": {"cash": [1000000, 10000000], "artifact_chance": 0.30, "artifact_pool": ["rare","epic","legendary"], "casecoins": [50, 100], "perma_buff": "all_dmg_1"}
+    "rolls": {
+      "cash": [3000000, 25000000],
+      "artifact_chance": 1.0,
+      "artifact_pool": ["rare", "epic", "legendary"],
+      "casecoins": [50, 120],
+      "resources": {"case_dust": [20, 60], "clean_skins": [5, 15]},
+      "gas_chance": 0.20
+    }
   },
   "mythic": {
     "name": "Mythic Chest (Endgame)", "icon": "chests/06.png", "rarity_color": "#EC4899",
-    "rolls": {"cash": [100000000, 9999999999], "artifact_chance": 1.0, "artifact_pool": ["epic","legendary","mythic"], "casecoins": [200, 500], "mythic_item_chance": 0.05}
+    "rolls": {
+      "cash": [500000000, 99999999999],
+      "artifact_chance": 1.0,
+      "artifact_pool": ["epic", "legendary", "mythic"],
+      "casecoins": [250, 600],
+      "resources": {"clean_skins": [30, 100], "crypto": [10, 50]},
+      "gas_chance": 1.0,
+      "gas_amount": [1, 5],
+      "mythic_item_chance": 0.10
+    }
   }
 }

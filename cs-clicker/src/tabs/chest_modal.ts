@@ -92,6 +92,23 @@ function renderResult(modal: ModalHandle, data: OpenChestResult) {
     grid.appendChild(item);
   }
 
+  // Resource drops
+  if (data.resources) {
+    let delay = 400;
+    for (const [resType, amount] of Object.entries(data.resources)) {
+      const num = Number(amount);
+      if (num <= 0) continue;
+      const meta = store.config?.resources_meta[resType];
+      const item = el("div", { className: "roll-item", style: { animationDelay: `${delay}ms`, borderColor: meta?.color || "#475569" } });
+      const iconPath = meta?.icon || `resources/01.png`;
+      item.appendChild(el("img", { src: `${ASSET_BASE}/${iconPath}` }));
+      item.appendChild(el("div", { className: "name", textContent: `+${fmt(num)}`, style: { color: meta?.color || "#FFF" } }));
+      item.appendChild(el("div", { className: "label", textContent: meta?.name || resType }));
+      grid.appendChild(item);
+      delay += 100;
+    }
+  }
+
   modal.body.appendChild(grid);
   modal.setActions([{ label: "ОК", className: "primary", onClick: () => modal.close() }]);
 }

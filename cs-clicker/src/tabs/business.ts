@@ -3,6 +3,7 @@ import { store } from "../state";
 import type { BusinessDef, BusinessState, ResourceMeta } from "../types";
 import { ASSET_BASE, el, fmt } from "../util";
 import { toast } from "../ui/toast";
+import { showBusinessTreeModal } from "./biz_tree_modal";
 
 let root: HTMLElement | null = null;
 let pendingPolls: any = null;
@@ -124,13 +125,17 @@ function renderCard(bdef: BusinessDef): HTMLElement {
     return card;
   }
 
-  // Pending bar
+  // Pending bar + current owned amount
   const pending = Number(state?.pending || 0);
+  const owned = Number(store.state.resources[bdef.resource] || "0");
+  const pendingRow = el("div", { className: "biz-pending-row" });
   const pendingEl = el("div", { className: "biz-pending", dataset: { pendingFor: bdef.id } });
-  pendingEl.appendChild(el("span", {
-    textContent: `📦 Накоплено: ${fmt(Math.floor(pending))}`,
-  }));
-  card.appendChild(pendingEl);
+  pendingEl.appendChild(el("span", { textContent: `📦 Накоплено: ${fmtPending(pending)}` }));
+  pendingRow.appendChild(pendingEl);
+  const ownedEl = el("div", { className: "biz-owned" });
+  ownedEl.appendChild(el("span", { textContent: `${meta?.emoji || ""} Имею: ${fmt(owned)}`, style: { color: meta?.color || "#fff" } }));
+  pendingRow.appendChild(ownedEl);
+  card.appendChild(pendingRow);
 
   // Action row
   const actions = el("div", { className: "biz-actions" });
@@ -150,10 +155,10 @@ function renderCard(bdef: BusinessDef): HTMLElement {
   };
   actions.appendChild(tapBtn);
 
-  const collectBtn = el("button", { className: "biz-collect-btn" });
+  const collectBtn = el("button", { className: "biz-collect-btn", dataset: { collectFor: bdef.id } });
   collectBtn.appendChild(el("span", { textContent: "СОБРАТЬ" }));
-  collectBtn.appendChild(el("span", { className: "small", textContent: `${fmt(Math.floor(pending))}` }));
-  if (Math.floor(pending) <= 0) collectBtn.disabled = true;
+  collectBtn.appendChild(el("span", { className: "small", textContent: fmtPending(pending) }));
+  if (pending < 1) collectBtn.disabled = true;
   collectBtn.onclick = async () => {
     haptic("medium");
     const r = await api.businessCollect(bdef.id);
@@ -194,6 +199,17 @@ function renderCard(bdef: BusinessDef): HTMLElement {
   };
   actions.appendChild(upgradeBtn);
 
+  // 4th action: open branch tree
+  const treeBtn = el("button", { className: "biz-tree-btn" });
+  const branchSum = Object.values(state?.branches || {}).reduce((a, b) => a + (b || 0), 0);
+  treeBtn.appendChild(el("span", { textContent: "ДЕРЕВО" }));
+  treeBtn.appendChild(el("span", { className: "small", textContent: branchSum > 0 ? `${branchSum} ур.` : "5 веток" }));
+  treeBtn.onclick = () => {
+    haptic("light");
+    showBusinessTreeModal(bdef.id);
+  };
+  actions.appendChild(treeBtn);
+
   card.appendChild(actions);
 
   return card;
@@ -201,15 +217,30 @@ function renderCard(bdef: BusinessDef): HTMLElement {
 
 function refreshPendings() {
   if (!root || !store.state) return;
+  // Compute live pending = server's pending value at server_time, plus rate × elapsed-since-server_time.
+  const serverTime = new Date(store.state.server_time).getTime();
+  const elapsedMs = Date.now() - serverTime;
+  const elapsedSec = Math.max(0, elapsedMs / 1000);
   for (const b of store.state.businesses || []) {
     const node = root.querySelector(`[data-pending-for="${b.id}"] span`);
     if (node) {
-      const last = (store.state as any)._pendingTime || Date.now();
-      const elapsed = (Date.now() - last) / 1000;
-      const live = Number(b.pending) + Number(b.rate_per_sec) * elapsed;
-      node.textContent = `📦 Накоплено: ${fmt(Math.floor(live))}`;
+      const live = Number(b.pending) + Number(b.rate_per_sec) * elapsedSec;
+      node.textContent = `📦 Накоплено: ${fmtPending(live)}`;
+    }
+    const collectBtn = root.querySelector(`[data-collect-for="${b.id}"]`) as HTMLButtonElement | null;
+    if (collectBtn) {
+      const live = Number(b.pending) + Number(b.rate_per_sec) * elapsedSec;
+      const small = collectBtn.querySelector(".small");
+      if (small) small.textContent = fmtPending(live);
+      collectBtn.disabled = live < 1;
     }
   }
+}
+
+function fmtPending(v: number): string {
+  if (v < 0.1) return "0";
+  if (v < 10) return v.toFixed(1).replace(/\.0$/, "").replace(".", ",");
+  return fmt(Math.floor(v));
 }
 
 function translateError(err?: string, resource?: string): string {

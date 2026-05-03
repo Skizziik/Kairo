@@ -114,6 +114,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ target_level }),
     }),
+  businessBranchBuy: (business_id: string, branch_id: string) =>
+    request<{ state: StateSnap; new_level: number; spent_cash: string; spent_resource: string | null }>(
+      "/api/clicker/business/branch/buy",
+      { method: "POST", body: JSON.stringify({ business_id, branch_id }) },
+    ),
   leaderboard: (metric: string, limit: number = 50) =>
     request<LeaderboardEntry[]>(`/api/clicker/leaderboard?metric=${encodeURIComponent(metric)}&limit=${limit}`),
 };

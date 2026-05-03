@@ -81,16 +81,50 @@ def _business_def(business_id: str) -> dict | None:
     return None
 
 
-def _business_idle_per_sec(business_def: dict, level: int) -> Decimal:
-    """Idle production rate scales by 1.08^level."""
+def _business_branch_levels(upg_rows, business_id: str) -> dict[str, int]:
+    """Map branch_id → owned level for a given business."""
+    out: dict[str, int] = {}
+    prefix = f"bt_{business_id}_"
+    for u in upg_rows:
+        if u["kind"] == "business_branch" and u["slot_id"].startswith(prefix):
+            branch = u["slot_id"][len(prefix):]
+            out[branch] = int(u["level"])
+    return out
+
+
+def _business_branch_pcts(business_id: str, branch_levels: dict[str, int]) -> dict[str, float]:
+    """Sum branch effects for a business → {effect_key: total_pct}."""
+    totals: dict[str, float] = {}
+    branches = cfg.business_tree().get(business_id, [])
+    for b in branches:
+        lvl = branch_levels.get(b["id"], 0)
+        if lvl <= 0:
+            continue
+        eff = b.get("effect")
+        if not eff:
+            continue
+        totals[eff] = totals.get(eff, 0.0) + float(b.get("per_level", 0)) * lvl
+    return totals
+
+
+def _business_idle_per_sec(business_def: dict, level: int, branch_pcts: dict[str, float] | None = None) -> Decimal:
+    """Idle production rate scales by 1.08^level + branch idle/all bonus."""
     base = Decimal(str(business_def["base_idle_per_sec"]))
-    return base * (Decimal(str(cfg.BUSINESS_IDLE_GROWTH)) ** level)
+    rate = base * (Decimal(str(cfg.BUSINESS_IDLE_GROWTH)) ** level)
+    if branch_pcts:
+        bonus = Decimal(str(branch_pcts.get("idle_pct", 0))) + Decimal(str(branch_pcts.get("all_yield_pct", 0)))
+        rate = rate * (Decimal(1) + bonus / Decimal(100))
+    return rate
 
 
-def _business_tap_yield(business_def: dict, level: int) -> Decimal:
-    """Tap yield also scales mildly with level."""
+def _business_tap_yield(business_def: dict, level: int, branch_pcts: dict[str, float] | None = None) -> Decimal:
+    """Tap yield also scales mildly with level + branch tap/all bonus."""
     base = Decimal(str(business_def["base_tap_yield"]))
-    return base * (Decimal(str(cfg.BUSINESS_IDLE_GROWTH)) ** level)
+    yld = base * (Decimal(str(cfg.BUSINESS_IDLE_GROWTH)) ** level)
+    if branch_pcts:
+        bonus = Decimal(str(branch_pcts.get("tap_pct", 0))) + Decimal(str(branch_pcts.get("all_yield_pct", 0)))
+        yld = yld * (Decimal(1) + bonus / Decimal(100))
+    return yld
 
 
 def _business_upgrade_cost(business_def: dict, current_level: int) -> Decimal:
@@ -438,17 +472,16 @@ async def tap(tg_id: int, taps: int, dt_ms: int) -> dict:
                 if timer_ends and timer_ends.tzinfo is None:
                     timer_ends = timer_ends.replace(tzinfo=timezone.utc)
                 if timer_ends and timer_ends <= now and combat["enemy_max_hp"] > 0:
-                    # Timeout — drop level.
-                    new_level = max(int(user["checkpoint"]), level - 1, 1)
+                    # Timeout — respawn the SAME enemy at full HP, no level rollback.
                     await conn.execute(
-                        """update clicker_users set level = $2, last_combat_at = $3,
-                              total_damage = total_damage + $4
+                        """update clicker_users set last_combat_at = $2,
+                              total_damage = total_damage + $3
                            where tg_id = $1""",
-                        tg_id, new_level, now, total_dmg_inc,
+                        tg_id, now, total_dmg_inc,
                     )
-                    spawn = await _spawn_enemy_for_level(conn, tg_id, new_level, now)
+                    await _spawn_enemy_for_level(conn, tg_id, level, now)
                     result["timeout"] = True
-                    result["new_level"] = new_level
+                    result["new_level"] = level
                     return await _wrap_state(conn, tg_id, result)
 
                 await conn.execute(
@@ -619,6 +652,29 @@ async def open_chest(tg_id: int, chest_inventory_id: int) -> dict:
                 mythic_drop = random.choice(cfg.mythics())
                 await _grant_artifact(conn, tg_id, mythic_drop, "mythic")
 
+            # Resource drops.
+            resource_drops: dict[str, Decimal] = {}
+            res_rolls = rolls.get("resources") or {}
+            for res, span in res_rolls.items():
+                lo, hi = int(span[0]), int(span[1])
+                amt = random.randint(lo, hi)
+                if amt > 0:
+                    resource_drops[res] = Decimal(amt)
+
+            # Rare gas drop.
+            if random.random() < float(rolls.get("gas_chance", 0)):
+                gas_span = rolls.get("gas_amount") or [1, 1]
+                gas_amt = random.randint(int(gas_span[0]), int(gas_span[1]))
+                if gas_amt > 0:
+                    resource_drops["gas"] = resource_drops.get("gas", Decimal(0)) + Decimal(gas_amt)
+
+            for res, amt in resource_drops.items():
+                await conn.execute(
+                    """insert into clicker_resources (tg_id, resource_type, amount) values ($1, $2, $3)
+                       on conflict (tg_id, resource_type) do update set amount = clicker_resources.amount + excluded.amount""",
+                    tg_id, res, amt,
+                )
+
             await conn.execute(
                 """update clicker_inventory set consumed_at = $2 where id = $1""",
                 chest_inventory_id, now,
@@ -636,6 +692,7 @@ async def open_chest(tg_id: int, chest_inventory_id: int) -> dict:
                 "tier": tier, "cash": str(cash_drop), "casecoins": cc_drop,
                 "artifact": artifact_drop["id"] if artifact_drop else None,
                 "mythic": mythic_drop["id"] if mythic_drop else None,
+                "resources": {k: str(v) for k, v in resource_drops.items()},
             })
 
             return await _wrap_state(conn, tg_id, {
@@ -644,6 +701,7 @@ async def open_chest(tg_id: int, chest_inventory_id: int) -> dict:
                 "casecoins": cc_drop,
                 "artifact": artifact_drop,
                 "mythic": mythic_drop,
+                "resources": {k: str(v) for k, v in resource_drops.items()},
             })
 
 
@@ -1060,6 +1118,12 @@ async def _build_state(conn, tg_id: int) -> dict:
             produced = (rate * Decimal(str(elapsed)))
             pending = Decimal(biz_row["pending_amount"]) + produced
         biz_res_cost = _business_resource_cost(bdef, bus_level)
+        # Branch state for this business
+        branch_lvls = _business_branch_levels(upg_rows, bid)
+        # Recompute rate/tap with branch bonuses
+        branch_pcts = _business_branch_pcts(bid, branch_lvls)
+        rate = _business_idle_per_sec(bdef, bus_level, branch_pcts)
+        tap_yield = _business_tap_yield(bdef, bus_level, branch_pcts)
         biz_state.append({
             "id": bid,
             "level": bus_level,
@@ -1070,6 +1134,8 @@ async def _build_state(conn, tg_id: int) -> dict:
             "pending": str(pending.quantize(Decimal("0.01"))),
             "upgrade_cost": str(upgrade_cost),
             "upgrade_resource_cost": {k: str(v) for k, v in biz_res_cost.items()},
+            "branches": branch_lvls,
+            "branch_bonuses": branch_pcts,
         })
 
     level = int(user["level"])
@@ -1151,8 +1217,7 @@ def _next_boss_level(level: int) -> int:
 
 
 async def _accrue_business_idle(conn, tg_id: int, business_id: str, now: datetime) -> Decimal:
-    """Compute new idle pending amount and update last_idle_at to `now`.
-    Returns the *new total* pending (not delta)."""
+    """Compute new idle pending amount and update last_idle_at to `now`."""
     bdef = _business_def(business_id)
     if not bdef:
         return Decimal(0)
@@ -1164,7 +1229,14 @@ async def _accrue_business_idle(conn, tg_id: int, business_id: str, now: datetim
     cap = cfg.BUSINESS_IDLE_CAP_HOURS * 3600
     elapsed = min(elapsed, cap)
     level = await _business_level(conn, tg_id, business_id)
-    rate = _business_idle_per_sec(bdef, level)
+    # Apply branch idle bonus.
+    upg_rows = await conn.fetch(
+        "select kind, slot_id, level from clicker_upgrades where tg_id = $1 and kind = 'business_branch'",
+        tg_id,
+    )
+    branch_lvls = _business_branch_levels(upg_rows, business_id)
+    branch_pcts = _business_branch_pcts(business_id, branch_lvls)
+    rate = _business_idle_per_sec(bdef, level, branch_pcts)
     produced = (rate * Decimal(str(elapsed))).quantize(Decimal("0.0001"))
     new_pending = Decimal(state["pending_amount"]) + produced
     await conn.execute(
@@ -1190,7 +1262,13 @@ async def business_tap(tg_id: int, business_id: str) -> dict:
             if int(user["max_level"]) < int(bdef["unlock_level"]):
                 return {"ok": False, "error": "locked", "unlock_level": int(bdef["unlock_level"])}
             level = await _business_level(conn, tg_id, business_id)
-            yield_amount = _business_tap_yield(bdef, level)
+            upg_rows = await conn.fetch(
+                "select kind, slot_id, level from clicker_upgrades where tg_id = $1 and kind = 'business_branch'",
+                tg_id,
+            )
+            branch_lvls = _business_branch_levels(upg_rows, business_id)
+            branch_pcts = _business_branch_pcts(business_id, branch_lvls)
+            yield_amount = _business_tap_yield(bdef, level, branch_pcts)
             await conn.execute(
                 """insert into clicker_resources (tg_id, resource_type, amount) values ($1, $2, $3)
                    on conflict (tg_id, resource_type) do update set amount = clicker_resources.amount + excluded.amount""",
@@ -1198,6 +1276,90 @@ async def business_tap(tg_id: int, business_id: str) -> dict:
             )
     state = await get_state(tg_id)
     return {"ok": True, "data": {**state["data"], "tapped": str(yield_amount), "resource": bdef["resource"]}}
+
+
+async def buy_business_branch(tg_id: int, business_id: str, branch_id: str) -> dict:
+    """Spend cash + (optionally) the business's own resource to level a branch."""
+    branches = cfg.business_tree().get(business_id, [])
+    branch_def = next((b for b in branches if b["id"] == branch_id), None)
+    if not branch_def:
+        return {"ok": False, "error": "unknown_branch"}
+    bdef = _business_def(business_id)
+    if not bdef:
+        return {"ok": False, "error": "unknown_business"}
+    now = _now()
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            user = await conn.fetchrow(
+                "select cash, max_level from clicker_users where tg_id = $1 for update", tg_id,
+            )
+            if not user:
+                return {"ok": False, "error": "no_user"}
+            if int(user["max_level"]) < int(bdef["unlock_level"]):
+                return {"ok": False, "error": "locked"}
+
+            slot_id = f"bt_{business_id}_{branch_id}"
+            cur = await conn.fetchrow(
+                """select level from clicker_upgrades
+                   where tg_id = $1 and kind = 'business_branch' and slot_id = $2 for update""",
+                tg_id, slot_id,
+            )
+            cur_level = int(cur["level"]) if cur else 0
+            if cur_level >= int(branch_def.get("max_level", 10)):
+                return {"ok": False, "error": "max_level"}
+
+            base_cost = Decimal(str(branch_def["base_cost"]))
+            cost = (base_cost * (Decimal("1.20") ** cur_level)).quantize(Decimal("1"))
+            if Decimal(user["cash"]) < cost:
+                return {"ok": False, "error": "not_enough_cash", "needed": str(cost)}
+
+            res_type = branch_def.get("cost_resource")
+            res_cost = Decimal(0)
+            if res_type:
+                cost_pl = branch_def.get("cost_per_level", 0)
+                res_cost = (Decimal(str(cost_pl)) * (Decimal("1.20") ** cur_level)).quantize(Decimal("1"))
+                row = await conn.fetchrow(
+                    "select amount from clicker_resources where tg_id = $1 and resource_type = $2 for update",
+                    tg_id, res_type,
+                )
+                have = Decimal(row["amount"]) if row else Decimal(0)
+                if have < res_cost:
+                    return {
+                        "ok": False, "error": "not_enough_resource",
+                        "resource": res_type, "needed": str(res_cost), "have": str(have),
+                    }
+
+            # Accrue current rate before bumping level — so new bonus only applies forward.
+            await _accrue_business_idle(conn, tg_id, business_id, now)
+
+            new_level = cur_level + 1
+            if cur:
+                await conn.execute(
+                    """update clicker_upgrades set level = $3
+                       where tg_id = $1 and kind = 'business_branch' and slot_id = $2""",
+                    tg_id, slot_id, new_level,
+                )
+            else:
+                await conn.execute(
+                    """insert into clicker_upgrades (tg_id, kind, slot_id, level)
+                       values ($1, 'business_branch', $2, $3)""",
+                    tg_id, slot_id, new_level,
+                )
+            await conn.execute("update clicker_users set cash = cash - $2 where tg_id = $1", tg_id, cost)
+            if res_type and res_cost > 0:
+                await conn.execute(
+                    "update clicker_resources set amount = amount - $3 where tg_id = $1 and resource_type = $2",
+                    tg_id, res_type, res_cost,
+                )
+            await _log(conn, tg_id, "business_branch_bought", {
+                "business_id": business_id, "branch_id": branch_id,
+                "from": cur_level, "to": new_level, "cost": str(cost),
+                "res_cost": {res_type: str(res_cost)} if res_type else {},
+            })
+            return await _wrap_state(conn, tg_id, {
+                "business_id": business_id, "branch_id": branch_id, "new_level": new_level,
+                "spent_cash": str(cost), "spent_resource": str(res_cost) if res_type else None,
+            })
 
 
 async def business_collect(tg_id: int, business_id: str | None = None) -> dict:
@@ -1334,6 +1496,7 @@ def public_config() -> dict:
         "businesses": cfg.businesses(),
         "resources_meta": cfg.resources_meta(),
         "prestige_tree": cfg.prestige_tree(),
+        "business_tree": cfg.business_tree(),
         "constants": {
             "level_time_normal": cfg.LEVEL_TIME_NORMAL,
             "level_time_boss": cfg.LEVEL_TIME_BOSS,

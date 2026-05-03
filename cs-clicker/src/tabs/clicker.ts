@@ -295,8 +295,8 @@ function handleTapResult(data: TapResult) {
       toast(`🎁 Сундук: ${data.chest_dropped}!`, "success", 3000);
     }
   } else if (data.timeout) {
-    hapticNotify("error");
-    toast("⏱ Время вышло — откат на уровень ниже", "error");
+    hapticNotify("warning");
+    toast("⏱ Время вышло — респавн врага", "info");
   }
 
   // ANTI-BOUNCE: server's view of enemy_hp can lag behind local optimistic taps

@@ -66,6 +66,20 @@ export interface BusinessState {
   pending: string;
   upgrade_cost: string;
   upgrade_resource_cost: Record<string, string>;
+  branches: Record<string, number>;
+  branch_bonuses: Record<string, number>;
+}
+
+export interface BusinessBranchDef {
+  id: string;
+  name: string;
+  icon: string;
+  max_level: number;
+  base_cost: number;
+  cost_resource: string | null;
+  cost_per_level?: number;
+  effect: string;
+  per_level: number;
 }
 
 export interface StateSnap {
@@ -196,6 +210,7 @@ export interface ConfigSnap {
   businesses: BusinessDef[];
   resources_meta: Record<string, ResourceMeta>;
   prestige_tree: PrestigeNodeDef[];
+  business_tree: Record<string, BusinessBranchDef[]>;
   constants: {
     level_time_normal: number;
     level_time_boss: number;
@@ -244,6 +259,7 @@ export interface OpenChestResult {
   casecoins: number;
   artifact: ArtifactDef | null;
   mythic: MythicDef | null;
+  resources?: Record<string, string>;
 }
 
 export interface LeaderboardEntry {
