@@ -297,7 +297,14 @@ async function flushTaps() {
   try {
     const r = await api.tap(taps, 250);
     if (!r.ok || !r.data) {
-      console.warn("tap failed", r);
+      if (r.error === "rate_limit") {
+        // Server enforced the 10/sec cap. Drop all pending and prompt to buy permit.
+        pendingTaps = 0;
+        hapticNotify("warning");
+        toast(`⛔ Лимит ${(r as any).rate_cap || 10}/сек. Купи Лицензию (10⌬) для авто-клика`, "error", 3000);
+      } else {
+        console.warn("tap failed", r);
+      }
       isFlushingTaps = false;
       return;
     }

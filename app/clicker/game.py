@@ -638,22 +638,35 @@ async def tap(tg_id: int, taps: int, dt_ms: int) -> dict:
             if user["banned"]:
                 return {"ok": False, "error": "banned"}
 
-            # Rate-limit taps to TAP_RATE_BASE/sec unless the player owns clicker_permit.
-            # Permit removes the cap so external auto-clickers are tolerated.
+            # Rate-limit: STRICT 1-sec sliding window of TAP_RATE_BASE taps total.
+            # Once the window is full, any further tap request is hard-rejected.
+            # Permit removes the cap entirely (external auto-clickers OK).
             permit_lvl = await conn.fetchval(
                 "select level from clicker_upgrades where tg_id = $1 and kind = 'permit' and slot_id = 'clicker_permit'",
                 tg_id,
             )
             if not permit_lvl:
-                last_combat_for_rate = user["last_combat_at"]
-                if last_combat_for_rate is None:
-                    rate_window_s = 1.0
+                try:
+                    win_s = user["tap_window_start"]
+                    win_c = int(user["tap_window_count"] or 0)
+                except (KeyError, IndexError):
+                    win_s, win_c = None, 0
+                if win_s and win_s.tzinfo is None:
+                    win_s = win_s.replace(tzinfo=timezone.utc)
+                if win_s and (now - win_s).total_seconds() < 1.0:
+                    remaining = max(0, cfg.TAP_RATE_BASE - win_c)
+                    if remaining <= 0:
+                        return {"ok": False, "error": "rate_limit", "rate_cap": cfg.TAP_RATE_BASE}
+                    if taps > remaining:
+                        taps = remaining
+                    new_s, new_c = win_s, win_c + taps
                 else:
-                    if last_combat_for_rate.tzinfo is None:
-                        last_combat_for_rate = last_combat_for_rate.replace(tzinfo=timezone.utc)
-                    rate_window_s = max(0.05, min(5.0, (now - last_combat_for_rate).total_seconds()))
-                max_allowed = max(1, int(rate_window_s * cfg.TAP_RATE_BASE))
-                taps = min(taps, max_allowed)
+                    taps = min(taps, cfg.TAP_RATE_BASE)
+                    new_s, new_c = now, taps
+                await conn.execute(
+                    "update clicker_users set tap_window_start = $2, tap_window_count = $3 where tg_id = $1",
+                    tg_id, new_s, new_c,
+                )
 
             combat = await conn.fetchrow(
                 "select * from clicker_combat_state where tg_id = $1 for update", tg_id,
