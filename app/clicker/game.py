@@ -656,7 +656,10 @@ async def tap(tg_id: int, taps: int, dt_ms: int) -> dict:
                 if win_s and (now - win_s).total_seconds() < 1.0:
                     remaining = max(0, cfg.TAP_RATE_BASE - win_c)
                     if remaining <= 0:
-                        return {"ok": False, "error": "rate_limit", "rate_cap": cfg.TAP_RATE_BASE}
+                        # Surface current state so the client can correct optimistic UI.
+                        state = await _build_state(conn, tg_id)
+                        return {"ok": False, "error": "rate_limit", "rate_cap": cfg.TAP_RATE_BASE,
+                                "data": {"state": state}}
                     if taps > remaining:
                         taps = remaining
                     new_s, new_c = win_s, win_c + taps
