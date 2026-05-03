@@ -1,0 +1,7 @@
+[
+  {"id": "01", "name": "Картонный AWP",         "icon": "mythic/01.png", "effect": {"every_100_clicks_x1000": true}},
+  {"id": "02", "name": "Серт. Global Elite",    "icon": "mythic/02.png", "effect": {"offline_pct": 50}},
+  {"id": "03", "name": "Стикер Half-Life 3",    "icon": "mythic/03.png", "effect": {"all_income_pct": 11}},
+  {"id": "04", "name": "Скин AK Wild Lotus",    "icon": "mythic/04.png", "effect": {"resource_drop_x1_5": true}},
+  {"id": "05", "name": "Пин Гейба Ньюэлла",     "icon": "mythic/05.png", "effect": {"click_chance_free_chest_pct": 1}}
+]

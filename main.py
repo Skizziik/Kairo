@@ -9,8 +9,10 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 
+from app.api.clicker_api import router as clicker_router
 from app.api.economy_api import router as economy_router
 from app.bot import get_bot, get_dispatcher
+from app.clicker import audit as _clicker_audit
 from app.config import get_settings
 from app.db.client import close_pool, init_pool
 from app.economy import audit as _audit
@@ -96,6 +98,10 @@ async def lifespan(_: FastAPI):
         await _market.ensure_schema()
     except Exception as e:
         log.warning("market schema migration failed: %s", e)
+    try:
+        await _clicker_audit.ensure_schema()
+    except Exception as e:
+        log.warning("clicker schema migration failed: %s", e)
     # Trim oversized case pools (idempotent — only changes if current count > cap)
     try:
         await _case_rebalance.rebalance_all()
@@ -184,6 +190,7 @@ app.add_middleware(
 )
 
 app.include_router(economy_router)
+app.include_router(clicker_router)
 
 
 @app.get("/", response_class=PlainTextResponse)

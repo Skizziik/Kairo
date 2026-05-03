@@ -37,6 +37,7 @@ def _register(dp: Dispatcher) -> None:
     from app.handlers import (
         ai_chat,
         audit_cmd,
+        clicker,
         economy_cmds,
         extract,
         feedback,
@@ -99,6 +100,7 @@ def _register(dp: Dispatcher) -> None:
         top.router,
         google.router,           # /google + "загугли X" trigger
         economy_cmds.router,     # /balance /daily /casino
+        clicker.router,          # /clicker /cstatus
         audit_cmd.router,        # /audit @user [period] (admin)
         mystery_drop.router,     # claim_drop callback
         roll.router,

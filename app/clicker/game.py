@@ -1,0 +1,906 @@
+"""Core CS:Clicker game logic. All numbers server-side.
+
+Flow:
+  - Player taps  → /api/clicker/tap with N taps + window. Server applies damage,
+    checks crits, drops coins, advances level on kill.
+  - /state       → full snapshot for HUD.
+  - /upgrade     → buy upgrade level (idempotent atomic).
+  - /chest/open  → roll loot from chest.
+  - /artifact/equip — slot management.
+  - /prestige    — reset for ★ glory.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import random
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
+from typing import Any
+
+from app.db.client import pool
+from app.clicker import config_loader as cfg
+
+log = logging.getLogger(__name__)
+
+
+# ---------- helpers ---------------------------------------------------------
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _parse_jsonb(val: Any) -> Any:
+    if val is None:
+        return None
+    if isinstance(val, (dict, list)):
+        return val
+    if isinstance(val, str):
+        try:
+            return json.loads(val)
+        except Exception:
+            return None
+    return None
+
+
+def _hp_for_level(level: int) -> Decimal:
+    base = Decimal(cfg.HP_BASE) * (Decimal(str(cfg.HP_GROWTH)) ** level)
+    boss = cfg.boss_for_level(level)
+    if boss:
+        base = base * Decimal(str(cfg.HP_BOSS_MULT))
+    return base.quantize(Decimal("1"))
+
+
+def _coin_drop(hp: Decimal, luck: Decimal) -> Decimal:
+    base = hp * Decimal(str(cfg.COIN_DROP_RATIO)) * (Decimal(1) + (luck / Decimal(100)))
+    return base.quantize(Decimal("1"))
+
+
+def _is_boss_level(level: int) -> bool:
+    return cfg.boss_for_level(level) is not None
+
+
+def _level_timer_seconds(level: int) -> int:
+    return cfg.LEVEL_TIME_BOSS if _is_boss_level(level) else cfg.LEVEL_TIME_NORMAL
+
+
+def _upgrade_cost(base_cost: int | float, level: int) -> Decimal:
+    return (Decimal(str(base_cost)) * (Decimal(str(cfg.COST_GROWTH)) ** level)).quantize(Decimal("1"))
+
+
+def _upgrade_damage(base_dmg: int | float, level: int) -> Decimal:
+    """+20% per level inside one slot. Level 0 = base, level 1 = base*1.2..."""
+    return Decimal(str(base_dmg)) * (Decimal(1) + Decimal(str(cfg.DAMAGE_PER_LEVEL)) * level)
+
+
+# ---------- ensure_user / state --------------------------------------------
+
+
+async def ensure_user(tg_id: int, **profile) -> dict:
+    """Create row + initial combat state if first visit."""
+    now = _now()
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                insert into clicker_users (tg_id, username, first_name, last_name, is_premium)
+                values ($1, $2, $3, $4, $5)
+                on conflict (tg_id) do update set
+                    username = coalesce(excluded.username, clicker_users.username),
+                    first_name = coalesce(excluded.first_name, clicker_users.first_name),
+                    last_name = coalesce(excluded.last_name, clicker_users.last_name),
+                    is_premium = excluded.is_premium,
+                    last_seen_at = now()
+                returning *, (xmax = 0) as inserted
+                """,
+                tg_id,
+                profile.get("username"),
+                profile.get("first_name"),
+                profile.get("last_name"),
+                bool(profile.get("is_premium", False)),
+            )
+
+            if row["inserted"]:
+                # Seed starting weapon (slot 1, level 0 — i.e. just owned/active).
+                await conn.execute(
+                    """insert into clicker_upgrades (tg_id, kind, slot_id, level)
+                       values ($1, 'weapon', 'weapon_01', 0)
+                       on conflict do nothing""",
+                    tg_id,
+                )
+                # Initial combat state for level 1.
+                await _spawn_enemy_for_level(conn, tg_id, 1, now)
+
+    return dict(row)
+
+
+async def _spawn_enemy_for_level(conn, tg_id: int, level: int, now: datetime) -> dict:
+    """Set the combat HP bar for the given level."""
+    hp = _hp_for_level(level)
+    is_boss = _is_boss_level(level)
+    timer_s = _level_timer_seconds(level)
+    timer_ends_at = now + timedelta(seconds=timer_s)
+    await conn.execute(
+        """insert into clicker_combat_state (tg_id, enemy_hp, enemy_max_hp, is_boss, timer_ends_at, updated_at)
+           values ($1, $2, $2, $3, $4, $5)
+           on conflict (tg_id) do update set
+             enemy_hp = excluded.enemy_hp,
+             enemy_max_hp = excluded.enemy_max_hp,
+             is_boss = excluded.is_boss,
+             timer_ends_at = excluded.timer_ends_at,
+             updated_at = excluded.updated_at""",
+        tg_id, hp, is_boss, timer_ends_at, now,
+    )
+    return {"hp": hp, "max_hp": hp, "is_boss": is_boss, "timer_ends_at": timer_ends_at}
+
+
+# ---------- damage / stat aggregation --------------------------------------
+
+
+def _artifact_effects(equipped: list[dict]) -> dict[str, float]:
+    """Sum up percentage effects from equipped artifacts/mythics."""
+    totals: dict[str, float] = {}
+    for inst in equipped:
+        eff = inst.get("effect") or {}
+        for k, v in eff.items():
+            if isinstance(v, (int, float)):
+                totals[k] = totals.get(k, 0.0) + float(v)
+    return totals
+
+
+async def _equipped_artifacts(conn, tg_id: int) -> list[dict]:
+    """Return list of equipped artifacts/mythics with their effect dicts."""
+    art_index = {a["id"]: a for a in cfg.artifacts()}
+    mythic_index = {m["id"]: m for m in cfg.mythics()}
+    rows = await conn.fetch(
+        """select * from clicker_inventory
+           where tg_id = $1 and equipped_slot is not null and consumed_at is null""",
+        tg_id,
+    )
+    out = []
+    for r in rows:
+        if r["item_kind"] == "artifact":
+            # item_id is "artifact_<NN>"; strip prefix.
+            short = r["item_id"].replace("artifact_", "", 1)
+            spec = art_index.get(short)
+        elif r["item_kind"] == "mythic":
+            short = r["item_id"].replace("mythic_", "", 1)
+            spec = mythic_index.get(short)
+        else:
+            spec = None
+        if spec:
+            out.append({"effect": spec.get("effect", {}), "spec": spec})
+    return out
+
+
+async def _recompute_stats(conn, tg_id: int) -> dict:
+    """Recompute combat stats from upgrades + artifacts + prestige bonuses."""
+    upg_rows = await conn.fetch(
+        "select kind, slot_id, level from clicker_upgrades where tg_id = $1",
+        tg_id,
+    )
+    weapons_index = {f"weapon_{w['id']}": w for w in cfg.weapons()}
+    mercs_index = {f"merc_{m['id']}": m for m in cfg.mercs()}
+    crit_luck_specs = cfg.crit_luck()
+    crit_chance_index = {f"cc_{u['id']}": u for u in crit_luck_specs.get("crit_chance", [])}
+    crit_dmg_index = {f"cd_{u['id']}": u for u in crit_luck_specs.get("crit_damage", [])}
+    luck_index = {f"lk_{u['id']}": u for u in crit_luck_specs.get("luck", [])}
+
+    click_dmg = Decimal(0)
+    auto_dps = Decimal(0)
+    crit_chance_pct = Decimal(0)
+    crit_dmg_mult = Decimal(2)  # base ×2
+    luck = Decimal(0)
+
+    for u in upg_rows:
+        kind = u["kind"]; slot = u["slot_id"]; lvl = int(u["level"])
+        if kind == "weapon":
+            spec = weapons_index.get(slot)
+            if spec:
+                click_dmg += _upgrade_damage(spec["base_dmg"], lvl)
+        elif kind == "merc":
+            spec = mercs_index.get(slot)
+            if spec:
+                auto_dps += _upgrade_damage(spec["base_dps"], lvl)
+        elif kind == "crit_chance":
+            spec = crit_chance_index.get(slot)
+            if spec and lvl > 0:
+                crit_chance_pct += Decimal(str(spec["per_level_pct"])) * lvl
+        elif kind == "crit_damage":
+            spec = crit_dmg_index.get(slot)
+            if spec and lvl > 0:
+                # crit damage adds % to the multiplier base of 2.0.
+                # spec["per_level_pct"] is +5%/level → multiplier += 0.05*lvl.
+                crit_dmg_mult += Decimal(str(spec["per_level_pct"])) * lvl / Decimal(100)
+        elif kind == "luck":
+            spec = luck_index.get(slot)
+            if spec and lvl > 0:
+                luck += Decimal(str(spec["per_level_pct"])) * lvl
+
+    # Apply artifact/mythic percentage bonuses.
+    equipped = await _equipped_artifacts(conn, tg_id)
+    eff = _artifact_effects(equipped)
+
+    def pct(name: str, base: Decimal) -> Decimal:
+        return base * (Decimal(1) + Decimal(str(eff.get(name, 0))) / Decimal(100))
+
+    click_dmg = pct("click_damage_pct", click_dmg)
+    click_dmg = pct("all_dmg_pct", click_dmg)
+    click_dmg = pct("all_income_pct", click_dmg)  # mild — affects damage too via Stickers HL3 lore
+    auto_dps = pct("auto_dps_pct", auto_dps)
+    auto_dps = pct("all_dmg_pct", auto_dps)
+    crit_chance_pct = pct("crit_chance_pct", crit_chance_pct) if crit_chance_pct > 0 else crit_chance_pct
+    crit_chance_pct += Decimal(str(eff.get("crit_chance_pct", 0)))
+    crit_dmg_mult += Decimal(str(eff.get("crit_dmg_pct", 0))) / Decimal(100)
+    luck = pct("luck_pct", luck)
+
+    # Cap crit chance at 100%.
+    if crit_chance_pct > 100:
+        crit_chance_pct = Decimal(100)
+
+    await conn.execute(
+        """update clicker_users set
+              click_damage = $2,
+              auto_dps = $3,
+              crit_chance = $4,
+              crit_multiplier = $5,
+              luck = $6
+           where tg_id = $1""",
+        tg_id, click_dmg, auto_dps, crit_chance_pct, crit_dmg_mult, luck,
+    )
+
+    return {
+        "click_damage": click_dmg,
+        "auto_dps": auto_dps,
+        "crit_chance": crit_chance_pct,
+        "crit_multiplier": crit_dmg_mult,
+        "luck": luck,
+    }
+
+
+# ---------- tap / combat ---------------------------------------------------
+
+
+async def tap(tg_id: int, taps: int, dt_ms: int) -> dict:
+    """Apply N taps to current enemy. Includes auto-DPS for elapsed seconds.
+
+    `taps` is clamped server-side (anti-spam: max 30/sec).
+    `dt_ms` is the ms elapsed since the player's previous request — server uses
+    its own time delta if smaller (anti-cheat).
+    """
+    now = _now()
+    taps = max(0, min(int(taps), 60))  # max 60 taps per request
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            user = await conn.fetchrow(
+                "select * from clicker_users where tg_id = $1 for update", tg_id,
+            )
+            if not user:
+                return {"ok": False, "error": "no_user"}
+            if user["banned"]:
+                return {"ok": False, "error": "banned"}
+
+            combat = await conn.fetchrow(
+                "select * from clicker_combat_state where tg_id = $1 for update", tg_id,
+            )
+            if not combat:
+                combat_dict = await _spawn_enemy_for_level(conn, tg_id, int(user["level"]), now)
+                combat = await conn.fetchrow(
+                    "select * from clicker_combat_state where tg_id = $1 for update", tg_id,
+                )
+
+            level = int(user["level"])
+            click_dmg = Decimal(user["click_damage"])
+            auto_dps = Decimal(user["auto_dps"])
+            crit_chance = float(user["crit_chance"])
+            crit_mult = Decimal(user["crit_multiplier"])
+            luck = Decimal(user["luck"])
+
+            # Time delta: bounded by server clock + max 5s window.
+            last_combat = user["last_combat_at"]
+            if last_combat is None:
+                elapsed_s = 1.0
+            else:
+                if last_combat.tzinfo is None:
+                    last_combat = last_combat.replace(tzinfo=timezone.utc)
+                elapsed_s = max(0.0, min(5.0, (now - last_combat).total_seconds()))
+
+            # Apply tap damage with crits.
+            tap_damage = Decimal(0)
+            crits = 0
+            for _ in range(taps):
+                if random.random() * 100 < crit_chance:
+                    tap_damage += click_dmg * crit_mult
+                    crits += 1
+                else:
+                    tap_damage += click_dmg
+
+            # Apply auto-DPS for elapsed window.
+            auto_damage = (auto_dps * Decimal(str(elapsed_s))).quantize(Decimal("1"))
+
+            total_damage = tap_damage + auto_damage
+            new_hp = Decimal(combat["enemy_hp"]) - total_damage
+            killed = new_hp <= 0
+
+            # Track total damage for BP-XP (1k dmg = 1 BP-XP).
+            total_dmg_inc = total_damage if total_damage > 0 else Decimal(0)
+
+            result: dict[str, Any] = {
+                "tap_damage": str(tap_damage),
+                "auto_damage": str(auto_damage),
+                "crits": crits,
+                "killed": False,
+            }
+
+            if not killed:
+                # Check timer expiry.
+                timer_ends = combat["timer_ends_at"]
+                if timer_ends and timer_ends.tzinfo is None:
+                    timer_ends = timer_ends.replace(tzinfo=timezone.utc)
+                if timer_ends and timer_ends <= now and combat["enemy_max_hp"] > 0:
+                    # Timeout — drop level.
+                    new_level = max(int(user["checkpoint"]), level - 1, 1)
+                    await conn.execute(
+                        """update clicker_users set level = $2, last_combat_at = $3,
+                              total_damage = total_damage + $4
+                           where tg_id = $1""",
+                        tg_id, new_level, now, total_dmg_inc,
+                    )
+                    spawn = await _spawn_enemy_for_level(conn, tg_id, new_level, now)
+                    result["timeout"] = True
+                    result["new_level"] = new_level
+                    return await _wrap_state(conn, tg_id, result)
+
+                await conn.execute(
+                    """update clicker_combat_state set enemy_hp = $2, updated_at = $3
+                       where tg_id = $1""",
+                    tg_id, new_hp, now,
+                )
+                await conn.execute(
+                    """update clicker_users set last_combat_at = $2,
+                          total_damage = total_damage + $3
+                       where tg_id = $1""",
+                    tg_id, now, total_dmg_inc,
+                )
+                result["enemy_hp"] = str(new_hp)
+                return await _wrap_state(conn, tg_id, result)
+
+            # Killed!
+            killed_hp = Decimal(combat["enemy_max_hp"])
+            coin_reward = _coin_drop(killed_hp, luck)
+            if combat["is_boss"]:
+                coin_reward = coin_reward * cfg.BOSS_COIN_MULT
+
+            chest_dropped: str | None = None
+            artifact_dropped: dict | None = None
+
+            if combat["is_boss"]:
+                boss_def = cfg.boss_for_level(level)
+                if boss_def:
+                    drop_chance = cfg.BOSS_CHEST_DROP_BASE
+                    user_kills = int(user["bosses_killed"])
+                    is_first_kill_of_first_boss = (boss_def["id"] == "01") and user_kills == 0
+                    if is_first_kill_of_first_boss or random.random() < drop_chance:
+                        chest_dropped = boss_def["chest"]
+                        await _grant_chest(conn, tg_id, chest_dropped)
+                    if boss_def.get("guaranteed_artifact"):
+                        # Guaranteed artifact from the matching chest tier.
+                        a = _roll_artifact(boss_def["chest"])
+                        if a:
+                            await _grant_artifact(conn, tg_id, a, "artifact")
+                            artifact_dropped = a
+                    if boss_def.get("guaranteed_mythic"):
+                        m = random.choice(cfg.mythics())
+                        await _grant_artifact(conn, tg_id, m, "mythic")
+                        artifact_dropped = m
+                    await conn.execute(
+                        "update clicker_users set bosses_killed = bosses_killed + 1 where tg_id = $1",
+                        tg_id,
+                    )
+
+            new_level = level + 1
+            new_max = max(int(user["max_level"]), new_level)
+            new_checkpoint = int(user["checkpoint"])
+            if level % cfg.CHECKPOINT_EVERY == 0 and level > new_checkpoint:
+                new_checkpoint = level
+            await conn.execute(
+                """update clicker_users set
+                      level = $2,
+                      max_level = $3,
+                      checkpoint = $4,
+                      cash = cash + $5,
+                      last_combat_at = $6,
+                      total_damage = total_damage + $7
+                   where tg_id = $1""",
+                tg_id, new_level, new_max, new_checkpoint, coin_reward, now, total_dmg_inc,
+            )
+            await _spawn_enemy_for_level(conn, tg_id, new_level, now)
+
+            result["killed"] = True
+            result["coin_reward"] = str(coin_reward)
+            result["was_boss"] = combat["is_boss"]
+            result["new_level"] = new_level
+            if chest_dropped:
+                result["chest_dropped"] = chest_dropped
+            if artifact_dropped:
+                result["artifact_dropped"] = artifact_dropped
+
+            return await _wrap_state(conn, tg_id, result)
+
+
+# ---------- chest / artifact roll mechanics ---------------------------------
+
+
+def _roll_artifact(chest_tier: str) -> dict | None:
+    spec = cfg.chests().get(chest_tier)
+    if not spec:
+        return None
+    pool = spec["rolls"].get("artifact_pool") or []
+    candidates = [a for a in cfg.artifacts() if a["rarity"] in pool]
+    if not candidates:
+        return None
+    return random.choice(candidates)
+
+
+async def _grant_chest(conn, tg_id: int, chest_tier: str) -> int:
+    spec = cfg.chests().get(chest_tier)
+    if not spec:
+        return 0
+    row = await conn.fetchrow(
+        """insert into clicker_inventory (tg_id, item_kind, item_id, rarity)
+           values ($1, 'chest', $2, $3)
+           returning id""",
+        tg_id, f"chest_{chest_tier}", chest_tier,
+    )
+    return int(row["id"])
+
+
+async def _grant_artifact(conn, tg_id: int, artifact_def: dict, kind: str) -> int:
+    rarity = artifact_def.get("rarity", "mythic" if kind == "mythic" else "common")
+    item_id = f"{kind}_{artifact_def['id']}"
+    row = await conn.fetchrow(
+        """insert into clicker_inventory (tg_id, item_kind, item_id, rarity)
+           values ($1, $2, $3, $4)
+           returning id""",
+        tg_id, kind, item_id, rarity,
+    )
+    return int(row["id"])
+
+
+async def open_chest(tg_id: int, chest_inventory_id: int) -> dict:
+    """Roll loot from a chest in inventory. Atomic, idempotent via consumed_at."""
+    now = _now()
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            chest = await conn.fetchrow(
+                """select * from clicker_inventory where id = $1 and tg_id = $2 and item_kind = 'chest'
+                   and consumed_at is null for update""",
+                chest_inventory_id, tg_id,
+            )
+            if not chest:
+                return {"ok": False, "error": "chest_not_found"}
+
+            tier = chest["rarity"]
+            spec = cfg.chests().get(tier)
+            if not spec:
+                return {"ok": False, "error": "bad_tier"}
+
+            rolls = spec["rolls"]
+            cash_min, cash_max = rolls["cash"]
+            cash_drop = Decimal(random.randint(int(cash_min), int(cash_max)))
+
+            cc_drop = 0
+            if rolls.get("casecoins"):
+                cc_min, cc_max = rolls["casecoins"]
+                cc_drop = random.randint(int(cc_min), int(cc_max))
+
+            artifact_drop = None
+            if random.random() < float(rolls.get("artifact_chance", 0)):
+                artifact_drop = _roll_artifact(tier)
+                if artifact_drop:
+                    await _grant_artifact(conn, tg_id, artifact_drop, "artifact")
+
+            mythic_drop = None
+            if rolls.get("mythic_item_chance") and random.random() < float(rolls["mythic_item_chance"]):
+                mythic_drop = random.choice(cfg.mythics())
+                await _grant_artifact(conn, tg_id, mythic_drop, "mythic")
+
+            await conn.execute(
+                """update clicker_inventory set consumed_at = $2 where id = $1""",
+                chest_inventory_id, now,
+            )
+            await conn.execute(
+                """update clicker_users set
+                      cash = cash + $2,
+                      casecoins = casecoins + $3,
+                      chests_opened = chests_opened + 1
+                   where tg_id = $1""",
+                tg_id, cash_drop, cc_drop,
+            )
+
+            await _log(conn, tg_id, "chest_opened", {
+                "tier": tier, "cash": str(cash_drop), "casecoins": cc_drop,
+                "artifact": artifact_drop["id"] if artifact_drop else None,
+                "mythic": mythic_drop["id"] if mythic_drop else None,
+            })
+
+            return await _wrap_state(conn, tg_id, {
+                "tier": tier,
+                "cash": str(cash_drop),
+                "casecoins": cc_drop,
+                "artifact": artifact_drop,
+                "mythic": mythic_drop,
+            })
+
+
+# ---------- upgrades --------------------------------------------------------
+
+
+def _upgrade_spec(kind: str, slot_id: str) -> tuple[dict | None, int]:
+    """Return (spec, max_level) for a given (kind, slot_id)."""
+    if kind == "weapon":
+        for w in cfg.weapons():
+            if f"weapon_{w['id']}" == slot_id:
+                return w, w.get("max_level", 50)
+    elif kind == "merc":
+        for m in cfg.mercs():
+            if f"merc_{m['id']}" == slot_id:
+                return m, m.get("max_level", 25)
+    elif kind == "crit_chance":
+        for u in cfg.crit_luck().get("crit_chance", []):
+            if f"cc_{u['id']}" == slot_id:
+                return u, u.get("max_level", 30)
+    elif kind == "crit_damage":
+        for u in cfg.crit_luck().get("crit_damage", []):
+            if f"cd_{u['id']}" == slot_id:
+                return u, u.get("max_level", 30)
+    elif kind == "luck":
+        for u in cfg.crit_luck().get("luck", []):
+            if f"lk_{u['id']}" == slot_id:
+                return u, u.get("max_level", 20)
+    return None, 0
+
+
+async def buy_upgrade(tg_id: int, kind: str, slot_id: str, count: int = 1) -> dict:
+    count = max(1, min(int(count), 25))  # bulk buy up to 25 levels
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            user = await conn.fetchrow(
+                "select * from clicker_users where tg_id = $1 for update", tg_id,
+            )
+            if not user:
+                return {"ok": False, "error": "no_user"}
+
+            spec, max_level = _upgrade_spec(kind, slot_id)
+            if not spec:
+                return {"ok": False, "error": "unknown_upgrade"}
+
+            unlock = int(spec.get("unlock_level", 1))
+            if int(user["max_level"]) < unlock:
+                return {"ok": False, "error": "locked", "unlock_level": unlock}
+
+            cur = await conn.fetchrow(
+                """select level from clicker_upgrades where tg_id = $1 and kind = $2 and slot_id = $3 for update""",
+                tg_id, kind, slot_id,
+            )
+            cur_level = int(cur["level"]) if cur else 0
+            if cur_level >= max_level:
+                return {"ok": False, "error": "max_level"}
+
+            requested = min(count, max_level - cur_level)
+            base_cost = spec.get("base_cost", 0)
+
+            total_cost = Decimal(0)
+            for i in range(requested):
+                total_cost += _upgrade_cost(base_cost, cur_level + i)
+
+            if Decimal(user["cash"]) < total_cost:
+                return {"ok": False, "error": "not_enough_cash", "needed": str(total_cost)}
+
+            new_level = cur_level + requested
+
+            if cur:
+                await conn.execute(
+                    """update clicker_upgrades set level = $4
+                       where tg_id = $1 and kind = $2 and slot_id = $3""",
+                    tg_id, kind, slot_id, new_level,
+                )
+            else:
+                await conn.execute(
+                    """insert into clicker_upgrades (tg_id, kind, slot_id, level)
+                       values ($1, $2, $3, $4)""",
+                    tg_id, kind, slot_id, new_level,
+                )
+
+            await conn.execute(
+                "update clicker_users set cash = cash - $2 where tg_id = $1",
+                tg_id, total_cost,
+            )
+
+            await _recompute_stats(conn, tg_id)
+            await _log(conn, tg_id, "upgrade_bought", {
+                "kind": kind, "slot": slot_id, "from": cur_level, "to": new_level,
+                "cost": str(total_cost),
+            })
+            return await _wrap_state(conn, tg_id, {
+                "kind": kind, "slot_id": slot_id, "new_level": new_level,
+                "spent": str(total_cost),
+            })
+
+
+# ---------- equip / unequip artifacts --------------------------------------
+
+
+async def equip(tg_id: int, inventory_id: int, slot: int) -> dict:
+    """Equip an artifact/mythic into a 0..(slots-1) slot."""
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            user = await conn.fetchrow(
+                "select artifact_slots from clicker_users where tg_id = $1 for update", tg_id,
+            )
+            if not user:
+                return {"ok": False, "error": "no_user"}
+            if slot < 0 or slot >= int(user["artifact_slots"]):
+                return {"ok": False, "error": "bad_slot"}
+
+            inv = await conn.fetchrow(
+                """select * from clicker_inventory where id = $1 and tg_id = $2 and consumed_at is null for update""",
+                inventory_id, tg_id,
+            )
+            if not inv or inv["item_kind"] not in ("artifact", "mythic"):
+                return {"ok": False, "error": "not_equippable"}
+
+            # Unequip whatever was in that slot, then equip new.
+            await conn.execute(
+                """update clicker_inventory set equipped_slot = null
+                   where tg_id = $1 and equipped_slot = $2""",
+                tg_id, slot,
+            )
+            # Also unequip this same item from another slot if it was there.
+            await conn.execute(
+                """update clicker_inventory set equipped_slot = $3
+                   where tg_id = $1 and id = $2""",
+                tg_id, inventory_id, slot,
+            )
+
+            await _recompute_stats(conn, tg_id)
+            await _log(conn, tg_id, "equip", {"id": inventory_id, "slot": slot})
+            return await _wrap_state(conn, tg_id, {"equipped": inventory_id, "slot": slot})
+
+
+async def unequip(tg_id: int, inventory_id: int) -> dict:
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                """update clicker_inventory set equipped_slot = null
+                   where tg_id = $1 and id = $2""",
+                tg_id, inventory_id,
+            )
+            await _recompute_stats(conn, tg_id)
+            return await _wrap_state(conn, tg_id, {"unequipped": inventory_id})
+
+
+# ---------- prestige --------------------------------------------------------
+
+
+async def prestige(tg_id: int) -> dict:
+    """Reset progress for ★ glory. Keeps artifacts, casecoins, glory, prestige count."""
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            user = await conn.fetchrow(
+                "select * from clicker_users where tg_id = $1 for update", tg_id,
+            )
+            if not user:
+                return {"ok": False, "error": "no_user"}
+            max_level = int(user["max_level"])
+            if max_level < 20:
+                return {"ok": False, "error": "level_too_low", "needed": 20}
+
+            glory_gained = max(1, int((max_level / cfg.PRESTIGE_GLORY_DIVISOR) ** cfg.PRESTIGE_GLORY_EXP))
+            new_slots = min(cfg.ARTIFACT_SLOT_MAX, int(user["artifact_slots"]) + 1)
+
+            await conn.execute(
+                """update clicker_users set
+                      level = 1,
+                      checkpoint = 1,
+                      cash = 0,
+                      glory = glory + $2,
+                      prestige_count = prestige_count + 1,
+                      artifact_slots = $3,
+                      click_damage = 1,
+                      auto_dps = 0,
+                      crit_chance = 0,
+                      crit_multiplier = 2,
+                      luck = 0
+                   where tg_id = $1""",
+                tg_id, glory_gained, new_slots,
+            )
+            # Wipe all upgrades except keep weapon_01 owned at level 0.
+            await conn.execute("delete from clicker_upgrades where tg_id = $1", tg_id)
+            await conn.execute(
+                """insert into clicker_upgrades (tg_id, kind, slot_id, level)
+                   values ($1, 'weapon', 'weapon_01', 0)""",
+                tg_id,
+            )
+            # Spawn enemy for level 1.
+            await _spawn_enemy_for_level(conn, tg_id, 1, _now())
+
+            await _recompute_stats(conn, tg_id)
+            await _log(conn, tg_id, "prestige", {"max_level": max_level, "glory_gained": glory_gained})
+            return await _wrap_state(conn, tg_id, {"glory_gained": glory_gained})
+
+
+# ---------- state snapshot --------------------------------------------------
+
+
+async def _wrap_state(conn, tg_id: int, extra: dict | None = None) -> dict:
+    state = await _build_state(conn, tg_id)
+    if extra is not None:
+        return {"ok": True, "data": {"state": state, **extra}}
+    return {"ok": True, "data": {"state": state}}
+
+
+async def get_state(tg_id: int) -> dict:
+    async with pool().acquire() as conn:
+        return await _wrap_state(conn, tg_id)
+
+
+async def _build_state(conn, tg_id: int) -> dict:
+    user = await conn.fetchrow("select * from clicker_users where tg_id = $1", tg_id)
+    if not user:
+        raise RuntimeError("ensure_user must be called first")
+
+    combat = await conn.fetchrow("select * from clicker_combat_state where tg_id = $1", tg_id)
+    upg_rows = await conn.fetch(
+        "select kind, slot_id, level from clicker_upgrades where tg_id = $1", tg_id,
+    )
+    inv_rows = await conn.fetch(
+        """select * from clicker_inventory where tg_id = $1 and consumed_at is null
+           order by acquired_at desc limit 200""",
+        tg_id,
+    )
+
+    level = int(user["level"])
+    boss_def = cfg.boss_for_level(level)
+    loc = cfg.location_for_level(level)
+    enemy_sprite = cfg.enemy_for_level(level)
+
+    return {
+        "user": {
+            "tg_id": int(user["tg_id"]),
+            "first_name": user["first_name"],
+            "username": user["username"],
+            "level": level,
+            "max_level": int(user["max_level"]),
+            "checkpoint": int(user["checkpoint"]),
+            "cash": str(user["cash"]),
+            "casecoins": str(user["casecoins"]),
+            "glory": str(user["glory"]),
+            "bp_xp": str(user["bp_xp"]),
+            "click_damage": str(user["click_damage"]),
+            "auto_dps": str(user["auto_dps"]),
+            "crit_chance": str(user["crit_chance"]),
+            "crit_multiplier": str(user["crit_multiplier"]),
+            "luck": str(user["luck"]),
+            "prestige_count": int(user["prestige_count"]),
+            "artifact_slots": int(user["artifact_slots"]),
+            "bosses_killed": int(user["bosses_killed"]),
+            "chests_opened": int(user["chests_opened"]),
+            "total_damage": str(user["total_damage"]),
+        },
+        "combat": {
+            "enemy_hp": str(combat["enemy_hp"]) if combat else "0",
+            "enemy_max_hp": str(combat["enemy_max_hp"]) if combat else "0",
+            "is_boss": bool(combat["is_boss"]) if combat else False,
+            "timer_ends_at": combat["timer_ends_at"].isoformat() if combat and combat["timer_ends_at"] else None,
+        } if combat else {"enemy_hp": "0", "enemy_max_hp": "0", "is_boss": False, "timer_ends_at": None},
+        "level_meta": {
+            "level": level,
+            "is_boss": boss_def is not None,
+            "location_name": loc["name"],
+            "location_bg": loc["bg"],
+            "enemy_sprite": boss_def["icon"] if boss_def else enemy_sprite,
+            "enemy_name": boss_def["name"] if boss_def else None,
+            "boss_flavor": boss_def["flavor"] if boss_def else None,
+            "next_boss_level": _next_boss_level(level),
+        },
+        "upgrades": [
+            {"kind": u["kind"], "slot_id": u["slot_id"], "level": int(u["level"])}
+            for u in upg_rows
+        ],
+        "inventory": [
+            {
+                "id": int(r["id"]),
+                "kind": r["item_kind"],
+                "item_id": r["item_id"],
+                "rarity": r["rarity"],
+                "equipped_slot": int(r["equipped_slot"]) if r["equipped_slot"] is not None else None,
+                "metadata": _parse_jsonb(r["metadata"]) or {},
+            }
+            for r in inv_rows
+        ],
+        "server_time": _now().isoformat(),
+    }
+
+
+def _next_boss_level(level: int) -> int:
+    nxt = ((level - 1) // 5 + 1) * 5
+    if nxt < level:
+        nxt += 5
+    return max(level, nxt)
+
+
+# ---------- public config ---------------------------------------------------
+
+
+def public_config() -> dict:
+    return {
+        "version": "0.1.0",
+        "weapons": cfg.weapons(),
+        "mercs": cfg.mercs(),
+        "locations": cfg.locations(),
+        "bosses": cfg.bosses(),
+        "chests": cfg.chests(),
+        "artifacts": cfg.artifacts(),
+        "mythics": cfg.mythics(),
+        "crit_luck": cfg.crit_luck(),
+        "constants": {
+            "level_time_normal": cfg.LEVEL_TIME_NORMAL,
+            "level_time_boss": cfg.LEVEL_TIME_BOSS,
+            "hp_base": cfg.HP_BASE,
+            "hp_growth": cfg.HP_GROWTH,
+            "hp_boss_mult": cfg.HP_BOSS_MULT,
+            "coin_drop_ratio": cfg.COIN_DROP_RATIO,
+            "boss_coin_mult": cfg.BOSS_COIN_MULT,
+            "cost_growth": cfg.COST_GROWTH,
+            "damage_per_level": cfg.DAMAGE_PER_LEVEL,
+            "checkpoint_every": cfg.CHECKPOINT_EVERY,
+        },
+    }
+
+
+# ---------- log -------------------------------------------------------------
+
+
+async def _log(conn, tg_id: int, event_type: str, data: dict) -> None:
+    try:
+        await conn.execute(
+            "insert into clicker_event_log (tg_id, event_type, data) values ($1, $2, $3::jsonb)",
+            tg_id, event_type, json.dumps(data, default=str),
+        )
+    except Exception:
+        log.exception("clicker event log failed")
+
+
+# ---------- leaderboards ----------------------------------------------------
+
+
+async def leaderboard(metric: str, limit: int = 50) -> list[dict]:
+    col_map = {
+        "level": "max_level",
+        "cash": "cash",
+        "casecoins": "casecoins",
+        "glory": "glory",
+        "prestige": "prestige_count",
+        "bosses": "bosses_killed",
+    }
+    col = col_map.get(metric, "max_level")
+    async with pool().acquire() as conn:
+        rows = await conn.fetch(
+            f"""select tg_id, first_name, username, {col} as score, max_level, prestige_count
+                from clicker_users where banned = false
+                order by {col} desc nulls last limit $1""",
+            int(limit),
+        )
+    return [
+        {
+            "tg_id": int(r["tg_id"]),
+            "first_name": r["first_name"],
+            "username": r["username"],
+            "score": str(r["score"]) if r["score"] is not None else "0",
+            "max_level": int(r["max_level"]),
+            "prestige_count": int(r["prestige_count"]),
+        }
+        for r in rows
+    ]

@@ -1,0 +1,95 @@
+"""FastAPI routes for the CS:Clicker Mini App."""
+from __future__ import annotations
+
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+
+from app.api.auth import require_user
+from app.clicker import game as gm
+
+log = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/clicker", tags=["clicker"])
+
+
+class TapReq(BaseModel):
+    taps: int = Field(..., ge=0, le=60)
+    dt_ms: int = Field(..., ge=0, le=10000)
+
+
+class UpgradeReq(BaseModel):
+    kind: str = Field(..., min_length=1, max_length=32)
+    slot_id: str = Field(..., min_length=1, max_length=64)
+    count: int = Field(default=1, ge=1, le=25)
+
+
+class OpenChestReq(BaseModel):
+    chest_inventory_id: int = Field(..., ge=1)
+
+
+class EquipReq(BaseModel):
+    inventory_id: int = Field(..., ge=1)
+    slot: int = Field(..., ge=0, le=5)
+
+
+class UnequipReq(BaseModel):
+    inventory_id: int = Field(..., ge=1)
+
+
+@router.get("/config")
+async def api_config() -> dict:
+    return {"ok": True, "data": gm.public_config()}
+
+
+@router.get("/state")
+async def api_state(user: dict = Depends(require_user)) -> dict:
+    tg_id = int(user["id"])
+    await gm.ensure_user(
+        tg_id,
+        username=user.get("username"),
+        first_name=user.get("first_name"),
+        last_name=user.get("last_name"),
+        is_premium=bool(user.get("is_premium", False)),
+    )
+    return await gm.get_state(tg_id)
+
+
+@router.post("/tap")
+async def api_tap(req: TapReq, user: dict = Depends(require_user)) -> dict:
+    return await gm.tap(int(user["id"]), req.taps, req.dt_ms)
+
+
+@router.post("/upgrade")
+async def api_upgrade(req: UpgradeReq, user: dict = Depends(require_user)) -> dict:
+    return await gm.buy_upgrade(int(user["id"]), req.kind, req.slot_id, req.count)
+
+
+@router.post("/chest/open")
+async def api_chest_open(req: OpenChestReq, user: dict = Depends(require_user)) -> dict:
+    return await gm.open_chest(int(user["id"]), req.chest_inventory_id)
+
+
+@router.post("/equip")
+async def api_equip(req: EquipReq, user: dict = Depends(require_user)) -> dict:
+    return await gm.equip(int(user["id"]), req.inventory_id, req.slot)
+
+
+@router.post("/unequip")
+async def api_unequip(req: UnequipReq, user: dict = Depends(require_user)) -> dict:
+    return await gm.unequip(int(user["id"]), req.inventory_id)
+
+
+@router.post("/prestige")
+async def api_prestige(user: dict = Depends(require_user)) -> dict:
+    return await gm.prestige(int(user["id"]))
+
+
+@router.get("/leaderboard")
+async def api_leaderboard(
+    metric: str = Query(default="level"),
+    limit: int = Query(default=50, ge=1, le=100),
+) -> dict:
+    rows = await gm.leaderboard(metric, limit)
+    return {"ok": True, "data": rows}

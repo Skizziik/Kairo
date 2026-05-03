@@ -1,0 +1,10 @@
+[
+  {"id": "01", "name": "Школьник с битой",   "role": "Базовый авто-урон",    "base_dps": 0.5,   "base_cost": 200,         "unlock_level": 5,  "max_level": 25, "icon": "mercs/01.png"},
+  {"id": "02", "name": "Бомж-снайпер",       "role": "+ Crit Chance",        "base_dps": 5,     "base_cost": 5000,        "unlock_level": 12, "max_level": 25, "icon": "mercs/02.png"},
+  {"id": "03", "name": "Питбуль на цепи",    "role": "Скорость атаки",       "base_dps": 50,    "base_cost": 80000,       "unlock_level": 20, "max_level": 25, "icon": "mercs/03.png"},
+  {"id": "04", "name": "Хакер-бот",          "role": "+50% урона по боссам", "base_dps": 800,   "base_cost": 1500000,     "unlock_level": 28, "max_level": 25, "icon": "mercs/04.png"},
+  {"id": "05", "name": "Стример-кастер",     "role": "Бонус с друзей",       "base_dps": 12000, "base_cost": 40000000,    "unlock_level": 38, "max_level": 25, "icon": "mercs/05.png"},
+  {"id": "06", "name": "Бариста-Smoke",      "role": "AoE урон",             "base_dps": 200000,"base_cost": 1000000000,  "unlock_level": 48, "max_level": 25, "icon": "mercs/06.png"},
+  {"id": "07", "name": "Стриптизёрша Зара",  "role": "Замедляет босса",      "base_dps": 4000000,"base_cost": 50000000000, "unlock_level": 60, "max_level": 25, "icon": "mercs/07.png"},
+  {"id": "08", "name": "Картонный Гейб",     "role": "Раз в мин: +100k$",    "base_dps": 80000000,"base_cost": 2000000000000,"unlock_level": 75,"max_level": 25, "icon": "mercs/08.png"}
+]

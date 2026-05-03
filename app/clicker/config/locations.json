@@ -1,0 +1,17 @@
+[
+  {"id": 1,  "name": "de_dust2 — Ларёчный Двор",    "level_range": [1, 5],    "bg": "bg/01.jpeg", "enemies": ["enemies/loc01_1.png","enemies/loc01_2.png","enemies/loc01_3.png","enemies/loc01_4.png"]},
+  {"id": 2,  "name": "de_inferno — Гаражный Кооператив","level_range": [6, 10], "bg": "bg/02.jpeg", "enemies": ["enemies/loc02_1.png","enemies/loc02_2.png","enemies/loc02_3.png","enemies/loc02_4.png"]},
+  {"id": 3,  "name": "cs_office — Опен-Спейс",       "level_range": [11, 15], "bg": "bg/03.jpeg", "enemies": ["enemies/loc03_1.png","enemies/loc03_2.png","enemies/loc03_3.png","enemies/loc03_4.png"]},
+  {"id": 4,  "name": "de_mirage — Восточный Базар",  "level_range": [16, 20], "bg": "bg/04.jpeg", "enemies": ["enemies/loc04_1.png","enemies/loc04_2.png","enemies/loc04_3.png","enemies/loc04_4.png"]},
+  {"id": 5,  "name": "de_nuke — Реактор",            "level_range": [21, 25], "bg": "bg/05.jpeg", "enemies": ["enemies/loc05_1.png","enemies/loc05_2.png","enemies/loc05_3.png","enemies/loc05_4.png"]},
+  {"id": 6,  "name": "de_train — Депо",              "level_range": [26, 30], "bg": "bg/06.jpeg", "enemies": ["enemies/loc06_1.png","enemies/loc06_2.png","enemies/loc06_3.png","enemies/loc06_4.png"]},
+  {"id": 7,  "name": "cs_assault — Склад Контрабанды","level_range":[31, 35], "bg": "bg/07.jpeg", "enemies": ["enemies/loc07_1.png","enemies/loc07_2.png","enemies/loc07_3.png","enemies/loc07_4.png"]},
+  {"id": 8,  "name": "de_cache — Заброшка",          "level_range": [36, 40], "bg": "bg/08.jpeg", "enemies": ["enemies/loc08_1.png","enemies/loc08_2.png","enemies/loc08_3.png","enemies/loc08_4.png"]},
+  {"id": 9,  "name": "de_overpass — Подземка",       "level_range": [41, 45], "bg": "bg/09.jpeg", "enemies": ["enemies/loc09_1.png","enemies/loc09_2.png","enemies/loc09_3.png","enemies/loc09_4.png"]},
+  {"id": 10, "name": "Скин-салон Дубай",             "level_range": [46, 50], "bg": "bg/10.jpeg", "enemies": ["enemies/loc10_1.png","enemies/loc10_2.png","enemies/loc10_3.png","enemies/loc10_4.png"]},
+  {"id": 11, "name": "Хакерский Подвал",             "level_range": [51, 55], "bg": "bg/11.jpeg", "enemies": ["enemies/loc11_1.png","enemies/loc11_2.png","enemies/loc11_3.png","enemies/loc11_4.png"]},
+  {"id": 12, "name": "Major-турнир Stage",           "level_range": [56, 60], "bg": "bg/12.jpeg", "enemies": ["enemies/loc12_1.png","enemies/loc12_2.png","enemies/loc12_3.png","enemies/loc12_4.png"]},
+  {"id": 13, "name": "Дача Олигарха",                "level_range": [61, 65], "bg": "bg/13.jpeg", "enemies": ["enemies/loc13_1.png","enemies/loc13_2.png","enemies/loc13_3.png","enemies/loc13_4.png"]},
+  {"id": 14, "name": "Космо-станция Steam",          "level_range": [66, 70], "bg": "bg/14.jpeg", "enemies": ["enemies/loc14_1.png","enemies/loc14_2.png","enemies/loc14_3.png","enemies/loc14_4.png"]},
+  {"id": 15, "name": "Финальная Серверная Valve",    "level_range": [71, 75], "bg": "bg/15.jpeg", "enemies": ["enemies/loc15_1.png","enemies/loc15_2.png","enemies/loc15_3.png","enemies/loc15_4.png"]}
+]
