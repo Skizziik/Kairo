@@ -198,14 +198,32 @@ function renderCard(bdef: BusinessDef): HTMLElement {
 
   const collectBtn = el("button", { className: "biz-collect-btn", dataset: { collectFor: bdef.id } });
   collectBtn.appendChild(el("span", { textContent: "СОБРАТЬ" }));
-  collectBtn.appendChild(el("span", { className: "small", textContent: fmtPending(pending) }));
-  if (pending < 1) collectBtn.disabled = true;
+  // Show "collectable now" — already capped by available fuel — instead of optimistic pending.
+  const collectableNow = Number(state?.collectable_now ?? state?.pending ?? 0);
+  collectBtn.appendChild(el("span", { className: "small", textContent: fmtPending(collectableNow) }));
+  if (collectableNow < 1) collectBtn.disabled = true;
   collectBtn.onclick = async () => {
     haptic("medium");
     const r = await api.businessCollect(bdef.id);
     if (r.ok && r.data) {
       hapticNotify("success");
-      if ((r.data as any).state) store.setState((r.data as any).state);
+      const data = r.data as any;
+      // Show explicit fuel consumption so the player sees where their resources went.
+      const fuelSpent = data.fuel_spent || {};
+      const collected = data.collected || {};
+      const meta = store.config?.resources_meta || {};
+      const fuelParts: string[] = [];
+      for (const [res, amt] of Object.entries(fuelSpent)) {
+        if (Number(amt) > 0) fuelParts.push(`${meta[res]?.emoji || ""}-${fmt(amt as string)}`);
+      }
+      const gotParts: string[] = [];
+      for (const [res, amt] of Object.entries(collected)) {
+        if (Number(amt) > 0) gotParts.push(`${meta[res]?.emoji || ""}+${fmt(amt as string)}`);
+      }
+      if (gotParts.length > 0 || fuelParts.length > 0) {
+        toast([...gotParts, ...fuelParts].join(" "), "info", 2200);
+      }
+      if (data.state) store.setState(data.state);
     }
   };
   actions.appendChild(collectBtn);

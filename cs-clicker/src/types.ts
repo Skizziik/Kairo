@@ -64,6 +64,7 @@ export interface BusinessState {
   rate_per_sec: string;
   tap_yield: string;
   pending: string;
+  collectable_now?: string;
   upgrade_cost: string;
   upgrade_resource_cost: Record<string, string>;
   idle_consumption_per_sec?: Record<string, string>;

@@ -1824,20 +1824,25 @@ async def _build_state(conn, tg_id: int) -> dict:
             elapsed = max(0.0, (now - last).total_seconds())
             cap = cfg.BUSINESS_IDLE_CAP_HOURS * 3600
             elapsed = min(elapsed, cap)
-            # Cap the productive window by available consumption resources — same
-            # math as _accrue_business_idle. Without this, the preview lies about
-            # how much will land when the player presses Collect.
-            sustainable_s = Decimal(str(elapsed))
-            if consumption:
-                for res, cons_rate in consumption.items():
-                    if cons_rate <= 0:
-                        continue
-                    avail = res_balance.get(res, Decimal(0))
-                    max_for_res = avail / cons_rate if cons_rate > 0 else sustainable_s
-                    if max_for_res < sustainable_s:
-                        sustainable_s = max_for_res
-            produced = rate * sustainable_s
+            produced = rate * Decimal(str(elapsed))
             pending = Decimal(biz_row["pending_amount"]) + produced
+        # Preview "collectable_now": pending capped by fuel currently in balance,
+        # so the HUD shows what will actually drop on Collect.
+        collectable = pending
+        ratios = bdef.get("consumption_per_unit") or {}
+        if ratios:
+            red = Decimal(str(branch_pcts.get("consumption_red_pct", 0)))
+            if red > Decimal(90):
+                red = Decimal(90)
+            cons_mult = (Decimal(100) - red) / Decimal(100)
+            for res, ratio in ratios.items():
+                per_unit = Decimal(str(ratio)) * cons_mult
+                if per_unit <= 0:
+                    continue
+                avail = res_balance.get(res, Decimal(0))
+                max_for_res = avail / per_unit
+                if max_for_res < collectable:
+                    collectable = max_for_res
         biz_state.append({
             "id": bid,
             "level": bus_level,
@@ -1846,6 +1851,7 @@ async def _build_state(conn, tg_id: int) -> dict:
             "rate_per_sec": str(rate.quantize(Decimal("0.0001"))),
             "tap_yield": str(tap_yield.quantize(Decimal("0.001"))),
             "pending": str(pending.quantize(Decimal("0.01"))),
+            "collectable_now": str(collectable.quantize(Decimal("0.01"))),
             "upgrade_cost": str(upgrade_cost),
             "upgrade_resource_cost": {k: str(v) for k, v in biz_res_cost.items()},
             "idle_consumption_per_sec": {k: str(v.quantize(Decimal("0.0001"))) for k, v in consumption.items()},
@@ -1933,8 +1939,9 @@ def _next_boss_level(level: int) -> int:
 
 async def _accrue_business_idle(conn, tg_id: int, business_id: str, now: datetime) -> Decimal:
     """Compute new idle pending amount and update last_idle_at to `now`.
-    Drains idle_consumption_per_sec from resources for sustainable seconds.
-    If the player runs out of a consumed resource mid-window, production stops at that point."""
+    Production-only: rate × elapsed. Consumption is paid lazily at COLLECT time —
+    not retroactively from the player's balance during accrual. Otherwise
+    "Collect All" would silently drain energy when downstream businesses settle."""
     bdef = _business_def(business_id)
     if not bdef:
         return Decimal(0)
@@ -1953,57 +1960,25 @@ async def _accrue_business_idle(conn, tg_id: int, business_id: str, now: datetim
     branch_lvls = _business_branch_levels(upg_rows, business_id)
     branch_pcts = _business_branch_pcts(business_id, branch_lvls)
 
-    # Fetch equipped artifacts once for both offline_pct and all_production_x3.
+    # Fetch equipped artifacts once for offline_pct, all_production_x3, resource_pct.
     equipped = await _equipped_artifacts(conn, tg_id)
     eff = _artifact_effects(equipped)
     art_flags = _artifact_flags(equipped)
 
-    # Apply offline_pct branch when window > 60 sec (treat as offline accrual).
+    # Offline window bonus (>60s away).
     offline_mult = Decimal(1)
     if elapsed > 60:
         off_pct = Decimal(str(branch_pcts.get("offline_pct", 0)))
         off_pct += Decimal(str(eff.get("offline_pct", 0)))
         offline_mult = Decimal(1) + off_pct / Decimal(100)
 
-    # Λ-Кристалл mythic — all_production_x3 multiplies production AND consumption.
     prod_mult = Decimal(3) if art_flags.get("all_production_x3") else Decimal(1)
-    # Resource-specific bonus from artifacts (e.g. brass_pct, contraband_pct, all_resources_pct).
     res_id = bdef.get("resource") or ""
     res_bonus = Decimal(str(eff.get(f"{res_id}_pct", 0))) + Decimal(str(eff.get("all_resources_pct", 0)))
     res_mult = Decimal(1) + res_bonus / Decimal(100)
 
     rate = _business_idle_per_sec(bdef, level, branch_pcts) * offline_mult * prod_mult * res_mult
-    consumption = _business_consumption_per_sec(bdef, level, branch_pcts)
-    if art_flags.get("all_production_x3"):
-        consumption = {k: v * Decimal(3) for k, v in consumption.items()}
-
-    # Determine how many of `elapsed` seconds we can actually sustain given resources.
-    sustainable_s = Decimal(str(elapsed))
-    if consumption:
-        # Read current resources for the consumed types.
-        res_rows = await conn.fetch(
-            "select resource_type, amount from clicker_resources where tg_id = $1 and resource_type = any($2::text[]) for update",
-            tg_id, list(consumption.keys()),
-        )
-        have = {r["resource_type"]: Decimal(r["amount"]) for r in res_rows}
-        for res, cons_rate in consumption.items():
-            if cons_rate <= 0:
-                continue
-            avail = have.get(res, Decimal(0))
-            max_for_res = avail / cons_rate
-            if max_for_res < sustainable_s:
-                sustainable_s = max_for_res
-        # Drain consumption for the sustainable window.
-        if sustainable_s > 0:
-            for res, cons_rate in consumption.items():
-                drained = (cons_rate * sustainable_s).quantize(Decimal("0.0001"))
-                await conn.execute(
-                    """insert into clicker_resources (tg_id, resource_type, amount) values ($1, $2, 0)
-                       on conflict (tg_id, resource_type) do update set amount = clicker_resources.amount - $3""",
-                    tg_id, res, drained,
-                )
-
-    produced = (rate * sustainable_s).quantize(Decimal("0.0001"))
+    produced = (rate * Decimal(str(elapsed))).quantize(Decimal("0.0001"))
     new_pending = Decimal(state["pending_amount"]) + produced
     await conn.execute(
         """update clicker_businesses set pending_amount = $3, last_idle_at = $4
@@ -2166,7 +2141,9 @@ async def buy_business_branch(tg_id: int, business_id: str, branch_id: str) -> d
 
 
 async def business_collect(tg_id: int, business_id: str | None = None) -> dict:
-    """Collect pending idle from one or all businesses. None → all."""
+    """Collect pending idle from one or all businesses. None → all.
+    Pays consumption_per_unit fuel at collect time, scaling collected amount down
+    if balance can't cover the fuel for the full pending."""
     now = _now()
     targets: list[str] = []
     if business_id:
@@ -2183,7 +2160,21 @@ async def business_collect(tg_id: int, business_id: str | None = None) -> dict:
                 return {"ok": False, "error": "no_user"}
             user_max = int(user["max_level"])
 
+            # Live-tracked balance for fuel debt across multiple businesses.
+            res_rows = await conn.fetch(
+                "select resource_type, amount from clicker_resources where tg_id = $1 for update",
+                tg_id,
+            )
+            balance: dict[str, Decimal] = {r["resource_type"]: Decimal(r["amount"]) for r in res_rows}
+
             collected: dict[str, Decimal] = {}
+            spent: dict[str, Decimal] = {}
+            level_cache: dict[str, int] = {}
+            branch_pcts_cache: dict[str, dict] = {}
+            upg_rows = await conn.fetch(
+                "select kind, slot_id, level from clicker_upgrades where tg_id = $1", tg_id,
+            )
+
             for bid in targets:
                 bdef = _business_def(bid)
                 if not bdef:
@@ -2193,11 +2184,57 @@ async def business_collect(tg_id: int, business_id: str | None = None) -> dict:
                 pending = await _accrue_business_idle(conn, tg_id, bid, now)
                 if pending <= 0:
                     continue
-                # Drop fractional dust below 1 — collect floor.
-                amount = Decimal(int(pending))
+
+                # Compute fuel cost for the FULL pending. If the balance can't cover
+                # it, scale collect down so that exactly what can be fueled gets paid.
+                bus_level = next((int(u["level"]) for u in upg_rows if u["kind"] == "business" and u["slot_id"] == bid), 0)
+                level_cache[bid] = bus_level
+                branch_lvls = _business_branch_levels(upg_rows, bid)
+                branch_pcts = _business_branch_pcts(bid, branch_lvls)
+                branch_pcts_cache[bid] = branch_pcts
+                ratios = bdef.get("consumption_per_unit") or {}
+                # Apply consumption_red_pct branch + Λ-Кристалл x3.
+                red = Decimal(str(branch_pcts.get("consumption_red_pct", 0)))
+                if red > Decimal(90):
+                    red = Decimal(90)
+                cons_mult = (Decimal(100) - red) / Decimal(100)
+                # Equipped artifacts for x3 cons.
+                equipped = await _equipped_artifacts(conn, tg_id)
+                art_flags = _artifact_flags(equipped)
+                if art_flags.get("all_production_x3"):
+                    cons_mult = cons_mult * Decimal(3)
+
+                # Cap collectable amount by balance for each fuel resource.
+                collectable = pending
+                if ratios:
+                    for res, ratio in ratios.items():
+                        per_unit = Decimal(str(ratio)) * cons_mult
+                        if per_unit <= 0:
+                            continue
+                        avail = balance.get(res, Decimal(0))
+                        max_for_res = avail / per_unit
+                        if max_for_res < collectable:
+                            collectable = max_for_res
+
+                amount = Decimal(int(collectable))
                 if amount <= 0:
+                    # Update last_idle_at was done by _accrue but pending stays.
                     continue
                 rest = pending - amount
+
+                # Pay fuel for the collected amount.
+                if ratios:
+                    for res, ratio in ratios.items():
+                        per_unit = Decimal(str(ratio)) * cons_mult
+                        cost = (per_unit * amount).quantize(Decimal("0.0001"))
+                        if cost > 0:
+                            balance[res] = balance.get(res, Decimal(0)) - cost
+                            await conn.execute(
+                                "update clicker_resources set amount = amount - $3 where tg_id = $1 and resource_type = $2",
+                                tg_id, res, cost,
+                            )
+                            spent[res] = spent.get(res, Decimal(0)) + cost
+
                 await conn.execute(
                     """update clicker_businesses set pending_amount = $3
                        where tg_id = $1 and business_id = $2""",
@@ -2208,10 +2245,15 @@ async def business_collect(tg_id: int, business_id: str | None = None) -> dict:
                        on conflict (tg_id, resource_type) do update set amount = clicker_resources.amount + excluded.amount""",
                     tg_id, bdef["resource"], amount,
                 )
+                balance[bdef["resource"]] = balance.get(bdef["resource"], Decimal(0)) + amount
                 collected[bdef["resource"]] = collected.get(bdef["resource"], Decimal(0)) + amount
 
     state = await get_state(tg_id)
-    return {"ok": True, "data": {**state["data"], "collected": {k: str(v) for k, v in collected.items()}}}
+    return {"ok": True, "data": {
+        **state["data"],
+        "collected": {k: str(v) for k, v in collected.items()},
+        "fuel_spent": {k: str(v) for k, v in spent.items()},
+    }}
 
 
 def _business_resource_cost(bdef: dict, current_level: int) -> dict[str, Decimal]:
