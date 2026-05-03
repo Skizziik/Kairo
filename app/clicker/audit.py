@@ -15,6 +15,7 @@ create table if not exists clicker_users (
     first_name       text,
     last_name        text,
     is_premium       boolean not null default false,
+    perma_buffs      jsonb not null default '{}'::jsonb,
 
     -- progression
     level            integer not null default 1,
@@ -155,4 +156,8 @@ create index if not exists idx_clicker_event_log_user_time
 async def ensure_schema() -> None:
     async with pool().acquire() as conn:
         await conn.execute(SCHEMA_SQL)
+        # Idempotent: add perma_buffs column to existing tables if missing.
+        await conn.execute(
+            "alter table clicker_users add column if not exists perma_buffs jsonb not null default '{}'::jsonb"
+        )
     log.info("clicker schema ensured")

@@ -59,6 +59,11 @@ class BusinessBranchReq(BaseModel):
     branch_id: str = Field(..., min_length=1, max_length=32)
 
 
+class BPClaimReq(BaseModel):
+    level: int = Field(..., ge=1, le=50)
+    track: str = Field(..., min_length=4, max_length=8)
+
+
 @router.get("/config")
 async def api_config() -> dict:
     return {"ok": True, "data": gm.public_config()}
@@ -125,6 +130,21 @@ async def api_business_upgrade(req: BusinessReq, user: dict = Depends(require_us
 @router.post("/business/branch/buy")
 async def api_business_branch_buy(req: BusinessBranchReq, user: dict = Depends(require_user)) -> dict:
     return await gm.buy_business_branch(int(user["id"]), req.business_id, req.branch_id)
+
+
+@router.get("/battlepass")
+async def api_battlepass(user: dict = Depends(require_user)) -> dict:
+    return await gm.get_battlepass(int(user["id"]))
+
+
+@router.post("/battlepass/buy_premium")
+async def api_battlepass_buy_premium(user: dict = Depends(require_user)) -> dict:
+    return await gm.bp_buy_premium(int(user["id"]))
+
+
+@router.post("/battlepass/claim")
+async def api_battlepass_claim(req: BPClaimReq, user: dict = Depends(require_user)) -> dict:
+    return await gm.bp_claim(int(user["id"]), req.level, req.track)
 
 
 @router.post("/prestige/buy_node")

@@ -119,6 +119,14 @@ export const api = {
       "/api/clicker/business/branch/buy",
       { method: "POST", body: JSON.stringify({ business_id, branch_id }) },
     ),
+  battlepass: () => request<any>("/api/clicker/battlepass"),
+  bpBuyPremium: () =>
+    request<StateSnap>("/api/clicker/battlepass/buy_premium", { method: "POST" }),
+  bpClaim: (level: number, track: "free" | "premium") =>
+    request<any>("/api/clicker/battlepass/claim", {
+      method: "POST",
+      body: JSON.stringify({ level, track }),
+    }),
   leaderboard: (metric: string, limit: number = 50) =>
     request<LeaderboardEntry[]>(`/api/clicker/leaderboard?metric=${encodeURIComponent(metric)}&limit=${limit}`),
 };

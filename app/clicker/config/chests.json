@@ -26,7 +26,9 @@
       "artifact_chance": 0.60,
       "artifact_pool": ["common", "uncommon", "rare"],
       "casecoins": [3, 7],
-      "resources": {"brass": [30, 80], "contraband": [5, 15]}
+      "resources": {"brass": [30, 80], "contraband": [5, 15]},
+      "perma_buff_chance": 0.10,
+      "perma_buff": {"click_damage_pct": 1}
     }
   },
   "epic": {
@@ -37,7 +39,8 @@
       "artifact_pool": ["uncommon", "rare", "epic"],
       "casecoins": [10, 25],
       "resources": {"contraband": [20, 60], "case_dust": [3, 10]},
-      "gas_chance": 0.05
+      "gas_chance": 0.05,
+      "perma_buff": {"crit_chance_pct": 0.5}
     }
   },
   "legendary": {
@@ -48,7 +51,8 @@
       "artifact_pool": ["rare", "epic", "legendary"],
       "casecoins": [50, 120],
       "resources": {"case_dust": [20, 60], "clean_skins": [5, 15]},
-      "gas_chance": 0.20
+      "gas_chance": 0.20,
+      "perma_buff": {"all_dmg_pct": 1}
     }
   },
   "mythic": {

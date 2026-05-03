@@ -348,6 +348,11 @@ async def _recompute_stats(conn, tg_id: int) -> dict:
     pt = _prestige_effects(await _prestige_levels(conn, tg_id))
     pt_pct = pt["pct"]
 
+    # Apply perma_buffs from chests.
+    pb_row = await conn.fetchrow("select perma_buffs from clicker_users where tg_id = $1", tg_id)
+    pb = _parse_jsonb(pb_row["perma_buffs"]) if pb_row else None
+    pb = pb or {}
+
     def pct(name: str, base: Decimal) -> Decimal:
         return base * (Decimal(1) + Decimal(str(eff.get(name, 0))) / Decimal(100))
 
@@ -356,13 +361,18 @@ async def _recompute_stats(conn, tg_id: int) -> dict:
     click_dmg = pct("all_income_pct", click_dmg)  # mild — affects damage too via Stickers HL3 lore
     # Prestige tree click bonus
     click_dmg = click_dmg * (Decimal(1) + Decimal(str(pt_pct.get("click_damage_pct", 0))) / Decimal(100))
+    # Perma buffs from chests
+    click_dmg = click_dmg * (Decimal(1) + Decimal(str(pb.get("click_damage_pct", 0))) / Decimal(100))
+    click_dmg = click_dmg * (Decimal(1) + Decimal(str(pb.get("all_dmg_pct", 0))) / Decimal(100))
     auto_dps = pct("auto_dps_pct", auto_dps)
     auto_dps = pct("all_dmg_pct", auto_dps)
     auto_dps = auto_dps * (Decimal(1) + Decimal(str(pt_pct.get("auto_dps_pct", 0))) / Decimal(100))
     auto_dps = auto_dps * (Decimal(1) + Decimal(str(pt_pct.get("merc_dps_pct", 0))) / Decimal(100))
+    auto_dps = auto_dps * (Decimal(1) + Decimal(str(pb.get("all_dmg_pct", 0))) / Decimal(100))
     crit_chance_pct = pct("crit_chance_pct", crit_chance_pct) if crit_chance_pct > 0 else crit_chance_pct
     crit_chance_pct += Decimal(str(eff.get("crit_chance_pct", 0)))
     crit_chance_pct += Decimal(str(pt_pct.get("crit_chance_pct", 0)))
+    crit_chance_pct += Decimal(str(pb.get("crit_chance_pct", 0)))
     crit_dmg_mult += Decimal(str(eff.get("crit_dmg_pct", 0))) / Decimal(100)
     crit_dmg_mult += Decimal(str(pt_pct.get("crit_dmg_pct", 0))) / Decimal(100)
     luck = pct("luck_pct", luck)
@@ -458,6 +468,8 @@ async def tap(tg_id: int, taps: int, dt_ms: int) -> dict:
 
             # Track total damage for BP-XP (1k dmg = 1 BP-XP).
             total_dmg_inc = total_damage if total_damage > 0 else Decimal(0)
+            if total_dmg_inc > 0:
+                await _add_bp_xp(conn, tg_id, total_dmg_inc, now)
 
             result: dict[str, Any] = {
                 "tap_damage": str(tap_damage),
@@ -675,6 +687,23 @@ async def open_chest(tg_id: int, chest_inventory_id: int) -> dict:
                     tg_id, res, amt,
                 )
 
+            # Permanent buffs from chests (Rare+).
+            perma_drop = None
+            perma_chance = float(rolls.get("perma_buff_chance", 1.0))  # default 1.0 if perma_buff exists
+            if rolls.get("perma_buff") and random.random() < perma_chance:
+                perma_drop = rolls["perma_buff"]
+                # Read current perma_buffs and merge.
+                cur = await conn.fetchrow(
+                    "select perma_buffs from clicker_users where tg_id = $1", tg_id,
+                )
+                cur_buffs = _parse_jsonb(cur["perma_buffs"]) or {}
+                for k, v in perma_drop.items():
+                    cur_buffs[k] = float(cur_buffs.get(k, 0)) + float(v)
+                await conn.execute(
+                    "update clicker_users set perma_buffs = $2::jsonb where tg_id = $1",
+                    tg_id, json.dumps(cur_buffs),
+                )
+
             await conn.execute(
                 """update clicker_inventory set consumed_at = $2 where id = $1""",
                 chest_inventory_id, now,
@@ -688,11 +717,16 @@ async def open_chest(tg_id: int, chest_inventory_id: int) -> dict:
                 tg_id, cash_drop, cc_drop,
             )
 
+            # Recompute stats if perma buff applied.
+            if perma_drop:
+                await _recompute_stats(conn, tg_id)
+
             await _log(conn, tg_id, "chest_opened", {
                 "tier": tier, "cash": str(cash_drop), "casecoins": cc_drop,
                 "artifact": artifact_drop["id"] if artifact_drop else None,
                 "mythic": mythic_drop["id"] if mythic_drop else None,
                 "resources": {k: str(v) for k, v in resource_drops.items()},
+                "perma_buff": perma_drop,
             })
 
             return await _wrap_state(conn, tg_id, {
@@ -702,6 +736,7 @@ async def open_chest(tg_id: int, chest_inventory_id: int) -> dict:
                 "artifact": artifact_drop,
                 "mythic": mythic_drop,
                 "resources": {k: str(v) for k, v in resource_drops.items()},
+                "perma_buff": perma_drop,
             })
 
 
@@ -1067,8 +1102,275 @@ async def _wrap_state(conn, tg_id: int, extra: dict | None = None) -> dict:
     return {"ok": True, "data": {"state": state}}
 
 
+# ---------- battle pass --------------------------------------------------
+
+
+def _bp_week_start(now: datetime) -> date:
+    """Return the date of the most recent Monday 00:00 UTC."""
+    # weekday(): Monday=0..Sunday=6
+    days_since_monday = now.weekday()
+    monday = (now - timedelta(days=days_since_monday)).date()
+    return monday
+
+
+def _bp_xp_to_level(bp_xp: Decimal) -> tuple[int, Decimal, Decimal]:
+    """Given total weekly BP-XP, return (level, xp_into_level, xp_for_next).
+    Level capped at config max_level."""
+    cfg_bp = cfg.battlepass()
+    max_level = int(cfg_bp.get("max_level", 50))
+    xp_per_level = cfg_bp.get("xp_per_level") or [100] * max_level
+    remaining = Decimal(bp_xp)
+    level = 0
+    while level < max_level and remaining >= Decimal(int(xp_per_level[level])):
+        remaining -= Decimal(int(xp_per_level[level]))
+        level += 1
+    next_cost = Decimal(int(xp_per_level[level])) if level < max_level else Decimal(0)
+    return level, remaining, next_cost
+
+
+async def _ensure_bp_week(conn, tg_id: int, now: datetime) -> dict:
+    """Get-or-create the player's battle-pass row for the current UTC week."""
+    week = _bp_week_start(now)
+    row = await conn.fetchrow(
+        "select * from clicker_battlepass where tg_id = $1 and week_start = $2",
+        tg_id, week,
+    )
+    if row:
+        return dict(row)
+    await conn.execute(
+        """insert into clicker_battlepass (tg_id, week_start, bp_xp, bp_level, premium, rewards_claimed)
+           values ($1, $2, 0, 0, false, '{}'::int[])
+           on conflict (tg_id, week_start) do nothing""",
+        tg_id, week,
+    )
+    row = await conn.fetchrow(
+        "select * from clicker_battlepass where tg_id = $1 and week_start = $2",
+        tg_id, week,
+    )
+    return dict(row)
+
+
+async def _add_bp_xp(conn, tg_id: int, damage: Decimal, now: datetime) -> None:
+    """Convert damage → BP-XP (1k damage = 1 XP) and update weekly row."""
+    if damage <= 0:
+        return
+    bp_xp_delta = (damage / Decimal(1000)).quantize(Decimal("0.01"))
+    row = await _ensure_bp_week(conn, tg_id, now)
+    new_total = Decimal(row["bp_xp"]) + bp_xp_delta
+    new_level, _rem, _next = _bp_xp_to_level(new_total)
+    await conn.execute(
+        """update clicker_battlepass set bp_xp = $3, bp_level = $4
+           where tg_id = $1 and week_start = $2""",
+        tg_id, row["week_start"], new_total, new_level,
+    )
+    # Mirror cumulative bp_xp into clicker_users for any leaderboards.
+    await conn.execute(
+        "update clicker_users set bp_xp = bp_xp + $2 where tg_id = $1",
+        tg_id, bp_xp_delta,
+    )
+
+
+async def bp_buy_premium(tg_id: int) -> dict:
+    cfg_bp = cfg.battlepass()
+    cost = int(cfg_bp.get("premium_cost_casecoins", 50))
+    now = _now()
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            user = await conn.fetchrow(
+                "select casecoins from clicker_users where tg_id = $1 for update", tg_id,
+            )
+            if not user:
+                return {"ok": False, "error": "no_user"}
+            row = await _ensure_bp_week(conn, tg_id, now)
+            if row["premium"]:
+                return {"ok": False, "error": "already_premium"}
+            if Decimal(user["casecoins"]) < Decimal(cost):
+                return {"ok": False, "error": "not_enough_casecoins", "needed": str(cost)}
+            await conn.execute(
+                "update clicker_users set casecoins = casecoins - $2 where tg_id = $1",
+                tg_id, cost,
+            )
+            await conn.execute(
+                """update clicker_battlepass set premium = true
+                   where tg_id = $1 and week_start = $2""",
+                tg_id, row["week_start"],
+            )
+            await _log(conn, tg_id, "bp_premium_bought", {"week": str(row["week_start"]), "cost": cost})
+    state = await get_state(tg_id)
+    return {"ok": True, "data": state["data"]}
+
+
+async def bp_claim(tg_id: int, level: int, track: str) -> dict:
+    """Claim a free or premium reward at the given BP level."""
+    cfg_bp = cfg.battlepass()
+    rewards = cfg_bp.get("rewards") or []
+    reward_def = next((r for r in rewards if int(r["level"]) == int(level)), None)
+    if not reward_def:
+        return {"ok": False, "error": "unknown_level"}
+    track = track if track in ("free", "premium") else "free"
+    payload = reward_def.get(track) or {}
+    if not payload:
+        return {"ok": False, "error": "empty_reward"}
+
+    now = _now()
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            row = await _ensure_bp_week(conn, tg_id, now)
+            if int(row["bp_level"]) < int(level):
+                return {"ok": False, "error": "level_locked"}
+            if track == "premium" and not row["premium"]:
+                return {"ok": False, "error": "premium_locked"}
+
+            claimed: list = list(row["rewards_claimed"] or [])
+            # We encode claimed as level*2 (free) or level*2+1 (premium).
+            key = int(level) * 2 + (1 if track == "premium" else 0)
+            if key in claimed:
+                return {"ok": False, "error": "already_claimed"}
+
+            granted = await _grant_bp_reward(conn, tg_id, payload, now)
+            claimed.append(key)
+            await conn.execute(
+                """update clicker_battlepass set rewards_claimed = $3
+                   where tg_id = $1 and week_start = $2""",
+                tg_id, row["week_start"], claimed,
+            )
+            await _log(conn, tg_id, "bp_reward_claimed", {
+                "level": level, "track": track, "granted": granted,
+            })
+    state = await get_state(tg_id)
+    return {"ok": True, "data": {**state["data"], "granted": granted}}
+
+
+async def _grant_bp_reward(conn, tg_id: int, payload: dict, now: datetime) -> dict:
+    """Apply a reward payload from BP config. Returns dict of what was granted."""
+    granted: dict = {}
+    if "cash" in payload:
+        await conn.execute(
+            "update clicker_users set cash = cash + $2 where tg_id = $1",
+            tg_id, Decimal(int(payload["cash"])),
+        )
+        granted["cash"] = str(payload["cash"])
+    if "casecoins" in payload:
+        await conn.execute(
+            "update clicker_users set casecoins = casecoins + $2 where tg_id = $1",
+            tg_id, Decimal(int(payload["casecoins"])),
+        )
+        granted["casecoins"] = int(payload["casecoins"])
+    if "glory" in payload:
+        await conn.execute(
+            "update clicker_users set glory = glory + $2 where tg_id = $1",
+            tg_id, Decimal(int(payload["glory"])),
+        )
+        granted["glory"] = int(payload["glory"])
+    if "resources" in payload:
+        for res, amt in payload["resources"].items():
+            await conn.execute(
+                """insert into clicker_resources (tg_id, resource_type, amount) values ($1, $2, $3)
+                   on conflict (tg_id, resource_type) do update set amount = clicker_resources.amount + excluded.amount""",
+                tg_id, res, Decimal(int(amt)),
+            )
+        granted["resources"] = payload["resources"]
+    if "chest" in payload:
+        chest_id = await _grant_chest(conn, tg_id, payload["chest"])
+        granted["chest"] = payload["chest"]
+        granted["chest_inventory_id"] = chest_id
+    if "artifact_rarity" in payload:
+        rarity = payload["artifact_rarity"]
+        candidates = [a for a in cfg.artifacts() if a["rarity"] == rarity]
+        if candidates:
+            chosen = random.choice(candidates)
+            await _grant_artifact(conn, tg_id, chosen, "artifact")
+            granted["artifact"] = chosen
+    if "exclusive_artifact_weekly" in payload:
+        # Pick a random Mythic artifact as the "exclusive of the week".
+        mythics = [a for a in cfg.artifacts() if a["rarity"] == "mythic"]
+        if mythics:
+            chosen = random.choice(mythics)
+            await _grant_artifact(conn, tg_id, chosen, "artifact")
+            granted["exclusive_artifact"] = chosen
+    return granted
+
+
+async def get_battlepass(tg_id: int) -> dict:
+    now = _now()
+    async with pool().acquire() as conn:
+        row = await _ensure_bp_week(conn, tg_id, now)
+    cfg_bp = cfg.battlepass()
+    bp_xp = Decimal(row["bp_xp"])
+    level, into_lvl, next_cost = _bp_xp_to_level(bp_xp)
+    return {
+        "ok": True,
+        "data": {
+            "week_start": str(row["week_start"]),
+            "bp_xp": str(bp_xp),
+            "bp_level": int(level),
+            "xp_into_level": str(into_lvl),
+            "xp_for_next": str(next_cost),
+            "premium": bool(row["premium"]),
+            "rewards_claimed": list(row["rewards_claimed"] or []),
+            "max_level": int(cfg_bp.get("max_level", 50)),
+            "premium_cost_casecoins": int(cfg_bp.get("premium_cost_casecoins", 50)),
+            "rewards": cfg_bp.get("rewards") or [],
+        },
+    }
+
+
+# ---------- end battle pass ---------------------------------------------
+
+
+async def _accrue_casecoin_time(conn, tg_id: int, user_row, now: datetime) -> int:
+    """Award 1 casecoin per CASECOINS_RATE_SECONDS (600s = 10min) of online time.
+    Daily cap = CASECOINS_DAILY_CAP (60). Anti-farming: time delta capped at 120s/request.
+    """
+    today = now.date()
+    user_row = dict(user_row)
+
+    # Roll over the daily counter if a new UTC day started.
+    cur_day = user_row.get("casecoins_day")
+    if cur_day != today:
+        await conn.execute(
+            "update clicker_users set casecoins_today = 0, casecoins_day = $2 where tg_id = $1",
+            tg_id, today,
+        )
+        user_row["casecoins_today"] = 0
+        user_row["casecoins_day"] = today
+
+    last_seen = user_row["last_seen_at"]
+    if last_seen is None:
+        return 0
+    if last_seen.tzinfo is None:
+        last_seen = last_seen.replace(tzinfo=timezone.utc)
+    delta_s = max(0.0, min(120.0, (now - last_seen).total_seconds()))
+    if delta_s <= 0:
+        return 0
+
+    new_online = int(user_row.get("online_seconds") or 0) + int(delta_s)
+    casecoins_today = int(user_row.get("casecoins_today") or 0)
+    awards = 0
+    while new_online >= cfg.CASECOINS_RATE_SECONDS and casecoins_today < cfg.CASECOINS_DAILY_CAP:
+        new_online -= cfg.CASECOINS_RATE_SECONDS
+        casecoins_today += 1
+        awards += 1
+
+    await conn.execute(
+        """update clicker_users set
+              online_seconds = $2,
+              casecoins_today = $3,
+              casecoins = casecoins + $4
+           where tg_id = $1""",
+        tg_id, new_online, casecoins_today, awards,
+    )
+    return awards
+
+
 async def get_state(tg_id: int) -> dict:
     async with pool().acquire() as conn:
+        async with conn.transaction():
+            user_row = await conn.fetchrow(
+                "select * from clicker_users where tg_id = $1 for update", tg_id,
+            )
+            if user_row:
+                await _accrue_casecoin_time(conn, tg_id, user_row, _now())
         return await _wrap_state(conn, tg_id)
 
 

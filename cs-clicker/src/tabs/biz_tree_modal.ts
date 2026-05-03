@@ -20,10 +20,20 @@ const EFFECT_LABEL: Record<string, string> = {
 
 export function showBusinessTreeModal(businessId: string) {
   if (activeModal) return;
-  if (!store.config) return;
-  const branches = store.config.business_tree[businessId] || [];
+  if (!store.config) {
+    toast("Конфиг не загружен — обнови страницу", "error");
+    return;
+  }
+  const branches = store.config.business_tree?.[businessId] || [];
   const bdef = store.config.businesses.find((b) => b.id === businessId);
-  if (!bdef || branches.length === 0) return;
+  if (!bdef) {
+    toast("Бизнес не найден", "error");
+    return;
+  }
+  if (branches.length === 0) {
+    toast("Дерево этого бизнеса не настроено", "error");
+    return;
+  }
 
   const body = el("div");
   const list = el("div", { className: "biz-branch-list" });

@@ -72,8 +72,13 @@ def business_tree() -> dict:
     return _load("business_tree.json")
 
 
+@lru_cache(maxsize=1)
+def battlepass() -> dict:
+    return _load("battlepass.json")
+
+
 def reload() -> None:
-    for fn in (weapons, mercs, locations, bosses, chests, artifacts, mythics, crit_luck, businesses, resources_meta, prestige_tree, business_tree):
+    for fn in (weapons, mercs, locations, bosses, chests, artifacts, mythics, crit_luck, businesses, resources_meta, prestige_tree, business_tree, battlepass):
         fn.cache_clear()
 
 

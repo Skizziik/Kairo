@@ -4,6 +4,7 @@ import type { LeaderboardEntry, PrestigeNodeDef } from "../types";
 import { el, fmt } from "../util";
 import { toast } from "../ui/toast";
 import { openModal } from "../ui/modal";
+import { showBattlepassModal } from "./battlepass_modal";
 
 let root: HTMLElement | null = null;
 let lbMetric: "level" | "cash" | "casecoins" | "glory" | "prestige" | "bosses" = "level";
@@ -41,6 +42,18 @@ function render() {
   pBtn.onclick = () => doPrestige(projectedGlory);
   prestigeCard.appendChild(pBtn);
   content.appendChild(prestigeCard);
+
+  // Battle Pass card
+  const bpCard = el("div", { className: "prestige-card", style: { borderColor: "#3FA9F5", background: "linear-gradient(135deg, rgba(63,169,245,0.15), rgba(63,169,245,0.05))" } });
+  bpCard.appendChild(el("div", { className: "title", textContent: "🎟️ BATTLE PASS", style: { color: "#3FA9F5" } }));
+  bpCard.appendChild(el("div", {
+    className: "body",
+    innerHTML: `Недельный пасс на 50 уровней. Free + Premium треки. XP начисляется за весь нанесённый урон (1k = 1 XP).<br/>Premium открывается за <b>50 ⌬</b>, эксклюзив на 50-м уровне.`,
+  }));
+  const bpBtn = el("button", { textContent: "ОТКРЫТЬ BATTLE PASS", style: { background: "linear-gradient(180deg, #3FA9F5, #1B6FB5)", color: "#fff", borderColor: "#154E80" } });
+  bpBtn.onclick = () => { haptic("light"); showBattlepassModal(); };
+  bpCard.appendChild(bpBtn);
+  content.appendChild(bpCard);
 
   // Prestige Tree (always visible so player sees the path forward).
   if (store.config) {

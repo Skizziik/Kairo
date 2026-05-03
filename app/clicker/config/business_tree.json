@@ -1,44 +1,44 @@
 {
   "shop": [
-    {"id": "fridge",        "name": "Холодильник",          "icon": "biz_items/biz1_1.png", "max_level": 10, "base_cost": 500,    "cost_resource": null,         "effect": "idle_pct",      "per_level": 8},
-    {"id": "cassirsha",     "name": "Кассирша Зина",        "icon": "biz_items/biz1_2.png", "max_level": 10, "base_cost": 1500,   "cost_resource": null,         "effect": "tap_pct",       "per_level": 12},
-    {"id": "lavash_stack",  "name": "Стопка лавашей",       "icon": "biz_items/biz1_3.png", "max_level": 10, "base_cost": 4000,   "cost_resource": null,         "effect": "all_yield_pct", "per_level": 5},
-    {"id": "courier",       "name": "Самокат курьера",      "icon": "biz_items/biz1_4.png", "max_level": 10, "base_cost": 12000,  "cost_resource": null,         "effect": "offline_pct",   "per_level": 10},
-    {"id": "forum_ads",     "name": "Реклама на форуме",    "icon": "biz_items/biz1_5.png", "max_level": 10, "base_cost": 35000,  "cost_resource": null,         "effect": "idle_pct",      "per_level": 15}
+    {"id": "fridge",        "name": "Холодильник",          "icon": "biz_items/biz1_1.png", "max_level": 25, "base_cost": 500,    "cost_resource": null,         "effect": "idle_pct",      "per_level": 8},
+    {"id": "cassirsha",     "name": "Кассирша Зина",        "icon": "biz_items/biz1_2.png", "max_level": 25, "base_cost": 1500,   "cost_resource": null,         "effect": "tap_pct",       "per_level": 12},
+    {"id": "lavash_stack",  "name": "Стопка лавашей",       "icon": "biz_items/biz1_3.png", "max_level": 25, "base_cost": 4000,   "cost_resource": null,         "effect": "all_yield_pct", "per_level": 5},
+    {"id": "courier",       "name": "Самокат курьера",      "icon": "biz_items/biz1_4.png", "max_level": 25, "base_cost": 12000,  "cost_resource": null,         "effect": "offline_pct",   "per_level": 10},
+    {"id": "forum_ads",     "name": "Реклама на форуме",    "icon": "biz_items/biz1_5.png", "max_level": 25, "base_cost": 35000,  "cost_resource": null,         "effect": "idle_pct",      "per_level": 15}
   ],
   "gun_range": [
-    {"id": "robot",         "name": "Робот-собиратель",     "icon": "biz_items/biz2_2.png", "max_level": 10, "base_cost": 25000,  "cost_resource": "energy",     "cost_per_level": 50,  "effect": "idle_pct",      "per_level": 10},
-    {"id": "target",        "name": "Бумажная мишень",      "icon": "biz_items/biz2_1.png", "max_level": 10, "base_cost": 60000,  "cost_resource": "energy",     "cost_per_level": 100, "effect": "tap_pct",       "per_level": 15},
-    {"id": "vip_stand",     "name": "VIP-стенд",            "icon": "biz_items/biz2_3.png", "max_level": 10, "base_cost": 180000, "cost_resource": "energy",     "cost_per_level": 200, "effect": "all_yield_pct", "per_level": 8},
-    {"id": "scope",         "name": "Снайперская подзорка", "icon": "biz_items/biz2_4.png", "max_level": 10, "base_cost": 500000, "cost_resource": "energy",     "cost_per_level": 400, "effect": "crit_yield_pct","per_level": 3},
-    {"id": "sto_contract",  "name": "Контракт с СТО",       "icon": "biz_items/biz2_5.png", "max_level": 10, "base_cost": 1500000,"cost_resource": "energy",     "cost_per_level": 800, "effect": "offline_pct",   "per_level": 12}
+    {"id": "robot",         "name": "Робот-собиратель",     "icon": "biz_items/biz2_2.png", "max_level": 25, "base_cost": 25000,  "cost_resource": "energy",     "cost_per_level": 50,  "effect": "idle_pct",      "per_level": 10},
+    {"id": "target",        "name": "Бумажная мишень",      "icon": "biz_items/biz2_1.png", "max_level": 25, "base_cost": 60000,  "cost_resource": "energy",     "cost_per_level": 100, "effect": "tap_pct",       "per_level": 15},
+    {"id": "vip_stand",     "name": "VIP-стенд",            "icon": "biz_items/biz2_3.png", "max_level": 25, "base_cost": 180000, "cost_resource": "energy",     "cost_per_level": 200, "effect": "all_yield_pct", "per_level": 8},
+    {"id": "scope",         "name": "Снайперская подзорка", "icon": "biz_items/biz2_4.png", "max_level": 25, "base_cost": 500000, "cost_resource": "energy",     "cost_per_level": 400, "effect": "crit_yield_pct","per_level": 3},
+    {"id": "sto_contract",  "name": "Контракт с СТО",       "icon": "biz_items/biz2_5.png", "max_level": 25, "base_cost": 1500000,"cost_resource": "energy",     "cost_per_level": 800, "effect": "offline_pct",   "per_level": 12}
   ],
   "black_market": [
-    {"id": "border",        "name": "Связной с границей",   "icon": "biz_items/biz3_1.png", "max_level": 10, "base_cost": 400000,   "cost_resource": "brass",      "cost_per_level": 80,  "effect": "idle_pct",      "per_level": 12},
-    {"id": "fake_docs",     "name": "Поддельные документы","icon": "biz_items/biz3_2.png", "max_level": 10, "base_cost": 1200000,  "cost_resource": "brass",      "cost_per_level": 160, "effect": "tap_pct",       "per_level": 18},
-    {"id": "cop_cover",     "name": "Крыша-мент",           "icon": "biz_items/biz3_3.png", "max_level": 10, "base_cost": 3500000,  "cost_resource": "brass",      "cost_per_level": 320, "effect": "raid_def_pct",  "per_level": 8},
-    {"id": "courier_dark",  "name": "Чёрный курьер",        "icon": "biz_items/biz3_4.png", "max_level": 10, "base_cost": 10000000, "cost_resource": "brass",      "cost_per_level": 640, "effect": "offline_pct",   "per_level": 15},
-    {"id": "money_wash",    "name": "Прачечная для денег",  "icon": "biz_items/biz3_5.png", "max_level": 10, "base_cost": 30000000, "cost_resource": "brass",      "cost_per_level": 1280,"effect": "all_yield_pct", "per_level": 12}
+    {"id": "border",        "name": "Связной с границей",   "icon": "biz_items/biz3_1.png", "max_level": 25, "base_cost": 400000,   "cost_resource": "brass",      "cost_per_level": 80,  "effect": "idle_pct",      "per_level": 12},
+    {"id": "fake_docs",     "name": "Поддельные документы","icon": "biz_items/biz3_2.png", "max_level": 25, "base_cost": 1200000,  "cost_resource": "brass",      "cost_per_level": 160, "effect": "tap_pct",       "per_level": 18},
+    {"id": "cop_cover",     "name": "Крыша-мент",           "icon": "biz_items/biz3_3.png", "max_level": 25, "base_cost": 3500000,  "cost_resource": "brass",      "cost_per_level": 320, "effect": "raid_def_pct",  "per_level": 8},
+    {"id": "courier_dark",  "name": "Чёрный курьер",        "icon": "biz_items/biz3_4.png", "max_level": 25, "base_cost": 10000000, "cost_resource": "brass",      "cost_per_level": 640, "effect": "offline_pct",   "per_level": 15},
+    {"id": "money_wash",    "name": "Прачечная для денег",  "icon": "biz_items/biz3_5.png", "max_level": 25, "base_cost": 30000000, "cost_resource": "brass",      "cost_per_level": 1280,"effect": "all_yield_pct", "per_level": 12}
   ],
   "case_factory": [
-    {"id": "conveyor",      "name": "Конвейер",             "icon": "biz_items/biz4_1.png", "max_level": 10, "base_cost": 8000000,    "cost_resource": "contraband", "cost_per_level": 50,  "effect": "idle_pct",      "per_level": 14},
-    {"id": "qc",            "name": "QC-инспектор",         "icon": "biz_items/biz4_2.png", "max_level": 10, "base_cost": 24000000,   "cost_resource": "contraband", "cost_per_level": 100, "effect": "rare_drop_pct", "per_level": 5},
-    {"id": "stickers",      "name": "Ламинатор стикеров",   "icon": "biz_items/biz4_3.png", "max_level": 10, "base_cost": 70000000,   "cost_resource": "contraband", "cost_per_level": 200, "effect": "tap_pct",       "per_level": 22},
-    {"id": "night_shift",   "name": "Ночная смена",         "icon": "biz_items/biz4_4.png", "max_level": 10, "base_cost": 200000000,  "cost_resource": "contraband", "cost_per_level": 400, "effect": "offline_pct",   "per_level": 18},
-    {"id": "corp",          "name": "Корпоративная корпорация","icon":"biz_items/biz4_5.png","max_level":10,"base_cost": 600000000,  "cost_resource": "contraband", "cost_per_level": 800, "effect": "all_yield_pct", "per_level": 15}
+    {"id": "conveyor",      "name": "Конвейер",             "icon": "biz_items/biz4_1.png", "max_level": 25, "base_cost": 8000000,    "cost_resource": "contraband", "cost_per_level": 50,  "effect": "idle_pct",      "per_level": 14},
+    {"id": "qc",            "name": "QC-инспектор",         "icon": "biz_items/biz4_2.png", "max_level": 25, "base_cost": 24000000,   "cost_resource": "contraband", "cost_per_level": 100, "effect": "rare_drop_pct", "per_level": 5},
+    {"id": "stickers",      "name": "Ламинатор стикеров",   "icon": "biz_items/biz4_3.png", "max_level": 25, "base_cost": 70000000,   "cost_resource": "contraband", "cost_per_level": 200, "effect": "tap_pct",       "per_level": 22},
+    {"id": "night_shift",   "name": "Ночная смена",         "icon": "biz_items/biz4_4.png", "max_level": 25, "base_cost": 200000000,  "cost_resource": "contraband", "cost_per_level": 400, "effect": "offline_pct",   "per_level": 18},
+    {"id": "corp",          "name": "Корпоративная корпорация","icon":"biz_items/biz4_5.png","max_level":25,"base_cost": 600000000,  "cost_resource": "contraband", "cost_per_level": 800, "effect": "all_yield_pct", "per_level": 15}
   ],
   "skin_laundromat": [
-    {"id": "bleach",        "name": "Промышленный отбеливатель","icon":"biz_items/biz5_1.png","max_level":10,"base_cost": 200000000,    "cost_resource": "case_dust",  "cost_per_level": 30,  "effect": "idle_pct",      "per_level": 15},
-    {"id": "manager_ak",    "name": "Менеджер с патчем АК", "icon": "biz_items/biz5_2.png", "max_level": 10, "base_cost": 600000000,    "cost_resource": "case_dust",  "cost_per_level": 60,  "effect": "tap_pct",       "per_level": 25},
-    {"id": "fake_reviews",  "name": "Бот-отзывы",           "icon": "biz_items/biz5_3.png", "max_level": 10, "base_cost": 1800000000,   "cost_resource": "case_dust",  "cost_per_level": 120, "effect": "rare_drop_pct", "per_level": 7},
-    {"id": "double_wash",   "name": "Двойной цикл",         "icon": "biz_items/biz5_4.png", "max_level": 10, "base_cost": 5000000000,   "cost_resource": "case_dust",  "cost_per_level": 240, "effect": "offline_pct",   "per_level": 20},
-    {"id": "vip_partner",   "name": "VIP-партнёрка",        "icon": "biz_items/biz5_5.png", "max_level": 10, "base_cost": 15000000000,  "cost_resource": "case_dust",  "cost_per_level": 480, "effect": "all_yield_pct", "per_level": 18}
+    {"id": "bleach",        "name": "Промышленный отбеливатель","icon":"biz_items/biz5_1.png","max_level":25,"base_cost": 200000000,    "cost_resource": "case_dust",  "cost_per_level": 30,  "effect": "idle_pct",      "per_level": 15},
+    {"id": "manager_ak",    "name": "Менеджер с патчем АК", "icon": "biz_items/biz5_2.png", "max_level": 25, "base_cost": 600000000,    "cost_resource": "case_dust",  "cost_per_level": 60,  "effect": "tap_pct",       "per_level": 25},
+    {"id": "fake_reviews",  "name": "Бот-отзывы",           "icon": "biz_items/biz5_3.png", "max_level": 25, "base_cost": 1800000000,   "cost_resource": "case_dust",  "cost_per_level": 120, "effect": "rare_drop_pct", "per_level": 7},
+    {"id": "double_wash",   "name": "Двойной цикл",         "icon": "biz_items/biz5_4.png", "max_level": 25, "base_cost": 5000000000,   "cost_resource": "case_dust",  "cost_per_level": 240, "effect": "offline_pct",   "per_level": 20},
+    {"id": "vip_partner",   "name": "VIP-партнёрка",        "icon": "biz_items/biz5_5.png", "max_level": 25, "base_cost": 15000000000,  "cost_resource": "case_dust",  "cost_per_level": 480, "effect": "all_yield_pct", "per_level": 18}
   ],
   "crypto_bunker": [
-    {"id": "gpu_farm",      "name": "Ферма GPU",            "icon": "biz_items/biz6_1.png", "max_level": 10, "base_cost": 5000000000,   "cost_resource": "clean_skins","cost_per_level": 20,  "effect": "idle_pct",      "per_level": 18},
-    {"id": "mining_pool",   "name": "Майнинг-пул",          "icon": "biz_items/biz6_2.png", "max_level": 10, "base_cost": 15000000000,  "cost_resource": "clean_skins","cost_per_level": 40,  "effect": "all_yield_pct", "per_level": 12},
-    {"id": "cold_storage",  "name": "Холодное хранение",    "icon": "biz_items/biz6_3.png", "max_level": 10, "base_cost": 45000000000,  "cost_resource": "clean_skins","cost_per_level": 80,  "effect": "raid_def_pct",  "per_level": 12},
-    {"id": "stake_node",    "name": "Stake-нода",           "icon": "biz_items/biz6_4.png", "max_level": 10, "base_cost": 130000000000, "cost_resource": "clean_skins","cost_per_level": 160, "effect": "offline_pct",   "per_level": 25},
-    {"id": "hardfork",      "name": "Hardfork-стратегия",   "icon": "biz_items/biz6_5.png", "max_level": 10, "base_cost": 400000000000, "cost_resource": "clean_skins","cost_per_level": 320, "effect": "all_yield_pct", "per_level": 22}
+    {"id": "gpu_farm",      "name": "Ферма GPU",            "icon": "biz_items/biz6_1.png", "max_level": 25, "base_cost": 5000000000,   "cost_resource": "clean_skins","cost_per_level": 20,  "effect": "idle_pct",      "per_level": 18},
+    {"id": "mining_pool",   "name": "Майнинг-пул",          "icon": "biz_items/biz6_2.png", "max_level": 25, "base_cost": 15000000000,  "cost_resource": "clean_skins","cost_per_level": 40,  "effect": "all_yield_pct", "per_level": 12},
+    {"id": "cold_storage",  "name": "Холодное хранение",    "icon": "biz_items/biz6_3.png", "max_level": 25, "base_cost": 45000000000,  "cost_resource": "clean_skins","cost_per_level": 80,  "effect": "raid_def_pct",  "per_level": 12},
+    {"id": "stake_node",    "name": "Stake-нода",           "icon": "biz_items/biz6_4.png", "max_level": 25, "base_cost": 130000000000, "cost_resource": "clean_skins","cost_per_level": 160, "effect": "offline_pct",   "per_level": 25},
+    {"id": "hardfork",      "name": "Hardfork-стратегия",   "icon": "biz_items/biz6_5.png", "max_level": 25, "base_cost": 400000000000, "cost_resource": "clean_skins","cost_per_level": 320, "effect": "all_yield_pct", "per_level": 22}
   ]
 }

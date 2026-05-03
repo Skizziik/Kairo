@@ -823,6 +823,68 @@ html, body {
 ::-webkit-scrollbar-track { background: var(--bg-deep); }
 ::-webkit-scrollbar-thumb { background: var(--bg-mid); border-radius: 3px; }
 
+/* ---------- BATTLE PASS ---------- */
+
+.bp-body { display: flex; flex-direction: column; gap: 10px; }
+.bp-head {
+  background: var(--bg-card); border: 1px solid var(--bg-mid); border-radius: 8px;
+  padding: 10px;
+}
+.bp-week { font-size: 11px; color: var(--text-soft); margin-bottom: 6px; }
+.bp-lvl-row { display: flex; justify-content: space-between; margin-bottom: 6px; }
+.bp-lvl-num { font-size: 16px; font-weight: 800; color: var(--neon-blue); }
+.bp-lvl-xp { font-size: 12px; color: var(--text-soft); }
+.bp-progress-bar { height: 6px; background: rgba(0,0,0,0.4); border-radius: 3px; overflow: hidden; }
+.bp-progress-fill { height: 100%; background: linear-gradient(90deg, var(--neon-blue), var(--gold)); transition: width 300ms; }
+
+.bp-buy-premium {
+  width: 100%; min-height: 44px;
+  background: linear-gradient(180deg, var(--gold), #B58800);
+  color: #000; border: 1px solid #6F5500; border-radius: 8px;
+  font-family: inherit; font-weight: 800; font-size: 14px;
+  cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+}
+.bp-buy-premium .small { font-size: 11px; opacity: 0.85; }
+.bp-buy-premium:active { transform: translateY(1px); }
+.bp-premium-on {
+  text-align: center; padding: 8px 12px;
+  background: rgba(255,184,0,0.15); border: 1px solid var(--gold); border-radius: 8px;
+  color: var(--gold); font-weight: 700; font-size: 13px;
+}
+
+.bp-rewards { display: flex; flex-direction: column; gap: 4px; }
+.bp-row {
+  display: grid; grid-template-columns: 32px 1fr 1fr; gap: 6px;
+  align-items: stretch;
+  padding: 4px;
+  background: var(--bg-card); border: 1px solid var(--bg-mid); border-radius: 6px;
+}
+.bp-row.locked { opacity: 0.55; }
+.bp-row-lvl {
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; color: var(--awp-orange);
+}
+.bp-cell {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 6px 8px;
+  border: 1px dashed var(--bg-mid); border-radius: 6px;
+  background: rgba(0,0,0,0.15);
+}
+.bp-cell-premium { border-color: rgba(255,184,0,0.4); background: rgba(255,184,0,0.04); }
+.bp-reward-text { font-size: 10px; color: var(--text-bright); line-height: 1.3; }
+.bp-empty { color: var(--text-dim); font-size: 14px; text-align: center; }
+.bp-claim-btn {
+  width: 100%; min-height: 28px;
+  background: linear-gradient(180deg, var(--cs-green), #5D8019);
+  border: 1px solid #4A6815; border-radius: 4px;
+  color: #fff; font-family: inherit; font-weight: 800; font-size: 11px;
+  cursor: pointer;
+}
+.bp-claim-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: grayscale(0.5); }
+.bp-claim-btn.claimed { background: var(--bg-mid); border-color: var(--bg-mid); color: var(--cs-green); }
+.bp-claim-btn:active:not(:disabled) { transform: translateY(1px); }
+
 /* ---------- PRESTIGE TREE ---------- */
 
 .pt-grid {
