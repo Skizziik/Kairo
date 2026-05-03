@@ -170,7 +170,7 @@ function renderWeapon(w: WeaponDef): HTMLElement {
     maxLevel: w.max_level,
     unlock_level: w.unlock_level,
     base_cost: w.base_cost,
-    description: `Урон: ${fmt(w.base_dmg * (1 + lvl * 0.20))}`,
+    description: `Урон: ${fmt(w.base_dmg * (1 + lvl * Number(store.config?.constants?.damage_per_level ?? 0.18)))}`,
     resource_cost_per_level: (w as any).resource_cost_per_level,
     resource_cost_starts_level: (w as any).resource_cost_starts_level,
   });
@@ -188,7 +188,7 @@ function renderMerc(m: MercDef): HTMLElement {
     maxLevel: m.max_level,
     unlock_level: m.unlock_level,
     base_cost: m.base_cost,
-    description: `${m.role} · ${fmt(m.base_dps * (1 + lvl * 0.20))}/сек`,
+    description: `${m.role} · ${fmt(m.base_dps * (1 + lvl * Number(store.config?.constants?.damage_per_level ?? 0.18)))}/сек`,
     resource_cost_per_level: (m as any).resource_cost_per_level,
     resource_cost_starts_level: (m as any).resource_cost_starts_level,
   });

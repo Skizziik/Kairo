@@ -38,6 +38,7 @@ function hasClickerPermit(): boolean {
   return !!(u && u.level > 0);
 }
 let timerInterval: any = null;
+let autoTickInterval: any = null;
 let lastLevel = -1;
 let isFlushingTaps = false;
 
@@ -143,6 +144,7 @@ export function mountClickerTab(parent: HTMLElement): HTMLElement {
 
   store.subscribe(render);
   startTimerLoop();
+  startAutoTickLoop();
   render();
   return root;
 }
@@ -261,6 +263,32 @@ function startTimerLoop() {
       });
     }
   }, 200);
+}
+
+// Idle auto-DPS tick: every 1s, if the player is on the clicker tab and not
+// actively tapping, send tap(0, 1000) so the server applies auto-DPS damage
+// for the elapsed window. Without this, idle accrual freezes when player isn't
+// clicking — auto-DPS feels "broken".
+function startAutoTickLoop() {
+  if (autoTickInterval) clearInterval(autoTickInterval);
+  autoTickInterval = setInterval(async () => {
+    if (!store.state) return;
+    if (store.activeTab !== "clicker") return;
+    if (isFlushingTaps || pendingTaps > 0) return;
+    // Only tick if no recent click in last ~900ms (otherwise normal flush handles it).
+    if (Date.now() - lastTapAt < 900) return;
+    // No point ticking if auto_dps is 0.
+    if (Number(store.state.user.auto_dps) <= 0) return;
+    isFlushingTaps = true;
+    try {
+      const r = await api.tap(0, 1000);
+      if (r.ok && r.data) handleTapResult(r.data);
+    } catch {
+      /* ignore */
+    } finally {
+      isFlushingTaps = false;
+    }
+  }, 1000);
 }
 
 // ---------- TAP HANDLING ----------

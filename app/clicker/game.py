@@ -765,8 +765,10 @@ async def tap(tg_id: int, taps: int, dt_ms: int) -> dict:
                     tg_id, new_tc % 50,
                 )
 
-            # Apply auto-DPS for elapsed window.
-            auto_damage = (auto_dps * auto_mult * Decimal(str(elapsed_s))).quantize(Decimal("1"))
+            # Apply auto-DPS for elapsed window. Don't quantize to int — fractional
+            # damage (e.g. 0.9 × 0.25 = 0.225) must accumulate, otherwise rapid taps
+            # round it to 0 every time and auto-DPS feels broken at low values.
+            auto_damage = auto_dps * auto_mult * Decimal(str(elapsed_s))
 
             total_damage = tap_damage + auto_damage
             new_hp = Decimal(combat["enemy_hp"]) - total_damage
@@ -1792,10 +1794,13 @@ async def _build_state(conn, tg_id: int) -> dict:
         "select * from clicker_businesses where tg_id = $1", tg_id,
     )
 
-    # Compute live pending for each business (without persisting — just for display).
+    # Compute live pending for each business (preview — must match what business_collect
+    # actually produces, otherwise UI lies about how much will be collected).
     now = _now()
     biz_state = []
     user_max = int(user["max_level"])
+    # Snapshot current resource balance once so consumption-capping is consistent.
+    res_balance = {r["resource_type"]: Decimal(r["amount"]) for r in res_rows}
     for bdef in cfg.businesses():
         bid = bdef["id"]
         if user_max < int(bdef["unlock_level"]):
@@ -1803,9 +1808,14 @@ async def _build_state(conn, tg_id: int) -> dict:
         # Find row.
         biz_row = next((dict(r) for r in biz_rows if r["business_id"] == bid), None)
         bus_level = next((int(u["level"]) for u in upg_rows if u["kind"] == "business" and u["slot_id"] == bid), 0)
-        rate = _business_idle_per_sec(bdef, bus_level)
+        # Branches first — they affect rate / tap_yield / consumption.
+        branch_lvls = _business_branch_levels(upg_rows, bid)
+        branch_pcts = _business_branch_pcts(bid, branch_lvls)
+        rate = _business_idle_per_sec(bdef, bus_level, branch_pcts)
+        tap_yield = _business_tap_yield(bdef, bus_level, branch_pcts)
         upgrade_cost = _business_upgrade_cost(bdef, bus_level)
-        tap_yield = _business_tap_yield(bdef, bus_level)
+        consumption = _business_consumption_per_sec(bdef, bus_level, branch_pcts)
+        biz_res_cost = _business_resource_cost(bdef, bus_level)
         pending = Decimal(0)
         if biz_row:
             last = biz_row["last_idle_at"]
@@ -1814,16 +1824,20 @@ async def _build_state(conn, tg_id: int) -> dict:
             elapsed = max(0.0, (now - last).total_seconds())
             cap = cfg.BUSINESS_IDLE_CAP_HOURS * 3600
             elapsed = min(elapsed, cap)
-            produced = (rate * Decimal(str(elapsed)))
+            # Cap the productive window by available consumption resources — same
+            # math as _accrue_business_idle. Without this, the preview lies about
+            # how much will land when the player presses Collect.
+            sustainable_s = Decimal(str(elapsed))
+            if consumption:
+                for res, cons_rate in consumption.items():
+                    if cons_rate <= 0:
+                        continue
+                    avail = res_balance.get(res, Decimal(0))
+                    max_for_res = avail / cons_rate if cons_rate > 0 else sustainable_s
+                    if max_for_res < sustainable_s:
+                        sustainable_s = max_for_res
+            produced = rate * sustainable_s
             pending = Decimal(biz_row["pending_amount"]) + produced
-        biz_res_cost = _business_resource_cost(bdef, bus_level)
-        # Branch state for this business
-        branch_lvls = _business_branch_levels(upg_rows, bid)
-        # Recompute rate/tap with branch bonuses
-        branch_pcts = _business_branch_pcts(bid, branch_lvls)
-        rate = _business_idle_per_sec(bdef, bus_level, branch_pcts)
-        tap_yield = _business_tap_yield(bdef, bus_level, branch_pcts)
-        consumption = _business_consumption_per_sec(bdef, bus_level, branch_pcts)
         biz_state.append({
             "id": bid,
             "level": bus_level,

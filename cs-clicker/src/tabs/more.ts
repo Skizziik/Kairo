@@ -33,23 +33,8 @@ function render() {
     textContent: "★ Престиж и 🎟️ Battle Pass теперь в кликер-табе (рядом с АПГРЕЙДЫ).",
   }));
 
-  // Stats
-  content.appendChild(el("div", { className: "upg-section-title", textContent: "СТАТИСТИКА", style: { marginTop: "16px" } }));
-  const stats = el("div", { className: "lb-list" });
-  stats.appendChild(statRow("Максимальный уровень", String(u.max_level)));
-  stats.appendChild(statRow("Чекпоинт",              String(u.checkpoint)));
-  stats.appendChild(statRow("Боссов убито",          String(u.bosses_killed)));
-  stats.appendChild(statRow("Сундуков открыто",      String(u.chests_opened)));
-  stats.appendChild(statRow("Урон всего",            fmt(u.total_damage)));
-  stats.appendChild(statRow("Click Damage",          fmt(u.click_damage)));
-  stats.appendChild(statRow("Auto-DPS",              fmt(u.auto_dps) + "/сек"));
-  stats.appendChild(statRow("Crit Chance",           `${Number(u.crit_chance).toFixed(1)}%`));
-  stats.appendChild(statRow("Crit ×",                `${Number(u.crit_multiplier).toFixed(2)}`));
-  stats.appendChild(statRow("Удача",                 `${Number(u.luck).toFixed(0)}%`));
-  content.appendChild(stats);
-
-  // Leaderboard
-  content.appendChild(el("div", { className: "upg-section-title", textContent: "ЛИДЕРБОРД", style: { marginTop: "20px" } }));
+  // Leaderboard (top)
+  content.appendChild(el("div", { className: "upg-section-title", textContent: "ЛИДЕРБОРД", style: { marginTop: "16px" } }));
   const tabs = el("div", { className: "lb-tabs" });
   for (const m of [
     { id: "level",     label: "🏆 Уровень" },
@@ -75,6 +60,21 @@ function render() {
     lbList.appendChild(el("div", { textContent: "Загружаем…", style: { textAlign: "center", color: "#64748B", padding: "16px" } }));
   }
   content.appendChild(lbList);
+
+  // Stats (below leaderboard)
+  content.appendChild(el("div", { className: "upg-section-title", textContent: "СТАТИСТИКА", style: { marginTop: "20px" } }));
+  const stats = el("div", { className: "lb-list" });
+  stats.appendChild(statRow("Максимальный уровень", String(u.max_level)));
+  stats.appendChild(statRow("Чекпоинт",              String(u.checkpoint)));
+  stats.appendChild(statRow("Боссов убито",          String(u.bosses_killed)));
+  stats.appendChild(statRow("Сундуков открыто",      String(u.chests_opened)));
+  stats.appendChild(statRow("Урон всего",            fmt(u.total_damage)));
+  stats.appendChild(statRow("Click Damage",          fmt(u.click_damage)));
+  stats.appendChild(statRow("Auto-DPS",              fmt(u.auto_dps) + "/сек"));
+  stats.appendChild(statRow("Crit Chance",           `${Number(u.crit_chance).toFixed(1)}%`));
+  stats.appendChild(statRow("Crit ×",                `${Number(u.crit_multiplier).toFixed(2)}`));
+  stats.appendChild(statRow("Удача",                 `${Number(u.luck).toFixed(0)}%`));
+  content.appendChild(stats);
 
   root.appendChild(content);
 
