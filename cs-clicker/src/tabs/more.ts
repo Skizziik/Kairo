@@ -25,57 +25,13 @@ function render() {
 
   content.appendChild(el("div", { className: "tab-title", textContent: "⚡ ЕЩЁ" }));
 
-  // Prestige
   const u = store.state.user;
-  const canPrestige = u.max_level >= 20;
-  const projectedGlory = canPrestige ? Math.max(1, Math.floor(Math.pow(u.max_level / 20, 1.5))) : 0;
-  const prestigeCard = el("div", { className: "prestige-card" });
-  prestigeCard.appendChild(el("div", { className: "title", textContent: `★ ПРЕСТИЖ #${u.prestige_count + 1}` }));
-  prestigeCard.appendChild(el("div", {
-    className: "body",
-    innerHTML: canPrestige
-      ? `Сбросишь уровень и апгрейды → получишь <b>${projectedGlory}★</b> Славы.<br/>Артефакты, casecoins, глория и сундуки <b>сохранятся</b>.<br/>+1 слот артефакта (сейчас: ${u.artifact_slots}/6).`
-      : `Доступно с уровня 20. Сейчас твой максимум: <b>${u.max_level}</b>.`,
-  }));
-  const pBtn = el("button", { textContent: canPrestige ? `СДЕЛАТЬ ПРЕСТИЖ +${projectedGlory}★` : "ЗАБЛОКИРОВАНО" });
-  if (!canPrestige) pBtn.disabled = true;
-  pBtn.onclick = () => doPrestige(projectedGlory);
-  prestigeCard.appendChild(pBtn);
-  content.appendChild(prestigeCard);
 
-  // Battle Pass card
-  const bpCard = el("div", { className: "prestige-card", style: { borderColor: "#3FA9F5", background: "linear-gradient(135deg, rgba(63,169,245,0.15), rgba(63,169,245,0.05))" } });
-  bpCard.appendChild(el("div", { className: "title", textContent: "🎟️ BATTLE PASS", style: { color: "#3FA9F5" } }));
-  bpCard.appendChild(el("div", {
-    className: "body",
-    innerHTML: `Недельный пасс на 50 уровней. Free + Premium треки. XP начисляется за весь нанесённый урон (1k = 1 XP).<br/>Premium открывается за <b>50 ⌬</b>, эксклюзив на 50-м уровне.`,
+  // Prestige + BP теперь в шорткатах кликер-таба, здесь только напоминание.
+  content.appendChild(el("div", {
+    style: { fontSize: "11px", color: "#94A3B8", textAlign: "center", padding: "8px", marginTop: "4px" },
+    textContent: "★ Престиж и 🎟️ Battle Pass теперь в кликер-табе (рядом с АПГРЕЙДЫ).",
   }));
-  const bpBtn = el("button", { textContent: "ОТКРЫТЬ BATTLE PASS", style: { background: "linear-gradient(180deg, #3FA9F5, #1B6FB5)", color: "#fff", borderColor: "#154E80" } });
-  bpBtn.onclick = () => { haptic("light"); showBattlepassModal(); };
-  bpCard.appendChild(bpBtn);
-  content.appendChild(bpCard);
-
-  // Prestige Tree (always visible so player sees the path forward).
-  if (store.config) {
-    content.appendChild(el("div", {
-      className: "upg-section-title",
-      textContent: `ДРЕВО ПРЕСТИЖА (${u.glory}★)`,
-      style: { marginTop: "16px" },
-    }));
-    if (Number(u.glory) === 0 && u.prestige_count === 0) {
-      content.appendChild(el("div", {
-        textContent: "Сделай первый престиж (с уровня 20+) чтобы получить ★ Славу и купить узлы.",
-        style: { fontSize: "12px", color: "#94A3B8", marginBottom: "10px", padding: "0 4px", lineHeight: "1.4" },
-      }));
-    }
-    const ptList = el("div", { className: "pt-grid" });
-    const owned = store.state.prestige_nodes || {};
-    const sorted = [...store.config.prestige_tree].sort((a, b) => a.tier - b.tier);
-    for (const node of sorted) {
-      ptList.appendChild(renderPrestigeNode(node, owned[node.id] || 0, Number(u.glory)));
-    }
-    content.appendChild(ptList);
-  }
 
   // Stats
   content.appendChild(el("div", { className: "upg-section-title", textContent: "СТАТИСТИКА", style: { marginTop: "16px" } }));

@@ -5,6 +5,8 @@ import { ASSET_BASE, el, fmt, fmtTimer } from "../util";
 import { showUpgradeModal } from "./upgrade_modal";
 import { toast } from "../ui/toast";
 import { showChestRollModal } from "./chest_modal";
+import { showPrestigeModal } from "./prestige_modal";
+import { showBattlepassModal } from "./battlepass_modal";
 
 let root: HTMLElement | null = null;
 let bgEl: HTMLElement;
@@ -100,7 +102,7 @@ export function mountClickerTab(parent: HTMLElement): HTMLElement {
   statCritEl = makeStatItem(statsBar, "КРИТ");
   content.appendChild(statsBar);
 
-  // Action bar
+  // Action bar — main upgrades + shortcuts to prestige/BP
   const actionBar = el("div", { className: "action-bar" });
   const upgradeBtn = el("button", { className: "action-btn primary", textContent: "АПГРЕЙДЫ" });
   upgradeBtn.onclick = () => {
@@ -108,6 +110,17 @@ export function mountClickerTab(parent: HTMLElement): HTMLElement {
     showUpgradeModal();
   };
   actionBar.appendChild(upgradeBtn);
+
+  const prestigeBtn = el("button", { className: "action-btn icon-btn", textContent: "★" });
+  prestigeBtn.title = "Престиж + дерево";
+  prestigeBtn.onclick = () => { haptic("light"); showPrestigeModal(); };
+  actionBar.appendChild(prestigeBtn);
+
+  const bpBtn = el("button", { className: "action-btn icon-btn", textContent: "🎟️" });
+  bpBtn.title = "Battle Pass";
+  bpBtn.onclick = () => { haptic("light"); showBattlepassModal(); };
+  actionBar.appendChild(bpBtn);
+
   content.appendChild(actionBar);
 
   root.appendChild(content);

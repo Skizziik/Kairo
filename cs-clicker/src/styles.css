@@ -368,6 +368,14 @@ html, body {
   background: rgba(0,0,0,0.3); color: #fff; padding: 1px 6px; border-radius: 999px;
   font-size: 10px;
 }
+.action-btn.icon-btn {
+  flex: 0 0 auto;
+  min-width: 56px;
+  font-size: 22px;
+  padding: 0;
+  background: linear-gradient(180deg, var(--bg-elevated), var(--bg-mid));
+  border-color: var(--bg-mid);
+}
 
 /* ---------- TAB COMMON ---------- */
 
@@ -661,32 +669,29 @@ html, body {
 /* ---------- BUSINESS TAB ---------- */
 
 .biz-res-hud {
-  display: flex; gap: 6px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
   margin-bottom: 12px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-  padding-bottom: 2px;
 }
-.biz-res-hud::-webkit-scrollbar { display: none; }
 .biz-res-chip {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 4px 10px 4px 6px;
+  display: flex; align-items: center; gap: 4px;
+  padding: 4px 8px 4px 4px;
   background: var(--bg-card);
   border: 1px solid var(--bg-mid);
-  border-radius: 999px;
+  border-radius: 8px;
   font-size: 12px; font-weight: 700;
-  flex-shrink: 0;
-  min-width: 84px;
   white-space: nowrap;
-  justify-content: flex-start;
+  overflow: hidden;
 }
 .biz-res-chip img { width: 22px; height: 22px; object-fit: contain; flex-shrink: 0; }
 .biz-res-chip .amt {
-  letter-spacing: 0.5px;
   flex: 1;
   text-align: right;
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .collect-all-btn-biz {

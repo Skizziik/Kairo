@@ -522,14 +522,42 @@ async def tap(tg_id: int, taps: int, dt_ms: int) -> dict:
             if combat["is_boss"]:
                 boss_def = cfg.boss_for_level(level)
                 if boss_def:
-                    drop_chance = cfg.BOSS_CHEST_DROP_BASE
+                    # Drop chance: base + prestige Boss-Hunter bonus.
+                    pt_now = _prestige_effects(await _prestige_levels(conn, tg_id))
+                    drop_chance = cfg.BOSS_CHEST_DROP_BASE + float(pt_now["pct"].get("boss_chest_drop_pct", 0)) / 100.0
                     user_kills = int(user["bosses_killed"])
+                    pity = int(user["boss_no_chest_streak"])
                     is_first_kill_of_first_boss = (boss_def["id"] == "01") and user_kills == 0
-                    if is_first_kill_of_first_boss or random.random() < drop_chance:
+                    is_pity_guaranteed = pity >= cfg.BOSS_CHEST_PITY_THRESHOLD
+
+                    rolled = random.random() < drop_chance
+                    if is_first_kill_of_first_boss or is_pity_guaranteed or rolled:
                         chest_dropped = boss_def["chest"]
                         await _grant_chest(conn, tg_id, chest_dropped)
+                        # Reset streak.
+                        await conn.execute(
+                            "update clicker_users set boss_no_chest_streak = 0 where tg_id = $1",
+                            tg_id,
+                        )
+                    else:
+                        # Bump streak.
+                        await conn.execute(
+                            "update clicker_users set boss_no_chest_streak = boss_no_chest_streak + 1 where tg_id = $1",
+                            tg_id,
+                        )
+
+                    # Direct gas chance on bosses lvl 30+ (rarest).
+                    if level >= cfg.BOSS_GAS_LEVEL_THRESHOLD:
+                        gas_chance = cfg.BOSS_GAS_DROP_CHANCE + float(pt_now["pct"].get("gas_drop_pct", 0)) / 100.0
+                        if random.random() < gas_chance:
+                            await conn.execute(
+                                """insert into clicker_resources (tg_id, resource_type, amount) values ($1, 'gas', 1)
+                                   on conflict (tg_id, resource_type) do update set amount = clicker_resources.amount + 1""",
+                                tg_id,
+                            )
+                            result["gas_dropped"] = 1
+
                     if boss_def.get("guaranteed_artifact"):
-                        # Guaranteed artifact from the matching chest tier.
                         a = _roll_artifact(boss_def["chest"])
                         if a:
                             await _grant_artifact(conn, tg_id, a, "artifact")
@@ -806,11 +834,19 @@ async def buy_upgrade(tg_id: int, kind: str, slot_id: str, count: int = 1) -> di
             for i in range(requested):
                 total_cost += _upgrade_cost(base_cost, cur_level + i)
 
-            # Resource costs (per-level × count).
+            # Resource costs (per-level × count, only after threshold).
             res_cost_per_level = spec.get("resource_cost_per_level") or {}
+            res_starts = int(spec.get("resource_cost_starts_level", 1))
             total_res_cost: dict[str, Decimal] = {}
+            # Only count levels at-or-above the threshold.
+            paid_levels = 0
+            for i in range(requested):
+                target_level = cur_level + i + 1  # we are buying level (cur_level+1)..
+                if target_level >= res_starts:
+                    paid_levels += 1
             for res, amt in res_cost_per_level.items():
-                total_res_cost[res] = Decimal(str(amt)) * Decimal(requested)
+                if paid_levels > 0:
+                    total_res_cost[res] = Decimal(str(amt)) * Decimal(paid_levels)
 
             if Decimal(user["cash"]) < total_cost:
                 return {"ok": False, "error": "not_enough_cash", "needed": str(total_cost)}

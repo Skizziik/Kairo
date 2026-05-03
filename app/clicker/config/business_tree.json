@@ -1,10 +1,10 @@
 {
   "shop": [
-    {"id": "fridge",        "name": "Холодильник",          "icon": "biz_items/biz1_1.png", "max_level": 25, "base_cost": 500,    "cost_resource": null,         "effect": "idle_pct",      "per_level": 8},
-    {"id": "cassirsha",     "name": "Кассирша Зина",        "icon": "biz_items/biz1_2.png", "max_level": 25, "base_cost": 1500,   "cost_resource": null,         "effect": "tap_pct",       "per_level": 12},
-    {"id": "lavash_stack",  "name": "Стопка лавашей",       "icon": "biz_items/biz1_3.png", "max_level": 25, "base_cost": 4000,   "cost_resource": null,         "effect": "all_yield_pct", "per_level": 5},
-    {"id": "courier",       "name": "Самокат курьера",      "icon": "biz_items/biz1_4.png", "max_level": 25, "base_cost": 12000,  "cost_resource": null,         "effect": "offline_pct",   "per_level": 10},
-    {"id": "forum_ads",     "name": "Реклама на форуме",    "icon": "biz_items/biz1_5.png", "max_level": 25, "base_cost": 35000,  "cost_resource": null,         "effect": "idle_pct",      "per_level": 15}
+    {"id": "fridge",        "name": "Холодильник",          "icon": "biz_items/biz1_1.png", "max_level": 25, "base_cost": 500,    "cost_resource": "energy",     "cost_per_level": 10,  "effect": "idle_pct",      "per_level": 8},
+    {"id": "cassirsha",     "name": "Кассирша Зина",        "icon": "biz_items/biz1_2.png", "max_level": 25, "base_cost": 1500,   "cost_resource": "energy",     "cost_per_level": 20,  "effect": "tap_pct",       "per_level": 12},
+    {"id": "lavash_stack",  "name": "Стопка лавашей",       "icon": "biz_items/biz1_3.png", "max_level": 25, "base_cost": 4000,   "cost_resource": "energy",     "cost_per_level": 35,  "effect": "all_yield_pct", "per_level": 5},
+    {"id": "courier",       "name": "Самокат курьера",      "icon": "biz_items/biz1_4.png", "max_level": 25, "base_cost": 12000,  "cost_resource": "energy",     "cost_per_level": 60,  "effect": "offline_pct",   "per_level": 10},
+    {"id": "forum_ads",     "name": "Реклама на форуме",    "icon": "biz_items/biz1_5.png", "max_level": 25, "base_cost": 35000,  "cost_resource": "energy",     "cost_per_level": 100, "effect": "idle_pct",      "per_level": 15}
   ],
   "gun_range": [
     {"id": "robot",         "name": "Робот-собиратель",     "icon": "biz_items/biz2_2.png", "max_level": 25, "base_cost": 25000,  "cost_resource": "energy",     "cost_per_level": 50,  "effect": "idle_pct",      "per_level": 10},
