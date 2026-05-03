@@ -114,6 +114,7 @@ function renderWeapon(w: WeaponDef): HTMLElement {
     base_cost: w.base_cost,
     description: `Урон: ${fmt(w.base_dmg * (1 + lvl * 0.20))}`,
     resource_cost_per_level: (w as any).resource_cost_per_level,
+    resource_cost_starts_level: (w as any).resource_cost_starts_level,
   });
 }
 
@@ -131,6 +132,7 @@ function renderMerc(m: MercDef): HTMLElement {
     base_cost: m.base_cost,
     description: `${m.role} · ${fmt(m.base_dps * (1 + lvl * 0.20))}/сек`,
     resource_cost_per_level: (m as any).resource_cost_per_level,
+    resource_cost_starts_level: (m as any).resource_cost_starts_level,
   });
 }
 
@@ -150,7 +152,8 @@ function renderCritLuck(kind: "crit_chance" | "crit_damage" | "luck", u: CritLuc
     unlock_level: u.unlock_level,
     base_cost: u.base_cost,
     description: `${label}: +${totalPct}% (+${u.per_level_pct}%/ур)`,
-    resource_cost_per_level: undefined,
+    resource_cost_per_level: (u as any).resource_cost_per_level,
+    resource_cost_starts_level: (u as any).resource_cost_starts_level,
   });
 }
 
@@ -159,6 +162,7 @@ function renderUpgCard(opts: {
   level: number; maxLevel: number; unlock_level: number; base_cost: number;
   description: string;
   resource_cost_per_level?: Record<string, number>;
+  resource_cost_starts_level?: number;
 }): HTMLElement {
   const card = el("div", { className: "upg-card" });
   const userLevel = store.state?.user.max_level || 0;
@@ -183,10 +187,19 @@ function renderUpgCard(opts: {
   const buyN = Math.max(1, Math.min(bulkSize, opts.maxLevel - opts.level));
   const cost = totalCost(opts.base_cost, opts.level, buyN);
 
-  // Resource cost (per-level × count).
+  // Resource cost — scales by RES_COST_GROWTH^(target_lvl-1) per level, only after starts threshold.
   const rc = opts.resource_cost_per_level || {};
   const totalResCost: Record<string, number> = {};
-  for (const [res, amt] of Object.entries(rc)) totalResCost[res] = Number(amt) * buyN;
+  const resGrowth = Number(store.config?.constants?.res_cost_growth ?? 1.08);
+  const startsAt = Number(opts.resource_cost_starts_level ?? 1);
+  for (let i = 0; i < buyN; i++) {
+    const targetLvl = opts.level + i + 1;
+    if (targetLvl < startsAt) continue;
+    const scale = Math.pow(resGrowth, targetLvl - 1);
+    for (const [res, amt] of Object.entries(rc)) {
+      totalResCost[res] = (totalResCost[res] || 0) + Math.ceil(Number(amt) * scale);
+    }
+  }
   let resOk = true;
   for (const [res, amt] of Object.entries(totalResCost)) {
     const have = Number(store.state?.resources[res] || "0");

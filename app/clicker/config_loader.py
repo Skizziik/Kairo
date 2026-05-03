@@ -103,6 +103,7 @@ BOSS_CHEST_DROP_BASE = 0.10      # flat 10% drop chance per boss kill
 BOSS_GAS_DROP_CHANCE = 0.005     # 0.5% chance for direct gas drop on boss kill (lvl 30+)
 BOSS_GAS_LEVEL_THRESHOLD = 30
 COST_GROWTH = 1.18            # was 1.15 — upgrade prices climb faster
+RES_COST_GROWTH = 1.08        # resource costs scale per level (gentler than cash)
 DAMAGE_PER_LEVEL = 0.18       # was 0.20 — slightly less damage per upgrade level
 CHECKPOINT_EVERY = 10
 CASECOINS_RATE_SECONDS = 600  # 1 ⌬ per 10 minutes

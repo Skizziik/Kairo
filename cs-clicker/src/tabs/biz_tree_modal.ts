@@ -73,18 +73,22 @@ function renderBranch(businessId: string, branch: BusinessBranchDef, owned: numb
   const card = el("div", { className: "biz-branch-card" });
   const maxed = owned >= branch.max_level;
 
-  const cashCost = Math.ceil(branch.base_cost * Math.pow(1.20, owned));
+  const growth = Math.pow(1.20, owned);
+  const cashCost = Math.ceil(branch.base_cost * growth);
   const haveCash = Number(store.state.user.cash);
 
-  let resCost = 0;
-  let haveRes = 0;
-  if (branch.cost_resource) {
-    resCost = Math.ceil((branch.cost_per_level || 0) * Math.pow(1.20, owned));
-    haveRes = Number(store.state.resources[branch.cost_resource] || "0");
+  // Multi-resource: prefer cost_resources dict, fallback to legacy cost_resource.
+  const resCostMap: Record<string, number> = {};
+  if (branch.cost_resources) {
+    for (const [res, baseAmt] of Object.entries(branch.cost_resources)) {
+      resCostMap[res] = Math.ceil(Number(baseAmt) * growth);
+    }
+  } else if (branch.cost_resource) {
+    resCostMap[branch.cost_resource] = Math.ceil((branch.cost_per_level || 0) * growth);
   }
+  const resOk = Object.entries(resCostMap).every(([res, need]) => Number(store.state!.resources[res] || "0") >= need);
 
   const cashOk = haveCash >= cashCost;
-  const resOk = !branch.cost_resource || haveRes >= resCost;
   const can = !maxed && cashOk && resOk;
 
   const head = el("div", { className: "biz-branch-head" });
@@ -116,11 +120,13 @@ function renderBranch(businessId: string, branch: BusinessBranchDef, owned: numb
     const costRow = el("div", { className: "small" });
     const cashSpan = el("span", { textContent: `$${fmt(cashCost)}`, style: { color: cashOk ? "#FFB800" : "#FCA5A5" } });
     costRow.appendChild(cashSpan);
-    if (branch.cost_resource) {
-      const meta = store.config.resources_meta[branch.cost_resource];
+    for (const [res, need] of Object.entries(resCostMap)) {
+      const meta = store.config.resources_meta[res];
+      const have = Number(store.state.resources[res] || "0");
+      const okThis = have >= need;
       const resSpan = el("span", {
-        textContent: ` · ${meta?.emoji || ""}${fmt(resCost)}`,
-        style: { color: resOk ? "#94A3B8" : "#FCA5A5" },
+        textContent: ` · ${meta?.emoji || ""}${fmt(need)}`,
+        style: { color: okThis ? "#94A3B8" : "#FCA5A5" },
       });
       costRow.appendChild(resSpan);
     }

@@ -77,8 +77,9 @@ export interface BusinessBranchDef {
   icon: string;
   max_level: number;
   base_cost: number;
-  cost_resource: string | null;
-  cost_per_level?: number;
+  cost_resource?: string | null;             // legacy single-resource
+  cost_per_level?: number;                   // legacy
+  cost_resources?: Record<string, number>;   // new multi-resource
   effect: string;
   per_level: number;
   desc?: string;
@@ -222,6 +223,7 @@ export interface ConfigSnap {
     coin_drop_ratio: number;
     boss_coin_mult: number;
     cost_growth: number;
+    res_cost_growth?: number;
     damage_per_level: number;
     checkpoint_every: number;
     business_idle_cap_hours: number;

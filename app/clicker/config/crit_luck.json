@@ -1,19 +1,19 @@
 {
   "crit_chance": [
-    {"id": "cc01", "name": "Острый Глаз",     "base_cost": 12000,    "unlock_level": 5,  "max_level": 30, "per_level_pct": 0.5, "icon": "ui/01.png", "resource_cost_per_level": {"energy": 8},               "resource_cost_starts_level": 3},
-    {"id": "cc02", "name": "Зум АВП",         "base_cost": 600000,   "unlock_level": 18, "max_level": 30, "per_level_pct": 1.0, "icon": "ui/01.png", "resource_cost_per_level": {"brass": 12, "energy": 25}},
-    {"id": "cc03", "name": "Прицел Logitech", "base_cost": 30000000, "unlock_level": 35, "max_level": 30, "per_level_pct": 1.5, "icon": "ui/01.png", "resource_cost_per_level": {"contraband": 8, "brass": 60}}
+    {"id": "cc01", "name": "Острый Глаз",     "base_cost": 12000,    "unlock_level": 5,  "max_level": 30, "per_level_pct": 0.5, "icon": "ui/01.png", "resource_cost_per_level": {"energy": 12},                                                            "resource_cost_starts_level": 3},
+    {"id": "cc02", "name": "Зум АВП",         "base_cost": 600000,   "unlock_level": 18, "max_level": 30, "per_level_pct": 1.0, "icon": "ui/01.png", "resource_cost_per_level": {"energy": 35, "brass": 18}},
+    {"id": "cc03", "name": "Прицел Logitech", "base_cost": 30000000, "unlock_level": 35, "max_level": 30, "per_level_pct": 1.5, "icon": "ui/01.png", "resource_cost_per_level": {"brass": 90, "contraband": 12, "case_dust": 2}}
   ],
   "crit_damage": [
-    {"id": "cd01", "name": "Headshot Practice","base_cost": 12000,    "unlock_level": 7,  "max_level": 30, "per_level_pct": 5,  "icon": "ui/14.png", "resource_cost_per_level": {"energy": 10},              "resource_cost_starts_level": 3},
-    {"id": "cd02", "name": "One-Tap School",   "base_cost": 2000000,  "unlock_level": 25, "max_level": 30, "per_level_pct": 10, "icon": "ui/14.png", "resource_cost_per_level": {"brass": 25, "contraband": 2}},
-    {"id": "cd03", "name": "Хедшот-Гуру",      "base_cost": 120000000,"unlock_level": 45, "max_level": 30, "per_level_pct": 20, "icon": "ui/14.png", "resource_cost_per_level": {"contraband": 18, "case_dust": 5}}
+    {"id": "cd01", "name": "Headshot Practice","base_cost": 12000,    "unlock_level": 7,  "max_level": 30, "per_level_pct": 5,  "icon": "ui/14.png", "resource_cost_per_level": {"energy": 15},                                                            "resource_cost_starts_level": 3},
+    {"id": "cd02", "name": "One-Tap School",   "base_cost": 2000000,  "unlock_level": 25, "max_level": 30, "per_level_pct": 10, "icon": "ui/14.png", "resource_cost_per_level": {"brass": 35, "contraband": 4}},
+    {"id": "cd03", "name": "Хедшот-Гуру",      "base_cost": 120000000,"unlock_level": 45, "max_level": 30, "per_level_pct": 20, "icon": "ui/14.png", "resource_cost_per_level": {"contraband": 25, "case_dust": 8, "clean_skins": 1}}
   ],
   "luck": [
-    {"id": "lk01", "name": "Талисман Бабы Зины","base_cost": 6000,    "unlock_level": 4,  "max_level": 20, "per_level_pct": 1, "icon": "ui/14.png", "resource_cost_per_level": {"energy": 5},               "resource_cost_starts_level": 3},
-    {"id": "lk02", "name": "Подкова",           "base_cost": 250000,  "unlock_level": 14, "max_level": 20, "per_level_pct": 2, "icon": "ui/14.png", "resource_cost_per_level": {"brass": 8}},
-    {"id": "lk03", "name": "Чёрная Кошка",      "base_cost": 12000000,"unlock_level": 30, "max_level": 20, "per_level_pct": 4, "icon": "ui/14.png", "resource_cost_per_level": {"contraband": 6, "brass": 35}},
-    {"id": "lk04", "name": "Лотерейный Билет",  "base_cost": 500000000,"unlock_level": 50,"max_level": 20, "per_level_pct": 7, "icon": "ui/14.png", "resource_cost_per_level": {"case_dust": 12, "contraband": 25}},
-    {"id": "lk05", "name": "Контракт с Богом",  "base_cost": 25000000000,"unlock_level": 70,"max_level": 20, "per_level_pct": 10, "icon": "ui/14.png", "resource_cost_per_level": {"clean_skins": 8, "case_dust": 40}}
+    {"id": "lk01", "name": "Талисман Бабы Зины","base_cost": 6000,        "unlock_level": 4,  "max_level": 20, "per_level_pct": 1, "icon": "ui/14.png", "resource_cost_per_level": {"energy": 8},                                                              "resource_cost_starts_level": 3},
+    {"id": "lk02", "name": "Подкова",           "base_cost": 250000,      "unlock_level": 14, "max_level": 20, "per_level_pct": 2, "icon": "ui/14.png", "resource_cost_per_level": {"energy": 20, "brass": 12}},
+    {"id": "lk03", "name": "Чёрная Кошка",      "base_cost": 12000000,    "unlock_level": 30, "max_level": 20, "per_level_pct": 4, "icon": "ui/14.png", "resource_cost_per_level": {"brass": 50, "contraband": 10, "case_dust": 1}},
+    {"id": "lk04", "name": "Лотерейный Билет",  "base_cost": 500000000,   "unlock_level": 50, "max_level": 20, "per_level_pct": 7, "icon": "ui/14.png", "resource_cost_per_level": {"contraband": 40, "case_dust": 18, "clean_skins": 3}},
+    {"id": "lk05", "name": "Контракт с Богом",  "base_cost": 25000000000, "unlock_level": 70, "max_level": 20, "per_level_pct": 10,"icon": "ui/14.png", "resource_cost_per_level": {"case_dust": 60, "clean_skins": 12, "crypto": 1, "gas": 1}}
   ]
 }

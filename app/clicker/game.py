@@ -1100,19 +1100,19 @@ async def buy_upgrade(tg_id: int, kind: str, slot_id: str, count: int = 1) -> di
             for i in range(requested):
                 total_cost += _upgrade_cost(base_cost, cur_level + i)
 
-            # Resource costs (per-level × count, only after threshold).
+            # Resource costs scale per target level: base × RES_COST_GROWTH^(lvl-1).
             res_cost_per_level = spec.get("resource_cost_per_level") or {}
             res_starts = int(spec.get("resource_cost_starts_level", 1))
             total_res_cost: dict[str, Decimal] = {}
-            # Only count levels at-or-above the threshold.
-            paid_levels = 0
+            growth = Decimal(str(cfg.RES_COST_GROWTH))
             for i in range(requested):
-                target_level = cur_level + i + 1  # we are buying level (cur_level+1)..
-                if target_level >= res_starts:
-                    paid_levels += 1
-            for res, amt in res_cost_per_level.items():
-                if paid_levels > 0:
-                    total_res_cost[res] = Decimal(str(amt)) * Decimal(paid_levels)
+                target_level = cur_level + i + 1
+                if target_level < res_starts:
+                    continue
+                scale = growth ** (target_level - 1)
+                for res, amt in res_cost_per_level.items():
+                    cost = (Decimal(str(amt)) * scale).quantize(Decimal("1"))
+                    total_res_cost[res] = total_res_cost.get(res, Decimal(0)) + cost
 
             if Decimal(user["cash"]) < total_cost:
                 return {"ok": False, "error": "not_enough_cash", "needed": str(total_cost)}
@@ -1997,25 +1997,35 @@ async def buy_business_branch(tg_id: int, business_id: str, branch_id: str) -> d
                 return {"ok": False, "error": "max_level"}
 
             base_cost = Decimal(str(branch_def["base_cost"]))
-            cost = (base_cost * (Decimal("1.20") ** cur_level)).quantize(Decimal("1"))
+            growth = Decimal("1.20") ** cur_level
+            cost = (base_cost * growth).quantize(Decimal("1"))
             if Decimal(user["cash"]) < cost:
                 return {"ok": False, "error": "not_enough_cash", "needed": str(cost)}
 
-            res_type = branch_def.get("cost_resource")
-            res_cost = Decimal(0)
-            if res_type:
-                cost_pl = branch_def.get("cost_per_level", 0)
-                res_cost = (Decimal(str(cost_pl)) * (Decimal("1.20") ** cur_level)).quantize(Decimal("1"))
-                row = await conn.fetchrow(
-                    "select amount from clicker_resources where tg_id = $1 and resource_type = $2 for update",
-                    tg_id, res_type,
+            # Multi-resource: cost_resources dict (preferred), legacy cost_resource+cost_per_level still works.
+            res_costs: dict[str, Decimal] = {}
+            cr_dict = branch_def.get("cost_resources") or {}
+            if cr_dict:
+                for res, base_amt in cr_dict.items():
+                    res_costs[res] = (Decimal(str(base_amt)) * growth).quantize(Decimal("1"))
+            else:
+                legacy_res = branch_def.get("cost_resource")
+                if legacy_res:
+                    cost_pl = branch_def.get("cost_per_level", 0)
+                    res_costs[legacy_res] = (Decimal(str(cost_pl)) * growth).quantize(Decimal("1"))
+
+            if res_costs:
+                res_rows = await conn.fetch(
+                    "select resource_type, amount from clicker_resources where tg_id = $1 and resource_type = any($2::text[]) for update",
+                    tg_id, list(res_costs.keys()),
                 )
-                have = Decimal(row["amount"]) if row else Decimal(0)
-                if have < res_cost:
-                    return {
-                        "ok": False, "error": "not_enough_resource",
-                        "resource": res_type, "needed": str(res_cost), "have": str(have),
-                    }
+                have = {r["resource_type"]: Decimal(r["amount"]) for r in res_rows}
+                for res, amt in res_costs.items():
+                    if have.get(res, Decimal(0)) < amt:
+                        return {
+                            "ok": False, "error": "not_enough_resource",
+                            "resource": res, "needed": str(amt), "have": str(have.get(res, Decimal(0))),
+                        }
 
             # Accrue current rate before bumping level — so new bonus only applies forward.
             await _accrue_business_idle(conn, tg_id, business_id, now)
@@ -2034,19 +2044,21 @@ async def buy_business_branch(tg_id: int, business_id: str, branch_id: str) -> d
                     tg_id, slot_id, new_level,
                 )
             await conn.execute("update clicker_users set cash = cash - $2 where tg_id = $1", tg_id, cost)
-            if res_type and res_cost > 0:
-                await conn.execute(
-                    "update clicker_resources set amount = amount - $3 where tg_id = $1 and resource_type = $2",
-                    tg_id, res_type, res_cost,
-                )
+            for res, amt in res_costs.items():
+                if amt > 0:
+                    await conn.execute(
+                        "update clicker_resources set amount = amount - $3 where tg_id = $1 and resource_type = $2",
+                        tg_id, res, amt,
+                    )
             await _log(conn, tg_id, "business_branch_bought", {
                 "business_id": business_id, "branch_id": branch_id,
                 "from": cur_level, "to": new_level, "cost": str(cost),
-                "res_cost": {res_type: str(res_cost)} if res_type else {},
+                "res_cost": {k: str(v) for k, v in res_costs.items()},
             })
             return await _wrap_state(conn, tg_id, {
                 "business_id": business_id, "branch_id": branch_id, "new_level": new_level,
-                "spent_cash": str(cost), "spent_resource": str(res_cost) if res_type else None,
+                "spent_cash": str(cost),
+                "spent_resources": {k: str(v) for k, v in res_costs.items()},
             })
 
 
@@ -2194,6 +2206,7 @@ def public_config() -> dict:
             "coin_drop_ratio": cfg.COIN_DROP_RATIO,
             "boss_coin_mult": cfg.BOSS_COIN_MULT,
             "cost_growth": cfg.COST_GROWTH,
+            "res_cost_growth": cfg.RES_COST_GROWTH,
             "damage_per_level": cfg.DAMAGE_PER_LEVEL,
             "checkpoint_every": cfg.CHECKPOINT_EVERY,
             "business_idle_cap_hours": cfg.BUSINESS_IDLE_CAP_HOURS,
