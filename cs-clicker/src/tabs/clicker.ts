@@ -265,30 +265,29 @@ function startTimerLoop() {
   }, 200);
 }
 
-// Idle auto-DPS tick: every 1s, if the player is on the clicker tab and not
-// actively tapping, send tap(0, 1000) so the server applies auto-DPS damage
-// for the elapsed window. Without this, idle accrual freezes when player isn't
-// clicking — auto-DPS feels "broken".
+// Idle auto-DPS tick: every 5s, if the player is on the clicker tab and not
+// actively tapping, send tap(0, elapsed) so the server applies auto-DPS for
+// the elapsed window. 5s interval keeps bandwidth modest while auto-DPS still
+// accrues smoothly (server caps elapsed at 5s anyway).
 function startAutoTickLoop() {
   if (autoTickInterval) clearInterval(autoTickInterval);
   autoTickInterval = setInterval(async () => {
     if (!store.state) return;
     if (store.activeTab !== "clicker") return;
     if (isFlushingTaps || pendingTaps > 0) return;
-    // Only tick if no recent click in last ~900ms (otherwise normal flush handles it).
-    if (Date.now() - lastTapAt < 900) return;
-    // No point ticking if auto_dps is 0.
+    // Only tick if no recent click in last ~3s (otherwise normal flush handles it).
+    if (Date.now() - lastTapAt < 3000) return;
     if (Number(store.state.user.auto_dps) <= 0) return;
     isFlushingTaps = true;
     try {
-      const r = await api.tap(0, 1000);
+      const r = await api.tap(0, 5000);
       if (r.ok && r.data) handleTapResult(r.data);
     } catch {
       /* ignore */
     } finally {
       isFlushingTaps = false;
     }
-  }, 1000);
+  }, 5000);
 }
 
 // ---------- TAP HANDLING ----------
@@ -333,9 +332,10 @@ function onTap(ev: PointerEvent) {
   s.combat.enemy_hp = String(newHp);
   updateHpBar(s);
 
-  // Batch flush every 250ms or every 10 taps.
+  // Batch flush every 500ms — keeps bandwidth half what it was at 250ms cadence,
+  // still feels responsive (server applies same damage either way).
   if (pendingTapsTimer) return;
-  pendingTapsTimer = setTimeout(flushTaps, 250);
+  pendingTapsTimer = setTimeout(flushTaps, 500);
 }
 
 async function flushTaps() {
@@ -365,6 +365,16 @@ async function flushTaps() {
 }
 
 function handleTapResult(data: TapResult) {
+  // Bandwidth-saving "tick_only" response from idle auto-DPS polls — server
+  // skipped the full state, only sent enemy_hp. Patch HP locally and bail.
+  if ((data as any).tick_only) {
+    if (store.state && data.enemy_hp !== undefined) {
+      store.state.combat.enemy_hp = String(data.enemy_hp);
+      // Trigger subscribers (HUD bar) without rebuilding everything.
+      store.setState(store.state);
+    }
+    return;
+  }
   // Boss mechanic events — display before kill so player sees what happened.
   if (data.boss_mechanics && data.boss_mechanics.length > 0) {
     for (const ev of data.boss_mechanics) {

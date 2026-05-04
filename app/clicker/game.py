@@ -824,6 +824,11 @@ async def tap(tg_id: int, taps: int, dt_ms: int) -> dict:
                     tg_id, now, total_dmg_inc,
                 )
                 result["enemy_hp"] = str(new_hp)
+                # BANDWIDTH: idle-ticks (no real player taps) don't need the full
+                # state object — return only what changed (HP) so 5s polling stays
+                # cheap. Real taps still get full state for HUD freshness.
+                if taps == 0 and not mechanic_events:
+                    return {"ok": True, "data": {**result, "enemy_hp": str(new_hp), "tick_only": True}}
                 return await _wrap_state(conn, tg_id, result)
 
             # Killed!
@@ -1796,8 +1801,9 @@ async def _build_state(conn, tg_id: int) -> dict:
         "select kind, slot_id, level from clicker_upgrades where tg_id = $1", tg_id,
     )
     inv_rows = await conn.fetch(
-        """select * from clicker_inventory where tg_id = $1 and consumed_at is null
-           order by acquired_at desc limit 200""",
+        """select id, item_kind, item_id, rarity, equipped_slot, metadata
+           from clicker_inventory where tg_id = $1 and consumed_at is null
+           order by acquired_at desc limit 60""",
         tg_id,
     )
     res_rows = await conn.fetch(
